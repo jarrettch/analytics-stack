@@ -1,3 +1,4 @@
+import Link from "next/link";
 import roster from "../src/data/roster.json";
 import { PlayerHex } from "@repo/ui/PlayerHex";
 
@@ -40,15 +41,19 @@ export default function Page() {
             </h2>
             <div className="flex flex-wrap justify-center gap-4">
               {section.players.map((player) => (
-                <PlayerHex
+                <Link
                   key={player.id}
-                  playerId={player.id}
-                  name={player.name}
-                  number={player.jerseyNumber}
-                  position={player.position}
-                  imageUrl={player.mlbHeadshot}
-                  rating={85}
-                />
+                  href={`/player/${player.id}`}
+                >
+                  <PlayerHex
+                    playerId={player.id}
+                    name={player.name}
+                    number={player.jerseyNumber}
+                    position={player.position}
+                    imageUrl={player.mlbHeadshot}
+                    rating={85}
+                  />
+                </Link>
               ))}
             </div>
           </section>
