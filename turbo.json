@@ -4,11 +4,12 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*", "**/*.py", "requirements.txt"],
       "outputs": [".next/**", "!.next/cache/**"]
     },
     "lint": {
-      "dependsOn": ["^lint"]
+      "dependsOn": ["^lint"],
+      "inputs": ["$TURBO_DEFAULT$",  "**/*.py", "**/*.ts", "**/*.tsx"]
     },
     "check-types": {
       "dependsOn": ["^check-types"]

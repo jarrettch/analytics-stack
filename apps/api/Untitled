@@ -1,0 +1,29 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="Analytics Stack API")
+
+# Allow your Next.js apps (running on 3000 and 3001) to talk to this API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+def read_root():
+    return {"status": "API is running"}
+
+# --- Visualize-EV Routes ---
+@app.get("/api/ev/scenarios")
+def get_ev_scenarios():
+    # Placeholder for your expected value logic
+    return {"game": "Texas Hold'em", "scenario": "Flush Draw", "ev": 1.25}
+
+# --- Dodgermetrics Routes ---
+@app.get("/api/dodgers/roster")
+def get_roster():
+    # You can eventually move your MLB stats fetching logic here
+    return {"message": "Roster endpoint ready"}

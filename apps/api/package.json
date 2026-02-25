@@ -1,0 +1,10 @@
+{
+    "name": "api",
+    "version": "1.0.0",
+    "scripts": {
+      "dev": "uvicorn main:app --reload --port 8000",
+      "build": "echo 'No build step for Python'",
+      "lint": "ruff check .",
+      "check-types": "mypy main.py routers/"
+    }
+  }
