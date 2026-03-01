@@ -7,6 +7,11 @@ import { NbaDashboard } from "@repo/ui";
 export default function Home() {
   const [matchups, setMatchups] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setNow(new Date());
+  }, []);
   
 
   useEffect(() => {
@@ -35,7 +40,7 @@ export default function Home() {
             Live
           </span>
           <span className="ml-auto font-mono text-[11px] text-muted-foreground uppercase">
-            {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} &mdash; {matchups.length} GAMES
+            {now?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} &mdash; {matchups.length} GAMES
           </span>
         </div>
         <div className="mt-1 h-px w-full bg-border" />
@@ -57,7 +62,7 @@ export default function Home() {
       <footer className="mx-auto mt-8 max-w-5xl border-t border-border pt-4">
         <div className="flex items-center justify-between">
           <span className="font-mono text-[10px] text-muted-foreground uppercase tracking-wider">
-            Model: EV-MODEL-V1 &bull; Updated {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ET
+            Model: EV-MODEL-V1 &bull; Updated {now?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ET
           </span>
           <div className="flex gap-4">
              <span className="font-mono text-[10px] text-muted-foreground uppercase">
