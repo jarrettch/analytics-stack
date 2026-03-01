@@ -10,7 +10,7 @@ export default function Home() {
   
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/nba/today")
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/nba/today`)
       .then((res) => res.json())
       .then((data) => {
         console.log("Matchups:", data);
