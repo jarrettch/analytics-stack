@@ -71,7 +71,7 @@ function TeamRow({ team, side }: { team: TeamData; side: "away" | "home" }) {
     <div className="flex items-center gap-3">
       {/* Seed + Name */}
       <img 
-        src={`https://tds-static.nba.com/logos/nba/v1/primary/L/${team.abbreviation}.svg`} 
+        src={`https://a.espncdn.com/i/teamlogos/nba/500/${team.abbreviation.toLowerCase()}.png`} 
         alt="" 
         className="size-5 mr-1 inline-block"
         onError={(e) => (e.currentTarget.style.display = 'none')} 
