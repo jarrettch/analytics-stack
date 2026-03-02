@@ -6,7 +6,7 @@ from routers import ev, dodgers, nba
 app = FastAPI(title="Analytics Stack API")
 
 # Use the Env Var suggestion from your notes
-origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3001,http://localhost:3002,https://analytics-stack-visualize-nyyuclcon-jarrettchs-projects.vercel.app/,https://www.visualize-ev.gg").split(",")
+origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3001,http://localhost:3002,https://analytics-stack-visualize-nyyuclcon-jarrettchs-projects.vercel.app,https://www.visualize-ev.gg,https://analytics-stack-visualize-ev.vercel.app").split(",")
 
 app.add_middleware(
     CORSMiddleware,
