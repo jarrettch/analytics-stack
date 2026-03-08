@@ -39,10 +39,10 @@ def get_standings_map():
         logger.info(f"Standings fetched successfully, processing {len(standings['resultSets'][0]['rowSet'])} teams")
         headers = standings['resultSets'][0]['headers']
         rows = standings['resultSets'][0]['rowSet']
-        
+
         # Map headers to indices for safer access
         h = {header: i for i, header in enumerate(headers)}
-        
+
         stats_map = {}
         for row in rows:
             tricode = row[h['TeamAbbreviation']]
@@ -54,9 +54,11 @@ def get_standings_map():
                 "streak": row[h['strCurrentStreak']],
                 "last10": f"{row[h['L10Wins']]}-{row[h['L10Losses']]}"
             }
+
+        logger.info(f"Built standings map with {len(stats_map)} teams")
         return stats_map
     except Exception as e:
-        logger.error(f"Standings Fetch Error: {e}")
+        logger.error(f"Standings Fetch Error: {e}", exc_info=True)
         return {}
 
 async def get_odds_map():
@@ -64,7 +66,8 @@ async def get_odds_map():
         async with httpx.AsyncClient() as client:
             r = await client.get("https://cdn.nba.com/static/json/liveData/odds/odds_todaysGames.json")
             data = r.json()
-        
+
+        logger.info(f"Odds API returned {len(data.get('games', []))} games")
         odds_map = {}
         for game in data.get("games", []):
             game_id = game["gameId"]
@@ -90,7 +93,8 @@ async def get_odds_map():
                             break
             
             odds_map[game_id] = {"spreadLine": str(spread_line)}
-        
+
+        logger.info(f"Odds map keys: {list(odds_map.keys())[:5]}...")  # Show first 5 gameIds
         return odds_map
     except Exception as e:
         logger.error(f"Odds fetch error: {e}")
@@ -110,19 +114,29 @@ async def get_todays_games():
             get_odds_map()
         )
 
+        logger.info(f"Data fetched - Standings: {len(standings_map)} teams, Odds: {len(odds_map)} games")
+
         # Fetch scoreboard and standings simultaneously
         # sb = scoreboard.ScoreBoard()
         # standings_map = get_standings_map() # Fresh standings
-        
+
         data = sb.get_dict()
         games = data.get('scoreboard', {}).get('games', [])
-        
+
+        logger.info(f"Scoreboard has {len(games)} games")
+        if games:
+            logger.info(f"Sample scoreboard gameId: {games[0].get('gameId')}")
+
         refined_games = []
         for g in games:
             logger.info(f"Game keys: {g.keys()}")
             away_tri = g['awayTeam']['teamTricode']
             home_tri = g['homeTeam']['teamTricode']
-            odds = odds_map.get(g['gameId'], {})
+
+            game_id = g['gameId']
+            odds = odds_map.get(game_id, {})
+            if not odds:
+                logger.warning(f"No odds found for gameId: {game_id}")
             
             # Get real stats or use your existing defaults as fallbacks
             away_stats = standings_map.get(away_tri, {})

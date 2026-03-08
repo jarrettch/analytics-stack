@@ -69,13 +69,8 @@ function TeamRow({ team, side }: { team: TeamData; side: "away" | "home" }) {
 
   return (
     <div className="flex items-center gap-3">
-      {/* Seed + Name */}
-      <img 
-        src={`https://a.espncdn.com/i/teamlogos/nba/500/${team.abbreviation.toLowerCase()}.png`} 
-        alt="" 
-        className="size-5 mr-1 inline-block"
-        onError={(e) => (e.currentTarget.style.display = 'none')} 
-        />
+      {/* Team Logo */}
+      <TeamLogo abbreviation={team.abbreviation} />
       <div className="flex min-w-0 flex-1 items-baseline gap-2">
         <span className="font-mono text-[10px] text-muted-foreground">
           {team.seed}
@@ -177,16 +172,136 @@ function RatingBar({
   )
 }
 
+function TeamLogo({
+  abbreviation,
+  size = "sm",
+}: {
+  abbreviation: string
+  size?: "sm" | "md" | "lg"
+}) {
+  const sizeClasses = {
+    sm: "size-5",
+    md: "size-8",
+    lg: "size-12",
+  }
+
+  return (
+    <img
+      src={`https://a.espncdn.com/i/teamlogos/nba/500/${abbreviation.toLowerCase()}.png`}
+      alt={`${abbreviation} logo`}
+      className={`${sizeClasses[size]} mr-1 inline-block`}
+      onError={(e) => (e.currentTarget.style.display = "none")}
+    />
+  )
+}
+
+function WinProbabilityBar({
+  awayTeam,
+  homeTeam,
+}: {
+  awayTeam: TeamData
+  homeTeam: TeamData
+}) {
+  const awayProbPct = (awayTeam.winProbability ?? 0.5) * 100
+  const homeProbPct = (homeTeam.winProbability ?? 0.5) * 100
+
+  return (
+    <div className="px-3 py-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          Win Probability
+        </span>
+        <TrendingUp className="size-3 text-muted-foreground" />
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="w-12 text-right font-mono text-xs font-semibold tabular-nums text-emerald-400">
+          {awayProbPct.toFixed(1)}%
+        </span>
+        <div className="flex h-2.5 flex-1 overflow-hidden rounded-sm">
+          <div
+            className="bg-emerald-500 transition-all"
+            style={{ width: `${awayProbPct}%` }}
+          />
+          <div
+            className="bg-red-500/80 transition-all"
+            style={{ width: `${homeProbPct}%` }}
+          />
+        </div>
+        <span className="w-12 font-mono text-xs font-semibold tabular-nums text-red-400">
+          {homeProbPct.toFixed(1)}%
+        </span>
+      </div>
+      <div className="mt-0.5 flex justify-between">
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {awayTeam.abbreviation}
+        </span>
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {homeTeam.abbreviation}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function ProjectedScoreCard({
+  awayTeam,
+  homeTeam,
+}: {
+  awayTeam: TeamData
+  homeTeam: TeamData
+}) {
+  return (
+    <div className="px-3 py-2">
+      <div className="mb-1">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          Projected Score
+        </span>
+      </div>
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center">
+        <div className="flex flex-col items-center">
+          <span className="font-mono text-[10px] text-muted-foreground">
+            {awayTeam.abbreviation}
+          </span>
+          <span
+            className={`font-mono text-2xl font-bold tabular-nums ${
+              awayTeam.predictedScore > homeTeam.predictedScore
+                ? "text-emerald-400"
+                : "text-foreground"
+            }`}
+          >
+            {awayTeam.predictedScore}
+          </span>
+        </div>
+        <span className="px-3 font-mono text-xs text-muted-foreground">
+          {" - "}
+        </span>
+        <div className="flex flex-col items-center">
+          <span className="font-mono text-[10px] text-muted-foreground">
+            {homeTeam.abbreviation}
+          </span>
+          <span
+            className={`font-mono text-2xl font-bold tabular-nums ${
+              homeTeam.predictedScore > awayTeam.predictedScore
+                ? "text-emerald-400"
+                : "text-foreground"
+            }`}
+          >
+            {homeTeam.predictedScore}
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function MatchupCard({ matchup }: { matchup: MatchupData }) {
   if (!matchup || !matchup.away || !matchup.home) {
     return null; 
   }
 
   console.log("Dashboard received:", matchup);
-  
+
   const { away, home } = matchup;
-  const awayProbPct = (away.winProbability ?? 0.5) * 100
-  const homeProbPct = (home.winProbability ?? 0.5) * 100
 
   return (
     <div className="w-full max-w-md overflow-hidden rounded-md border border-border bg-card">
@@ -244,76 +359,12 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
       <Separator className="bg-border" />
 
       {/* Win Probability Bar */}
-      <div className="px-3 py-2">
-        <div className="mb-1 flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Win Probability
-          </span>
-          <TrendingUp className="size-3 text-muted-foreground" />
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-12 text-right font-mono text-xs font-semibold tabular-nums text-emerald-400">
-            {awayProbPct.toFixed(1)}%
-          </span>
-          <div className="flex h-2.5 flex-1 overflow-hidden rounded-sm">
-            <div
-              className="bg-emerald-500 transition-all"
-              style={{ width: `${awayProbPct}%` }}
-            />
-            <div
-              className="bg-red-500/80 transition-all"
-              style={{ width: `${homeProbPct}%` }}
-            />
-          </div>
-          <span className="w-12 font-mono text-xs font-semibold tabular-nums text-red-400">
-            {homeProbPct.toFixed(1)}%
-          </span>
-        </div>
-        <div className="mt-0.5 flex justify-between">
-          <span className="font-mono text-[10px] text-muted-foreground">
-            {away.abbreviation}
-          </span>
-          <span className="font-mono text-[10px] text-muted-foreground">
-            {home.abbreviation}
-          </span>
-        </div>
-      </div>
+      <WinProbabilityBar awayTeam={away} homeTeam={home} />
 
       <Separator className="bg-border" />
 
-      {/* Predicted Score */}
-      <div className="px-3 py-2">
-        <div className="mb-1">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Projected Score
-          </span>
-        </div>
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center">
-          <div className="flex flex-col items-center">
-            <span className="font-mono text-[10px] text-muted-foreground">
-              {away.abbreviation}
-            </span>
-            <span
-              className={`font-mono text-2xl font-bold tabular-nums ${away.predictedScore > home.predictedScore ? "text-emerald-400" : "text-foreground"}`}
-            >
-              {away.predictedScore}
-            </span>
-          </div>
-          <span className="px-3 font-mono text-xs text-muted-foreground">
-            {" - "}
-          </span>
-          <div className="flex flex-col items-center">
-            <span className="font-mono text-[10px] text-muted-foreground">
-              {home.abbreviation}
-            </span>
-            <span
-              className={`font-mono text-2xl font-bold tabular-nums ${home.predictedScore > away.predictedScore ? "text-emerald-400" : "text-foreground"}`}
-            >
-              {home.predictedScore}
-            </span>
-          </div>
-        </div>
-      </div>
+      {/* Projected Score */}
+      <ProjectedScoreCard awayTeam={away} homeTeam={home} />
 
       <Separator className="bg-border" />
 
