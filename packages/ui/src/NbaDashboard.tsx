@@ -65,7 +65,7 @@ function StatValue({
 function TeamRow({ team, side }: { team: TeamData; side: "away" | "home" }) {
   // Defensive streak check
   const streak = team.streak || "N/A";
-  const isPositiveStreak = team.streak.startsWith("W")
+  const isPositiveStreak = streak !== "N/A" && streak.startsWith("W")
 
   return (
     <div className="flex items-center gap-3">
@@ -98,11 +98,12 @@ function TeamRow({ team, side }: { team: TeamData; side: "away" | "home" }) {
 }
 
 function TeamStats({ team }: { team: TeamData }) {
+  // Use local constants instead of mutating props
+  const last10 = team.last10 || "0-0";
+  const conference = team.conference || "NBA";
+  const streak = team.streak || "N/A";
+  const winPct = team.winPct ?? 0.5;
 
-  team.last10 = team.last10 || "0-0";
-  team.conference = team.conference || "NBA";
-  team.streak = team.streak || "N/A";
-  team.winPct = team.winPct || 0.5;
   return (
     <div className="grid grid-cols-5 gap-x-3 gap-y-0.5">
       <div className="flex flex-col">
@@ -111,28 +112,28 @@ function TeamStats({ team }: { team: TeamData }) {
       </div>
       <div className="flex flex-col">
         <StatLabel>Win%</StatLabel>
-        <StatValue>{(team.winPct * 100).toFixed(1)}</StatValue>
+        <StatValue>{(winPct * 100).toFixed(1)}</StatValue>
       </div>
       <div className="flex flex-col">
         <StatLabel>L10</StatLabel>
-        <StatValue>{team.last10}</StatValue>
+        <StatValue>{last10}</StatValue>
       </div>
       <div className="flex flex-col">
         <StatLabel>Streak</StatLabel>
         <StatValue>
           <span className="inline-flex items-center gap-0.5">
-            {team.streak.startsWith("W") ? (
+            {streak.startsWith("W") ? (
               <ArrowUp className="size-2.5 text-emerald-400" />
             ) : (
               <ArrowDown className="size-2.5 text-red-400" />
             )}
-            {team.streak}
+            {streak}
           </span>
         </StatValue>
       </div>
       <div className="flex flex-col">
         <StatLabel>Conf</StatLabel>
-        <StatValue>{team.conference}</StatValue>
+        <StatValue>{conference}</StatValue>
       </div>
     </div>
   )
@@ -343,7 +344,7 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
             O/U
           </span>
           <span className="font-mono text-xs font-semibold tabular-nums text-foreground">
-            {matchup.overUnder.toFixed(1)}
+            {(matchup.overUnder ?? 0).toFixed(1)}
           </span>
         </div>
         {matchup.series && (
@@ -361,7 +362,7 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
   )
 }
 
-export function NbaDashboard({ matchups = [] }: { matchups: any[] }) {
+export function NbaDashboard({ matchups = [] }: { matchups: MatchupData[] }) {
     return (
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {matchups.map((game) => (

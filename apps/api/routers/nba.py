@@ -1,7 +1,10 @@
+import asyncio
 from fastapi import APIRouter, HTTPException
-from nba_api.live.nba.endpoints import scoreboard
+from nba_api.live.nba.endpoints import scoreboard, odds
+from nba_api.stats.endpoints import leaguestandingsv3
 import time
 import logging
+import httpx
 
 # Setup basic logging
 logging.basicConfig(level=logging.INFO)
@@ -19,55 +22,134 @@ cache = {
     "ttl": CACHE_TTL_DEFAULT
 }
 
+# Get the standings map
+# def get_standings_map():
+#   try:
+def get_standings_map():
+    try:
+        logger.info("Fetching standings...")
+        standings = leaguestandingsv3.LeagueStandingsV3(
+            timeout=10,
+            headers={
+                'User-Agent': 'Mozilla/5.0',
+                'Referer': 'https://www.nba.com/',
+                'Origin': 'https://www.nba.com'
+            }
+        ).get_dict()
+        logger.info(f"Standings fetched successfully, processing {len(standings['resultSets'][0]['rowSet'])} teams")
+        headers = standings['resultSets'][0]['headers']
+        rows = standings['resultSets'][0]['rowSet']
+        
+        # Map headers to indices for safer access
+        h = {header: i for i, header in enumerate(headers)}
+        
+        stats_map = {}
+        for row in rows:
+            tricode = row[h['TeamAbbreviation']]
+            stats_map[tricode] = {
+                "record": f"{row[h['Wins']]}-{row[h['Losses']]}",
+                "winPct": row[h['WinPCT']],
+                "seed": row[h['PlayoffSeeding']],
+                "conference": row[h['Conference']],
+                "streak": row[h['strCurrentStreak']],
+                "last10": f"{row[h['L10Wins']]}-{row[h['L10Losses']]}"
+            }
+        return stats_map
+    except Exception as e:
+        logger.error(f"Standings Fetch Error: {e}")
+        return {}
+
+async def get_odds_map():
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get("https://cdn.nba.com/static/json/liveData/odds/odds_todaysGames.json")
+            data = r.json()
+        
+        odds_map = {}
+        for game in data.get("games", []):
+            game_id = game["gameId"]
+            spread_line = "N/A"
+            
+            for market in game.get("markets", []):
+                if market["name"] == "spread":
+                    for book in market.get("books", []):
+                        if book.get("countryCode") == "US" and "FanDuel" in book.get("name", ""):
+                            away_spread = None
+                            home_spread = None
+                            for outcome in book.get("outcomes", []):
+                                if outcome["type"] == "away":
+                                    away_spread = float(outcome.get("spread", 0))
+                                elif outcome["type"] == "home":
+                                    home_spread = float(outcome.get("spread", 0))
+                            
+                            if away_spread is not None and home_spread is not None:
+                                if away_spread < 0:
+                                    spread_line = f"Away -{abs(away_spread)}"
+                                else:
+                                    spread_line = f"Home -{abs(home_spread)}"
+                            break
+            
+            odds_map[game_id] = {"spreadLine": str(spread_line)}
+        
+        return odds_map
+    except Exception as e:
+        logger.error(f"Odds fetch error: {e}")
+        return {}
+
 @router.get("/today")
 async def get_todays_games():
     current_time = time.time()
-
-    # 1. Return cached data if still fresh
     if cache["data"] and (current_time - cache["last_fetch"] < cache["ttl"]):
         return cache["data"]
 
     try:
-        # 2. Fetch fresh data
-        sb = scoreboard.ScoreBoard()
+        loop = asyncio.get_event_loop()
+        sb, standings_map, odds_map = await asyncio.gather(
+            loop.run_in_executor(None, lambda: scoreboard.ScoreBoard()),
+            loop.run_in_executor(None, get_standings_map),
+            get_odds_map()
+        )
+
+        # Fetch scoreboard and standings simultaneously
+        # sb = scoreboard.ScoreBoard()
+        # standings_map = get_standings_map() # Fresh standings
+        
         data = sb.get_dict()
         games = data.get('scoreboard', {}).get('games', [])
         
         refined_games = []
-        is_any_game_live = False
-
         for g in games:
-            status_text = g.get('gameStatusText', '')
+            logger.info(f"Game keys: {g.keys()}")
+            away_tri = g['awayTeam']['teamTricode']
+            home_tri = g['homeTeam']['teamTricode']
+            odds = odds_map.get(g['gameId'], {})
             
-            # Detect live games: status contains "Q", "OT", or "Half"
-            if any(indicator in status_text for indicator in ["Q", "OT", "Half"]):
-                is_any_game_live = True
-
-            # Safer Broadcaster extraction for nested lists
-            broadcasters = g.get('broadcasters', {})
-            national_list = broadcasters.get('nationalTvBroadcasters', [])
-            tv_channel = national_list[0].get('broadcasterDisplay', 'Local') if national_list else 'Local'
+            # Get real stats or use your existing defaults as fallbacks
+            away_stats = standings_map.get(away_tri, {})
+            home_stats = standings_map.get(home_tri, {})
 
             refined_games.append({
                 "id": g['gameId'],
-                "status": status_text,
-                "time": g.get('gameEt', ''),
-                "date": "Feb 24", # You can derive this from gameEt
-                "venue": "NBA Arena",
-                "broadcast": tv_channel,
+                "status": g.get('gameStatusText', ''),
+                "time": g.get('gameEt', '').split('T')[-1][:5], # Extract HH:MM
+                "date": g.get('gameEt', '').split('T')[0],
+                # "venue": f"{g['arenaName']}, {g['arenaCity']}",
+                # "venue": f"{g.get('arenaName', g.get('arena', {}).get('arenaName', 'TBD'))}, {g.get('arenaCity', '')}",
+                "venue": f"{g['homeTeam'].get('teamCity', 'TBD')} Arena",
+                "broadcast": "Local", 
                 "model": "EV-MODEL-V1",
-                "spreadLine": "TBD",
-                "overUnder": 220.5,
+                "spreadLine": odds.get("spreadLine", "N/A"),
                 "away": {
                     "name": g['awayTeam']['teamName'],
-                    "abbreviation": g['awayTeam']['teamTricode'],
-                    "record": f"{g['awayTeam']['wins']}-{g['awayTeam']['losses']}",
-                    "winPct": 0.500,
-                    "seed": 1,
-                    "conference": "West",
-                    "streak": "L1",
-                    "last10": "5-5",
-                    "predictedScore": 110,
+                    "abbreviation": away_tri,
+                    "record": away_stats.get("record", "0-0"),
+                    "winPct": away_stats.get("winPct", 0.500),
+                    "seed": away_stats.get("seed", 0),
+                    "conference": away_stats.get("conference", "N/A"),
+                    "streak": away_stats.get("streak", "N/A"),
+                    "last10": away_stats.get("last10", "0-0"),
+                    # Keep your model's predicted stats here
+                    "predictedScore": 110, 
                     "winProbability": 0.5,
                     "offRating": 112.5,
                     "defRating": 110.2,
@@ -75,13 +157,13 @@ async def get_todays_games():
                 },
                 "home": {
                     "name": g['homeTeam']['teamName'],
-                    "abbreviation": g['homeTeam']['teamTricode'],
-                    "record": f"{g['homeTeam']['wins']}-{g['homeTeam']['losses']}",
-                    "winPct": 0.500,
-                    "seed": 2,
-                    "conference": "West",
-                    "streak": "W2",
-                    "last10": "6-4",
+                    "abbreviation": home_tri,
+                    "record": home_stats.get("record", "0-0"),
+                    "winPct": home_stats.get("winPct", 0.500),
+                    "seed": home_stats.get("seed", 0),
+                    "conference": home_stats.get("conference", "N/A"),
+                    "streak": home_stats.get("streak", "N/A"),
+                    "last10": home_stats.get("last10", "0-0"),
                     "predictedScore": 115,
                     "winProbability": 0.5,
                     "offRating": 115.1,
@@ -90,15 +172,13 @@ async def get_todays_games():
                 }
             })
         
-        # 3. Update cache and dynamic TTL
         cache["data"] = refined_games
         cache["last_fetch"] = current_time
-        cache["ttl"] = CACHE_TTL_LIVE if is_any_game_live else CACHE_TTL_DEFAULT
-        
         return refined_games
-
     except Exception as e:
-        logger.error(f"NBA API Fetch Error: {str(e)}")
+        # ... your existing error handling
+        logger.error(f"NBA API Fetch Error: {str(e)}", exc_info=True)
+        # logger.error(f"NBA API Fetch Error: {str(e)}")
         
         # 4. CRITICAL: Fallback to stale cache so the frontend stays hydrated
         if cache["data"]:
