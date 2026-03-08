@@ -156,7 +156,7 @@ async def get_todays_games():
                 "away": {
                     "name": g['awayTeam']['teamName'],
                     "abbreviation": away_tri,
-                    "record": away_stats.get("record", "0-0"),
+                    "record": f"{g['awayTeam']['wins']}-{g['awayTeam']['losses']}",
                     "winPct": away_stats.get("winPct", 0.500),
                     "seed": away_stats.get("seed", 0),
                     "conference": away_stats.get("conference", "N/A"),
@@ -172,7 +172,7 @@ async def get_todays_games():
                 "home": {
                     "name": g['homeTeam']['teamName'],
                     "abbreviation": home_tri,
-                    "record": home_stats.get("record", "0-0"),
+                    "record": f"{g['homeTeam']['wins']}-{g['homeTeam']['losses']}",
                     "winPct": home_stats.get("winPct", 0.500),
                     "seed": home_stats.get("seed", 0),
                     "conference": home_stats.get("conference", "N/A"),
