@@ -417,7 +417,7 @@ export function NbaDashboard({ matchups = [] }: { matchups: MatchupData[] }) {
     return (
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {matchups.map((game) => (
-          <MatchupCard key={game.id || game.gameId} matchup={game} />
+          <MatchupCard key={game.gameId} matchup={game} />
         ))}
       </div>
     );
