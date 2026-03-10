@@ -7,36 +7,11 @@ import {
   Activity,
   Timer,
 } from "lucide-react"
+import type { NBAMatchupData, NBATeamData } from "./types/sports-types"
 
-export interface TeamData {
-  name: string
-  abbreviation: string
-  record: string
-  winPct: number
-  seed: number
-  conference: string
-  streak: string
-  last10: string
-  predictedScore: number
-  winProbability: number
-  offRating: number
-  defRating: number
-  pace: number
-}
-
-export interface MatchupData {
-  gameId: string
-  date: string
-  time: string
-  venue: string
-  broadcast: string
-  series?: string
-  away: TeamData
-  home: TeamData
-  spreadLine: string
-  overUnder: number
-  model: string
-}
+// Legacy exports for backwards compatibility
+export type TeamData = NBATeamData
+export type MatchupData = NBAMatchupData
 
 function StatLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -62,7 +37,7 @@ function StatValue({
   )
 }
 
-function TeamRow({ team, side }: { team: TeamData; side: "away" | "home" }) {
+function TeamRow({ team, side }: { team: NBATeamData; side: "away" | "home" }) {
   // Defensive streak check
   const streak = team.streak || "N/A";
   const isPositiveStreak = streak !== "N/A" && streak.startsWith("W")
@@ -92,7 +67,7 @@ function TeamRow({ team, side }: { team: TeamData; side: "away" | "home" }) {
   )
 }
 
-function TeamStats({ team }: { team: TeamData }) {
+function TeamStats({ team }: { team: NBATeamData }) {
   // Use local constants instead of mutating props
   const last10 = team.last10 || "0-0";
   const conference = team.conference || "NBA";
@@ -199,8 +174,8 @@ function WinProbabilityBar({
   awayTeam,
   homeTeam,
 }: {
-  awayTeam: TeamData
-  homeTeam: TeamData
+  awayTeam: NBATeamData
+  homeTeam: NBATeamData
 }) {
   const awayProbPct = (awayTeam.winProbability ?? 0.5) * 100
   const homeProbPct = (homeTeam.winProbability ?? 0.5) * 100
@@ -247,8 +222,8 @@ function ProjectedScoreCard({
   awayTeam,
   homeTeam,
 }: {
-  awayTeam: TeamData
-  homeTeam: TeamData
+  awayTeam: NBATeamData
+  homeTeam: NBATeamData
 }) {
   return (
     <div className="px-3 py-2">
@@ -294,7 +269,7 @@ function ProjectedScoreCard({
   )
 }
 
-export function MatchupCard({ matchup }: { matchup: MatchupData }) {
+export function MatchupCard({ matchup }: { matchup: NBAMatchupData }) {
   if (!matchup || !matchup.away || !matchup.home) {
     return null; 
   }
@@ -413,7 +388,7 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
   )
 }
 
-export function NbaDashboard({ matchups = [] }: { matchups: MatchupData[] }) {
+export function NbaDashboard({ matchups = [] }: { matchups: NBAMatchupData[] }) {
     return (
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {matchups.map((game) => (
