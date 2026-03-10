@@ -1,4 +1,4 @@
 fastapi
 uvicorn
-nba_api
+nba_api @ git+https://github.com/swar/nba_api.git@v1.11.4
 httpx

@@ -1,7 +1,7 @@
 import asyncio
 from fastapi import APIRouter, HTTPException
 from nba_api.live.nba.endpoints import scoreboard, odds
-from nba_api.stats.endpoints import leaguestandingsv3, leaguestandings
+from nba_api.stats.endpoints import leaguestandingsv3, leaguestandings, leaguedashteamstats
 import time
 import logging
 import httpx
@@ -80,6 +80,41 @@ def get_standings_map():
         logger.error(f"Standings Fetch Error: {e}", exc_info=True)
         logger.error(f"Error type: {type(e).__name__}")
         logger.error(f"Error details: {str(e)}")
+        return {}
+
+def get_advanced_stats_map():
+    try:
+        logger.info("Fetching advanced team stats...")
+        stats = leaguedashteamstats.LeagueDashTeamStats(
+            measure_type_detailed_defense='Advanced',
+            per_mode_detailed='PerGame',
+            timeout=15
+        )
+
+        result = stats.get_dict()
+        headers = result['resultSets'][0]['headers']
+        rows = result['resultSets'][0]['rowSet']
+
+        logger.info(f"Advanced stats fetched successfully for {len(rows)} teams")
+
+        # Map headers to indices
+        h = {header: i for i, header in enumerate(headers)}
+
+        advanced_map = {}
+        for row in rows:
+            team_name = row[h['TEAM_NAME']]
+            # Map full team name to tricode (we'll need to handle this mapping)
+            advanced_map[team_name] = {
+                "offRating": row[h['OFF_RATING']],
+                "defRating": row[h['DEF_RATING']],
+                "netRating": row[h['NET_RATING']],
+                "pace": row[h.get('PACE', 0)] if 'PACE' in h else 98.5
+            }
+
+        logger.info(f"Built advanced stats map with {len(advanced_map)} teams")
+        return advanced_map
+    except Exception as e:
+        logger.error(f"Advanced Stats Fetch Error: {e}", exc_info=True)
         return {}
 
 async def get_odds_map():
@@ -188,13 +223,14 @@ async def get_todays_games():
 
     try:
         loop = asyncio.get_event_loop()
-        sb, standings_map, odds_map = await asyncio.gather(
+        sb, standings_map, advanced_stats_map, odds_map = await asyncio.gather(
             loop.run_in_executor(None, lambda: scoreboard.ScoreBoard()),
             loop.run_in_executor(None, get_standings_map),
+            loop.run_in_executor(None, get_advanced_stats_map),
             get_odds_map()
         )
 
-        logger.info(f"Data fetched - Standings: {len(standings_map)} teams, Odds: {len(odds_map)} matchups")
+        logger.info(f"Data fetched - Standings: {len(standings_map)} teams, Advanced: {len(advanced_stats_map)} teams, Odds: {len(odds_map)} matchups")
 
         # Fetch scoreboard and standings simultaneously
         # sb = scoreboard.ScoreBoard()
@@ -223,6 +259,12 @@ async def get_todays_games():
             away_stats = standings_map.get(away_tri, {})
             home_stats = standings_map.get(home_tri, {})
 
+            # Get advanced stats - try to find by full team name
+            away_full_name = f"{g['awayTeam']['teamCity']} {g['awayTeam']['teamName']}"
+            home_full_name = f"{g['homeTeam']['teamCity']} {g['homeTeam']['teamName']}"
+            away_advanced = advanced_stats_map.get(away_full_name, {})
+            home_advanced = advanced_stats_map.get(home_full_name, {})
+
             # Calculate win percentage from scoreboard data
             away_wins = g['awayTeam']['wins']
             away_losses = g['awayTeam']['losses']
@@ -233,7 +275,8 @@ async def get_todays_games():
             home_win_pct = home_wins / (home_wins + home_losses) if (home_wins + home_losses) > 0 else 0.500
 
             refined_games.append({
-                "id": g['gameId'],
+                "sport": "nba",
+                "gameId": g['gameId'],
                 "status": g.get('gameStatusText', ''),
                 "time": g.get('gameEt', '').split('T')[-1][:5], # Extract HH:MM
                 "date": g.get('gameEt', '').split('T')[0],
@@ -253,11 +296,11 @@ async def get_todays_games():
                     "streak": away_stats.get("streak", "N/A"),
                     "last10": away_stats.get("last10", "0-0"),
                     # Keep your model's predicted stats here
-                    "predictedScore": 110, 
+                    "predictedScore": 110,
                     "winProbability": 0.5,
-                    "offRating": 112.5,
-                    "defRating": 110.2,
-                    "pace": 98.5
+                    "offRating": away_advanced.get("offRating", 112.5),
+                    "defRating": away_advanced.get("defRating", 110.2),
+                    "pace": away_advanced.get("pace", 98.5)
                 },
                 "home": {
                     "name": g['homeTeam']['teamName'],
@@ -270,9 +313,9 @@ async def get_todays_games():
                     "last10": home_stats.get("last10", "0-0"),
                     "predictedScore": 115,
                     "winProbability": 0.5,
-                    "offRating": 115.1,
-                    "defRating": 113.4,
-                    "pace": 98.5
+                    "offRating": home_advanced.get("offRating", 115.1),
+                    "defRating": home_advanced.get("defRating", 113.4),
+                    "pace": home_advanced.get("pace", 98.5)
                 }
             })
         
