@@ -269,7 +269,7 @@ function ProjectedScoreCard({
   )
 }
 
-export function MatchupCard({ matchup }: { matchup: NBAMatchupData }) {
+function MatchupCard({ matchup }: { matchup: NBAMatchupData }) {
   if (!matchup || !matchup.away || !matchup.home) {
     return null; 
   }
