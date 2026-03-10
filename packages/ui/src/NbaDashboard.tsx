@@ -9,10 +9,6 @@ import {
 } from "lucide-react"
 import type { NBAMatchupData, NBATeamData } from "./types/sports-types"
 
-// Legacy exports for backwards compatibility
-export type TeamData = NBATeamData
-export type MatchupData = NBAMatchupData
-
 function StatLabel({ children }: { children: React.ReactNode }) {
   return (
     <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
