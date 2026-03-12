@@ -60,7 +60,6 @@ def get_standings_map():
 
         # Map headers to indices for safer access
         h = {header: i for i, header in enumerate(headers)}
-        logger.info(f"Available headers: {list(h.keys())}")
 
         # Map team name to tricode
         name_to_tricode = {
@@ -310,26 +309,6 @@ def debug_standings():
             "team_count": len(result),
             "sample_teams": list(result.keys())[:10] if result else [],
             "sample_data": {k: result[k] for k in list(result.keys())[:2]} if result else {}
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "error_type": type(e).__name__
-        }
-
-@router.get("/debug/standings-raw")
-def debug_standings_raw():
-    """Debug endpoint to see raw standings API response"""
-    try:
-        standings = leaguestandingsv3.LeagueStandingsV3(timeout=10).get_dict()
-        headers = standings['resultSets'][0]['headers']
-        rows = standings['resultSets'][0]['rowSet']
-        return {
-            "success": True,
-            "headers": headers,
-            "first_row": rows[0] if rows else None,
-            "row_count": len(rows)
         }
     except Exception as e:
         return {
