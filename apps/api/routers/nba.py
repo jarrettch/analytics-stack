@@ -51,34 +51,9 @@ def get_cached_data(cache_key: str):
 #   try:
 def get_standings_map():
     try:
-        logger.info("Fetching standings (trying v3)...")
-        try:
-            standings = leaguestandingsv3.LeagueStandingsV3(
-                timeout=10,
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                    'Accept': 'application/json, text/plain, */*',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Referer': 'https://www.nba.com/',
-                    'Origin': 'https://www.nba.com',
-                    'Connection': 'keep-alive'
-                }
-            ).get_dict()
-        except Exception as v3_error:
-            logger.warning(f"LeagueStandingsV3 failed: {v3_error}, trying older endpoint...")
-            standings = leaguestandings.LeagueStandings(
-                timeout=10,
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                    'Accept': 'application/json, text/plain, */*',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Referer': 'https://www.nba.com/',
-                    'Origin': 'https://www.nba.com',
-                    'Connection': 'keep-alive'
-                }
-            ).get_dict()
+        logger.info("Fetching standings (v3)...")
+        # Simple call without custom headers - matches working debug endpoint
+        standings = leaguestandingsv3.LeagueStandingsV3(timeout=10).get_dict()
         logger.info(f"Standings fetched successfully, processing {len(standings['resultSets'][0]['rowSet'])} teams")
         headers = standings['resultSets'][0]['headers']
         rows = standings['resultSets'][0]['rowSet']
