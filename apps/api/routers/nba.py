@@ -85,32 +85,48 @@ def get_standings_map():
 
         # Map headers to indices for safer access
         h = {header: i for i, header in enumerate(headers)}
+        logger.info(f"Available headers: {list(h.keys())}")
+
+        # Map team name to tricode
+        name_to_tricode = {
+            "Hawks": "ATL", "Celtics": "BOS", "Nets": "BKN", "Hornets": "CHA",
+            "Bulls": "CHI", "Cavaliers": "CLE", "Mavericks": "DAL", "Nuggets": "DEN",
+            "Pistons": "DET", "Warriors": "GSW", "Rockets": "HOU", "Pacers": "IND",
+            "Clippers": "LAC", "Lakers": "LAL", "Grizzlies": "MEM", "Heat": "MIA",
+            "Bucks": "MIL", "Timberwolves": "MIN", "Pelicans": "NOP", "Knicks": "NYK",
+            "Thunder": "OKC", "Magic": "ORL", "76ers": "PHI", "Suns": "PHX",
+            "Trail Blazers": "POR", "Kings": "SAC", "Spurs": "SAS", "Raptors": "TOR",
+            "Jazz": "UTA", "Wizards": "WAS",
+        }
 
         stats_map = {}
         for row in rows:
-            # Handle both v3 and legacy field names
-            tricode = row[h.get('TeamAbbreviation', h.get('TeamSlug', 0))]
+            team_id = str(row[h['TeamID']]) if 'TeamID' in h else None
+            team_name = row[h['TeamName']] if 'TeamName' in h else None
+            tricode = name_to_tricode.get(team_name) if team_name else None
 
-            # v3 uses different field names
-            if 'WINS' in h:  # v3 format
-                wins = row[h['WINS']]
-                losses = row[h['LOSSES']]
-                conference = row[h.get('Conference', 0)]
-                seed = row[h.get('PlayoffRank', 0)]
-            else:  # Legacy format
-                wins = row[h['Wins']]
-                losses = row[h['Losses']]
-                conference = row[h.get('Conference', 0)]
-                seed = row[h.get('PlayoffSeeding', 0)]
+            # Both v3 and legacy use uppercase field names
+            wins = row[h['WINS']]
+            losses = row[h['LOSSES']]
+            conference = row[h['Conference']] if 'Conference' in h else "N/A"
+            seed = row[h['PlayoffRank']] if 'PlayoffRank' in h else 0
+            streak = row[h['strCurrentStreak']] if 'strCurrentStreak' in h else "N/A"
+            last10 = row[h['L10']] if 'L10' in h else "N/A"
 
-            stats_map[tricode] = {
+            team_data = {
                 "record": f"{wins}-{losses}",
                 "winPct": wins / (wins + losses) if (wins + losses) > 0 else 0.5,
                 "seed": seed,
                 "conference": conference if conference else "N/A",
-                "streak": "N/A",  # Not available in standings API
-                "last10": "N/A"   # Not available in standings API
+                "streak": streak if streak else "N/A",
+                "last10": last10 if last10 else "N/A"
             }
+
+            # Store by tricode and team ID for flexible lookup
+            if tricode:
+                stats_map[tricode] = team_data
+            if team_id:
+                stats_map[team_id] = team_data
 
         logger.info(f"Built standings map with {len(stats_map)} teams")
         return stats_map
@@ -164,6 +180,41 @@ def get_advanced_stats_map():
         logger.error(f"Advanced Stats Fetch Error: {e}", exc_info=True)
         return {}
 
+def get_arena_map():
+    """Static arena map by team tricode. Arenas rarely change."""
+    return {
+        "ATL": "State Farm Arena",
+        "BOS": "TD Garden",
+        "BKN": "Barclays Center",
+        "CHA": "Spectrum Center",
+        "CHI": "United Center",
+        "CLE": "Rocket Mortgage FieldHouse",
+        "DAL": "American Airlines Center",
+        "DEN": "Ball Arena",
+        "DET": "Little Caesars Arena",
+        "GSW": "Chase Center",
+        "HOU": "Toyota Center",
+        "IND": "Gainbridge Fieldhouse",
+        "LAC": "Intuit Dome",
+        "LAL": "Crypto.com Arena",
+        "MEM": "FedExForum",
+        "MIA": "Kaseya Center",
+        "MIL": "Fiserv Forum",
+        "MIN": "Target Center",
+        "NOP": "Smoothie King Center",
+        "NYK": "Madison Square Garden",
+        "OKC": "Paycom Center",
+        "ORL": "Kia Center",
+        "PHI": "Wells Fargo Center",
+        "PHX": "Footprint Center",
+        "POR": "Moda Center",
+        "SAC": "Golden 1 Center",
+        "SAS": "Frost Bank Center",
+        "TOR": "Scotiabank Arena",
+        "UTA": "Delta Center",
+        "WAS": "Capital One Arena",
+    }
+
 def calculate_win_probability_from_odds(away_ml, home_ml, away_spread, home_spread):
     """
     Calculate win probabilities from moneyline and spread.
@@ -215,7 +266,6 @@ async def get_odds_map():
             away_team_id = str(game.get("awayTeamId", ""))
             matchup_key = f"{away_team_id}@{home_team_id}"
 
-            spread_line = "N/A"
             away_spread = None
             home_spread = None
             away_ml = None
@@ -232,11 +282,6 @@ async def get_odds_map():
                                 elif outcome["type"] == "home":
                                     home_spread = float(outcome.get("spread", 0))
 
-                            if away_spread is not None and home_spread is not None:
-                                if away_spread < 0:
-                                    spread_line = f"Away -{abs(away_spread)}"
-                                else:
-                                    spread_line = f"Home -{abs(home_spread)}"
                             break
 
                 # Extract moneyline (2way market)
@@ -267,7 +312,8 @@ async def get_odds_map():
             )
 
             odds_map[matchup_key] = {
-                "spreadLine": str(spread_line),
+                "awaySpread": away_spread,
+                "homeSpread": home_spread,
                 "awayWinProbability": away_prob,
                 "homeWinProbability": home_prob,
                 "oddsGameId": game.get("gameId", "unknown")
@@ -287,8 +333,28 @@ def debug_standings():
         return {
             "success": True,
             "team_count": len(result),
-            "sample_teams": list(result.keys())[:5] if result else [],
+            "sample_teams": list(result.keys())[:10] if result else [],
             "sample_data": {k: result[k] for k in list(result.keys())[:2]} if result else {}
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+
+@router.get("/debug/standings-raw")
+def debug_standings_raw():
+    """Debug endpoint to see raw standings API response"""
+    try:
+        standings = leaguestandingsv3.LeagueStandingsV3(timeout=10).get_dict()
+        headers = standings['resultSets'][0]['headers']
+        rows = standings['resultSets'][0]['rowSet']
+        return {
+            "success": True,
+            "headers": headers,
+            "first_row": rows[0] if rows else None,
+            "row_count": len(rows)
         }
     except Exception as e:
         return {
@@ -386,6 +452,7 @@ async def get_todays_games():
 
         logger.info(f"Processing {len(games)} games (standings: {len(standings_map)}, advanced: {len(advanced_stats_map)}, odds: {len(odds_map)})")
 
+        arena_map = get_arena_map()
         refined_games = []
         for g in games:
             away_tri = g['awayTeam']['teamTricode']
@@ -397,9 +464,23 @@ async def get_todays_games():
             matchup_key = f"{away_team_id}@{home_team_id}"
             odds = odds_map.get(matchup_key, {})
 
-            # Get real stats or use your existing defaults as fallbacks
-            away_stats = standings_map.get(away_tri, {})
-            home_stats = standings_map.get(home_tri, {})
+            # Format spread line with team abbreviation
+            away_spread = odds.get("awaySpread")
+            home_spread = odds.get("homeSpread")
+            if away_spread is not None and home_spread is not None:
+                if away_spread < 0:
+                    spread_line = f"{away_tri} {away_spread}"
+                else:
+                    spread_line = f"{home_tri} {home_spread}"
+            else:
+                spread_line = "N/A"
+
+            # Get arena from map, fallback to city name
+            venue = arena_map.get(home_tri, f"{g['homeTeam'].get('teamCity', 'TBD')} Arena")
+
+            # Get standings - try tricode first, fallback to team ID
+            away_stats = standings_map.get(away_tri) or standings_map.get(away_team_id, {})
+            home_stats = standings_map.get(home_tri) or standings_map.get(home_team_id, {})
 
             # Get advanced stats - try by team name first, then team ID
             away_full_name = f"{g['awayTeam']['teamCity']} {g['awayTeam']['teamName']}"
@@ -427,10 +508,10 @@ async def get_todays_games():
                 "gameClock": g.get('gameClock', ''),
                 "time": g.get('gameEt', '').split('T')[-1][:5],  # Extract HH:MM
                 "date": g.get('gameEt', '').split('T')[0],
-                "venue": f"{g['homeTeam'].get('teamCity', 'TBD')} Arena",
+                "venue": venue,
                 "broadcast": "Local",
                 "model": "EV-MODEL-V1",
-                "spreadLine": odds.get("spreadLine", "N/A"),
+                "spreadLine": spread_line,
                 "away": {
                     "name": g['awayTeam']['teamName'],
                     "abbreviation": away_tri,
