@@ -16,6 +16,7 @@ export interface BaseTeamData {
 // NBA-specific team data
 export interface NBATeamData extends BaseTeamData {
   last10: string
+  score: number        // Live/final score
   offRating: number
   defRating: number
   pace: number
@@ -52,6 +53,7 @@ export interface NHLTeamData extends BaseTeamData {
 
 export interface BaseMatchupData {
   gameId: string
+  status: string       // Game status text (e.g., "7:30 PM ET", "Final", "Q3 5:23")
   date: string
   time: string
   venue: string
@@ -64,6 +66,9 @@ export interface BaseMatchupData {
 
 export interface NBAMatchupData extends BaseMatchupData {
   sport: "nba"
+  gameStatus: number   // 1=scheduled, 2=live, 3=final
+  period: number
+  gameClock: string
   away: NBATeamData
   home: NBATeamData
 }

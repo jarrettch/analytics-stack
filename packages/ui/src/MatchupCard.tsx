@@ -20,6 +20,16 @@ import type {
   BaseTeamData,
 } from "./types/sports-types"
 
+// Parse ISO 8601 duration (PT04M00.00S) to display format (4:00)
+function parseGameClock(clock: string): string {
+  if (!clock) return ""
+  const match = clock.match(/PT(\d+)M([\d.]+)S/)
+  if (!match) return clock
+  const minutes = parseInt(match[1], 10)
+  const seconds = Math.floor(parseFloat(match[2]))
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`
+}
+
 function StatLabel({ children }: { children: React.ReactNode }) {
   return (
     <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -485,38 +495,82 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
 
       <Separator className="bg-border" />
 
-      {/* Predicted Score */}
+      {/* Score Section - Dynamic based on game status */}
       <div className="px-3 py-2">
-        <div className="mb-1">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Projected Score
-          </span>
-        </div>
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center">
-          <div className="flex flex-col items-center">
-            <span className="font-mono text-[10px] text-muted-foreground">
-              {away.abbreviation}
-            </span>
-            <span
-              className={`font-mono text-2xl font-bold tabular-nums ${away.predictedScore > home.predictedScore ? "text-emerald-400" : "text-foreground"}`}
-            >
-              {away.predictedScore}
-            </span>
-          </div>
-          <span className="px-3 font-mono text-xs text-muted-foreground">
-            {" - "}
-          </span>
-          <div className="flex flex-col items-center">
-            <span className="font-mono text-[10px] text-muted-foreground">
-              {home.abbreviation}
-            </span>
-            <span
-              className={`font-mono text-2xl font-bold tabular-nums ${home.predictedScore > away.predictedScore ? "text-emerald-400" : "text-foreground"}`}
-            >
-              {home.predictedScore}
-            </span>
-          </div>
-        </div>
+        {matchup.sport === "nba" && (matchup as NBAMatchupData).gameStatus >= 2 ? (
+          // Live or Final game - show actual score
+          <>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {(matchup as NBAMatchupData).gameStatus === 3 ? "Final" : "Live"}
+              </span>
+              {(matchup as NBAMatchupData).gameStatus === 2 && (
+                <span className="font-mono text-[10px] text-primary animate-pulse">
+                  Q{(matchup as NBAMatchupData).period} {parseGameClock((matchup as NBAMatchupData).gameClock)}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center">
+              <div className="flex flex-col items-center">
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  {away.abbreviation}
+                </span>
+                <span
+                  className={`font-mono text-2xl font-bold tabular-nums ${(away as NBATeamData).score > (home as NBATeamData).score ? "text-emerald-400" : "text-foreground"}`}
+                >
+                  {(away as NBATeamData).score}
+                </span>
+              </div>
+              <span className="px-3 font-mono text-xs text-muted-foreground">
+                {" - "}
+              </span>
+              <div className="flex flex-col items-center">
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  {home.abbreviation}
+                </span>
+                <span
+                  className={`font-mono text-2xl font-bold tabular-nums ${(home as NBATeamData).score > (away as NBATeamData).score ? "text-emerald-400" : "text-foreground"}`}
+                >
+                  {(home as NBATeamData).score}
+                </span>
+              </div>
+            </div>
+          </>
+        ) : (
+          // Scheduled game - show projected score
+          <>
+            <div className="mb-1">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Projected Score
+              </span>
+            </div>
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center">
+              <div className="flex flex-col items-center">
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  {away.abbreviation}
+                </span>
+                <span
+                  className={`font-mono text-2xl font-bold tabular-nums ${away.predictedScore > home.predictedScore ? "text-emerald-400" : "text-foreground"}`}
+                >
+                  {away.predictedScore}
+                </span>
+              </div>
+              <span className="px-3 font-mono text-xs text-muted-foreground">
+                {" - "}
+              </span>
+              <div className="flex flex-col items-center">
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  {home.abbreviation}
+                </span>
+                <span
+                  className={`font-mono text-2xl font-bold tabular-nums ${home.predictedScore > away.predictedScore ? "text-emerald-400" : "text-foreground"}`}
+                >
+                  {home.predictedScore}
+                </span>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       <Separator className="bg-border" />

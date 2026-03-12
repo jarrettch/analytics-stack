@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { SportsDashboard, type Sport, type MatchupData, SPORT_LABELS, SPORT_MODELS } from "@repo/ui";
 import { Activity } from "lucide-react";
 
@@ -11,31 +11,58 @@ export default function Home() {
   const [matchups, setMatchups] = useState<MatchupData[]>([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState<Date | null>(null);
+  const lastDataRef = useRef<string>("");
 
   useEffect(() => {
     setNow(new Date());
   }, []);
 
   useEffect(() => {
-    // For now, only NBA has an API endpoint
-    if (activeSport === "nba") {
-      setLoading(true);
-      fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/nba/today`)
-        .then((res) => res.json())
-        .then((data) => {
-          console.log("Matchups:", data);
-          setMatchups(data);
+    const fetchData = async (isInitial = false) => {
+      // For now, only NBA has an API endpoint
+      if (activeSport === "nba") {
+        if (isInitial) setLoading(true);
+
+        try {
+          const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/nba/today`);
+          const data = await res.json();
+
+          // Only update if data actually changed (prevents unnecessary re-renders)
+          const dataStr = JSON.stringify(data);
+
+          if (dataStr !== lastDataRef.current) {
+            console.log("Data updated");
+            lastDataRef.current = dataStr;
+            setMatchups(data);
+          }
+
           setLoading(false);
-        })
-        .catch((err) => {
+        } catch (err) {
           console.error("Failed to fetch NBA data:", err);
           setLoading(false);
-        });
-    } else {
-      // Other sports coming soon
-      setMatchups([]);
-      setLoading(false);
+        }
+      } else {
+        // Other sports coming soon
+        setMatchups([]);
+        setLoading(false);
+      }
+    };
+
+    // Initial fetch
+    fetchData(true);
+
+    // Set up polling for live games
+    let pollInterval: NodeJS.Timeout | null = null;
+
+    if (activeSport === "nba") {
+      // Poll every 15 seconds when games might be live
+      pollInterval = setInterval(() => fetchData(false), 15000);
     }
+
+    // Cleanup
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
   }, [activeSport]);
 
   const gameCount = matchups.length;
