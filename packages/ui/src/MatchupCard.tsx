@@ -6,6 +6,8 @@ import {
   TrendingUp,
   Activity,
   Timer,
+  Check,
+  X,
 } from "lucide-react"
 import type {
   MatchupData,
@@ -587,8 +589,14 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
             Spread
           </span>
-          <span className="font-mono text-xs font-semibold tabular-nums text-foreground">
+          <span className="font-mono text-xs font-semibold tabular-nums text-foreground flex items-center gap-1">
             {matchup.spreadLine}
+            {matchup.spreadResult === true && (
+              <Check className="size-3 text-emerald-400" />
+            )}
+            {matchup.spreadResult === false && (
+              <X className="size-3 text-red-400" />
+            )}
           </span>
         </div>
         <div className="flex items-center gap-3">

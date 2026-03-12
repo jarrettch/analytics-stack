@@ -424,10 +424,30 @@ async def get_todays_games():
             if away_spread is not None and home_spread is not None:
                 if away_spread < 0:
                     spread_line = f"{away_tri} {away_spread}"
+                    favorite = "away"
+                    spread_value = away_spread
                 else:
                     spread_line = f"{home_tri} {home_spread}"
+                    favorite = "home"
+                    spread_value = home_spread
             else:
                 spread_line = "N/A"
+                favorite = None
+                spread_value = None
+
+            # Calculate spread result for final games
+            spread_result = None  # None = not final or no spread, True = covered, False = not covered
+            if g.get('gameStatus') == 3 and spread_value is not None:
+                away_score = g['awayTeam'].get('score', 0)
+                home_score = g['homeTeam'].get('score', 0)
+                margin = away_score - home_score  # positive = away won
+
+                if favorite == "away":
+                    # Away favored: they need to win by more than the spread
+                    spread_result = margin > abs(spread_value)
+                else:
+                    # Home favored: they need to win by more than the spread
+                    spread_result = (-margin) > abs(spread_value)
 
             # Get arena from map, fallback to city name
             venue = arena_map.get(home_tri, f"{g['homeTeam'].get('teamCity', 'TBD')} Arena")
@@ -466,6 +486,7 @@ async def get_todays_games():
                 "broadcast": "Local",
                 "model": "EV-MODEL-V1",
                 "spreadLine": spread_line,
+                "spreadResult": spread_result,  # True = favorite covered, False = didn't cover, None = not final
                 "away": {
                     "name": g['awayTeam']['teamName'],
                     "abbreviation": away_tri,

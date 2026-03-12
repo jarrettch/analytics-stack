@@ -60,6 +60,7 @@ export interface BaseMatchupData {
   broadcast: string
   series?: string
   spreadLine: string
+  spreadResult?: boolean | null  // True = favorite covered, False = didn't cover, null = not final
   overUnder?: number
   model: string
 }
