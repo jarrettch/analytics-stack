@@ -473,6 +473,33 @@ async def get_todays_games():
             home_losses = g['homeTeam']['losses']
             home_win_pct = home_wins / (home_wins + home_losses) if (home_wins + home_losses) > 0 else 0.500
 
+            # Calculate projected scores (70% market, 30% naive model)
+            away_ortg = away_advanced.get("offRating", 112.0)
+            away_drtg = away_advanced.get("defRating", 112.0)
+            away_pace = away_advanced.get("pace", 100.0)
+            home_ortg = home_advanced.get("offRating", 112.0)
+            home_drtg = home_advanced.get("defRating", 112.0)
+            home_pace = home_advanced.get("pace", 100.0)
+
+            # Naive projection using ORtg/DRtg/Pace
+            game_pace = (away_pace + home_pace) / 2
+            naive_away = game_pace * (away_ortg + home_drtg) / 2 / 100
+            naive_home = game_pace * (home_ortg + away_drtg) / 2 / 100
+            naive_margin = naive_home - naive_away  # positive = home favored
+
+            # Market margin from spread (positive = home favored)
+            if spread_value is not None:
+                market_margin = -spread_value if favorite == "away" else spread_value
+            else:
+                market_margin = naive_margin  # Fall back to naive if no spread
+
+            # Blend: 70% market, 30% naive
+            blended_margin = (naive_margin * 0.3) + (market_margin * 0.7)
+            total_points = naive_away + naive_home
+
+            projected_away = round((total_points - blended_margin) / 2)
+            projected_home = round((total_points + blended_margin) / 2)
+
             refined_games.append({
                 "sport": "nba",
                 "gameId": g['gameId'],
@@ -497,7 +524,7 @@ async def get_todays_games():
                     "streak": away_stats.get("streak", "N/A"),
                     "last10": away_stats.get("last10", "0-0"),
                     "score": g['awayTeam'].get('score', 0),  # Live/final score
-                    "predictedScore": 110,
+                    "predictedScore": projected_away,
                     "winProbability": odds.get("awayWinProbability", 0.5),
                     "offRating": away_advanced.get("offRating", 112.5),
                     "defRating": away_advanced.get("defRating", 110.2),
@@ -513,7 +540,7 @@ async def get_todays_games():
                     "streak": home_stats.get("streak", "N/A"),
                     "last10": home_stats.get("last10", "0-0"),
                     "score": g['homeTeam'].get('score', 0),  # Live/final score
-                    "predictedScore": 115,
+                    "predictedScore": projected_home,
                     "winProbability": odds.get("homeWinProbability", 0.5),
                     "offRating": home_advanced.get("offRating", 115.1),
                     "defRating": home_advanced.get("defRating", 113.4),
