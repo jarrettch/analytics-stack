@@ -488,8 +488,9 @@ async def get_todays_games():
             naive_margin = naive_home - naive_away  # positive = home favored
 
             # Market margin from spread (positive = home favored)
+            # spread_value is always negative (e.g., -15.5), so flip sign for home favorite
             if spread_value is not None:
-                market_margin = -spread_value if favorite == "away" else spread_value
+                market_margin = spread_value if favorite == "away" else -spread_value
             else:
                 market_margin = naive_margin  # Fall back to naive if no spread
 
