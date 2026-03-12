@@ -24,7 +24,7 @@ import type {
 function parseGameClock(clock: string): string {
   if (!clock) return ""
   const match = clock.match(/PT(\d+)M([\d.]+)S/)
-  if (!match) return clock
+  if (!match || !match[1] || !match[2]) return clock
   const minutes = parseInt(match[1], 10)
   const seconds = Math.floor(parseFloat(match[2]))
   return `${minutes}:${seconds.toString().padStart(2, "0")}`
