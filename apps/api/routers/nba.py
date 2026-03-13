@@ -1,10 +1,14 @@
 import asyncio
+import os
 from fastapi import APIRouter, HTTPException
-from nba_api.live.nba.endpoints import scoreboard, odds
+from nba_api.live.nba.endpoints import scoreboard
 from nba_api.stats.endpoints import leaguestandingsv3, leaguestandings, leaguedashteamstats
 import time
 import logging
 import httpx
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Setup basic logging
 logging.basicConfig(level=logging.INFO)
@@ -15,14 +19,15 @@ router = APIRouter(prefix="/api/nba", tags=["NBA"])
 # Configuration for Dynamic TTL
 CACHE_TTL_LIVE = 20     # 20 seconds during live action
 CACHE_TTL_DEFAULT = 60  # 1 minute for pre/post-game
+CACHE_TTL_ODDS = 1800   # 30 minutes - The Odds API free tier is 500 req/month (~16/day)
 
 # Independent caches for each data source with appropriate TTLs
 caches = {
     "scoreboard": {"data": None, "last_fetch": 0, "ttl": CACHE_TTL_DEFAULT},
     "standings": {"data": None, "last_fetch": 0, "ttl": 300},       # 5 minutes
     "advanced_stats": {"data": None, "last_fetch": 0, "ttl": 600},  # 10 minutes
-    "odds": {"data": None, "last_fetch": 0, "ttl": 60},             # 1 minute
-    "assembled": {"data": None, "last_fetch": 0, "ttl": CACHE_TTL_DEFAULT},  # Final response
+    "odds": {"data": None, "last_fetch": 0, "ttl": CACHE_TTL_ODDS}, # 30 minutes (rate limited)
+    "assembled": {"data": None, "last_fetch": 0, "ttl": CACHE_TTL_DEFAULT},
 }
 
 def get_cached(cache_key: str):
@@ -225,60 +230,95 @@ def calculate_win_probability_from_odds(away_ml, home_ml, away_spread, home_spre
     # Default to 50/50
     return 0.5, 0.5
 
-async def get_odds_map():
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get("https://cdn.nba.com/static/json/liveData/odds/odds_todaysGames.json")
-            data = r.json()
+def get_team_tricode_from_name(team_name: str) -> str:
+    """Map full team name to tricode for matching with scoreboard."""
+    name_map = {
+        "Atlanta Hawks": "ATL", "Boston Celtics": "BOS", "Brooklyn Nets": "BKN",
+        "Charlotte Hornets": "CHA", "Chicago Bulls": "CHI", "Cleveland Cavaliers": "CLE",
+        "Dallas Mavericks": "DAL", "Denver Nuggets": "DEN", "Detroit Pistons": "DET",
+        "Golden State Warriors": "GSW", "Houston Rockets": "HOU", "Indiana Pacers": "IND",
+        "Los Angeles Clippers": "LAC", "LA Clippers": "LAC",
+        "Los Angeles Lakers": "LAL", "LA Lakers": "LAL",
+        "Memphis Grizzlies": "MEM", "Miami Heat": "MIA", "Milwaukee Bucks": "MIL",
+        "Minnesota Timberwolves": "MIN", "New Orleans Pelicans": "NOP",
+        "New York Knicks": "NYK", "Oklahoma City Thunder": "OKC", "Orlando Magic": "ORL",
+        "Philadelphia 76ers": "PHI", "Phoenix Suns": "PHX", "Portland Trail Blazers": "POR",
+        "Sacramento Kings": "SAC", "San Antonio Spurs": "SAS", "Toronto Raptors": "TOR",
+        "Utah Jazz": "UTA", "Washington Wizards": "WAS",
+    }
+    return name_map.get(team_name, team_name[:3].upper())
 
-        logger.info(f"Odds API returned {len(data.get('games', []))} games")
+async def get_odds_map():
+    """Fetch odds from The Odds API (includes spreads, totals, moneylines)."""
+    api_key = os.getenv("ODDS_API_KEY")
+    if not api_key:
+        logger.warning("ODDS_API_KEY not set, skipping odds fetch")
+        return {}
+
+    try:
+        url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds/"
+        params = {
+            "apiKey": api_key,
+            "regions": "us",
+            "markets": "spreads,totals,h2h",
+            "oddsFormat": "american",
+        }
+
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, params=params)
+            r.raise_for_status()
+            games = r.json()
+
+            # Log remaining requests (in headers)
+            remaining = r.headers.get("x-requests-remaining", "?")
+            logger.info(f"Odds API: {len(games)} games, {remaining} requests remaining")
 
         odds_map = {}
-        for game in data.get("games", []):
-            # Use team IDs as the key instead of gameId
-            home_team_id = str(game.get("homeTeamId", ""))
-            away_team_id = str(game.get("awayTeamId", ""))
-            matchup_key = f"{away_team_id}@{home_team_id}"
+        for game in games:
+            away_team = game.get("away_team", "")
+            home_team = game.get("home_team", "")
+            away_tri = get_team_tricode_from_name(away_team)
+            home_tri = get_team_tricode_from_name(home_team)
+            matchup_key = f"{away_tri}@{home_tri}"
 
             away_spread = None
             home_spread = None
             away_ml = None
             home_ml = None
+            over_under = None
 
-            for market in game.get("markets", []):
-                # Extract spread
-                if market["name"] == "spread":
-                    for book in market.get("books", []):
-                        if book.get("countryCode") == "US" and "FanDuel" in book.get("name", ""):
-                            for outcome in book.get("outcomes", []):
-                                if outcome["type"] == "away":
-                                    away_spread = float(outcome.get("spread", 0))
-                                elif outcome["type"] == "home":
-                                    home_spread = float(outcome.get("spread", 0))
+            # Find FanDuel first, fallback to first available book
+            bookmakers = game.get("bookmakers", [])
+            preferred_book = None
+            for book in bookmakers:
+                if book.get("key") == "fanduel":
+                    preferred_book = book
+                    break
+            if not preferred_book and bookmakers:
+                preferred_book = bookmakers[0]
 
-                            break
+            if preferred_book:
+                for market in preferred_book.get("markets", []):
+                    market_key = market.get("key")
 
-                # Extract moneyline (2way market)
-                elif market["name"] == "2way":
-                    for book in market.get("books", []):
-                        if book.get("countryCode") == "US" and "FanDuel" in book.get("name", ""):
-                            for outcome in book.get("outcomes", []):
-                                odds_str = outcome.get("odds", "")
-                                try:
-                                    # Convert decimal odds to American
-                                    decimal_odds = float(odds_str)
-                                    if decimal_odds >= 2.0:
-                                        american_odds = (decimal_odds - 1) * 100
-                                    else:
-                                        american_odds = -100 / (decimal_odds - 1)
+                    if market_key == "spreads":
+                        for outcome in market.get("outcomes", []):
+                            if outcome.get("name") == away_team:
+                                away_spread = outcome.get("point")
+                            elif outcome.get("name") == home_team:
+                                home_spread = outcome.get("point")
 
-                                    if outcome["type"] == "away":
-                                        away_ml = american_odds
-                                    elif outcome["type"] == "home":
-                                        home_ml = american_odds
-                                except (ValueError, ZeroDivisionError):
-                                    pass
-                            break
+                    elif market_key == "totals":
+                        for outcome in market.get("outcomes", []):
+                            if outcome.get("name") == "Over":
+                                over_under = outcome.get("point")
+
+                    elif market_key == "h2h":
+                        for outcome in market.get("outcomes", []):
+                            if outcome.get("name") == away_team:
+                                away_ml = outcome.get("price")
+                            elif outcome.get("name") == home_team:
+                                home_ml = outcome.get("price")
 
             # Calculate win probabilities
             away_prob, home_prob = calculate_win_probability_from_odds(
@@ -288,13 +328,18 @@ async def get_odds_map():
             odds_map[matchup_key] = {
                 "awaySpread": away_spread,
                 "homeSpread": home_spread,
+                "overUnder": over_under,
+                "awayMoneyline": away_ml,
+                "homeMoneyline": home_ml,
                 "awayWinProbability": away_prob,
                 "homeWinProbability": home_prob,
-                "oddsGameId": game.get("gameId", "unknown")
             }
 
         logger.info(f"Odds map created with {len(odds_map)} matchups")
         return odds_map
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Odds API HTTP error: {e.response.status_code} - {e.response.text}")
+        return {}
     except Exception as e:
         logger.error(f"Odds fetch error: {e}")
         return {}
@@ -411,11 +456,11 @@ async def get_todays_games():
         for g in games:
             away_tri = g['awayTeam']['teamTricode']
             home_tri = g['homeTeam']['teamTricode']
-
-            # Match odds by team IDs (works when odds API is current)
             away_team_id = str(g['awayTeam']['teamId'])
             home_team_id = str(g['homeTeam']['teamId'])
-            matchup_key = f"{away_team_id}@{home_team_id}"
+
+            # Match odds by tricode (The Odds API uses team names -> tricodes)
+            matchup_key = f"{away_tri}@{home_tri}"
             odds = odds_map.get(matchup_key, {})
 
             # Format spread line with team abbreviation
@@ -515,6 +560,8 @@ async def get_todays_games():
                 "model": "EV-MODEL-V1",
                 "spreadLine": spread_line,
                 "spreadResult": spread_result,  # True = favorite covered, False = didn't cover, None = not final
+                "overUnder": odds.get("overUnder"),  # Market total from The Odds API
+                "projectedTotal": round(total_points),  # Model's projected total
                 "away": {
                     "name": g['awayTeam']['teamName'],
                     "abbreviation": away_tri,
