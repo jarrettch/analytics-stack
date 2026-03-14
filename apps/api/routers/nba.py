@@ -1,7 +1,6 @@
 import asyncio
 import os
 import json
-from pathlib import Path
 from datetime import date
 from fastapi import APIRouter, HTTPException
 from nba_api.live.nba.endpoints import scoreboard
@@ -10,12 +9,14 @@ import time
 import logging
 import httpx
 from dotenv import load_dotenv
+from supabase import create_client
 
 load_dotenv()
 
-# Directory for persisting odds data
-ODDS_CACHE_DIR = Path(__file__).parent.parent / "data" / "odds"
-ODDS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+# Supabase client for odds persistence
+supabase = None
+if os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_KEY"):
+    supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
 # Setup basic logging
 logging.basicConfig(level=logging.INFO)
@@ -255,30 +256,43 @@ def get_team_tricode_from_name(team_name: str) -> str:
     }
     return name_map.get(team_name, team_name[:3].upper())
 
-def get_odds_cache_path() -> Path:
-    """Get path for today's odds cache file."""
-    return ODDS_CACHE_DIR / f"odds_{date.today().isoformat()}.json"
+def load_persisted_odds(game_date: date = None) -> dict:
+    """Load persisted odds from Supabase for a given date."""
+    if not supabase:
+        logger.warning("Supabase not configured, skipping odds load")
+        return {}
 
-def load_persisted_odds() -> dict:
-    """Load persisted odds from today's cache file."""
-    cache_path = get_odds_cache_path()
-    if cache_path.exists():
-        try:
-            with open(cache_path, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"Failed to load persisted odds: {e}")
-    return {}
-
-def save_persisted_odds(odds_map: dict):
-    """Save odds to today's cache file (merges with existing)."""
+    target_date = game_date or date.today()
     try:
-        existing = load_persisted_odds()
-        # Merge: new odds overwrite existing for same matchup
-        existing.update(odds_map)
-        with open(get_odds_cache_path(), "w") as f:
-            json.dump(existing, f)
-        logger.info(f"Persisted {len(existing)} matchup odds to disk")
+        response = supabase.table("nba_odds").select("matchup_key, odds_data").eq("game_date", target_date.isoformat()).execute()
+        odds_map = {}
+        for row in response.data:
+            odds_map[row["matchup_key"]] = row["odds_data"]
+        logger.info(f"Loaded {len(odds_map)} odds from Supabase for {target_date}")
+        return odds_map
+    except Exception as e:
+        logger.warning(f"Failed to load persisted odds: {e}")
+        return {}
+
+def save_persisted_odds(odds_map: dict, game_date: date = None):
+    """Save odds to Supabase (upserts by game_date + matchup_key)."""
+    if not supabase:
+        logger.warning("Supabase not configured, skipping odds save")
+        return
+
+    target_date = game_date or date.today()
+    try:
+        rows = [
+            {
+                "game_date": target_date.isoformat(),
+                "matchup_key": matchup_key,
+                "odds_data": odds_data,
+            }
+            for matchup_key, odds_data in odds_map.items()
+        ]
+        # Upsert: insert or update on conflict
+        supabase.table("nba_odds").upsert(rows, on_conflict="game_date,matchup_key").execute()
+        logger.info(f"Persisted {len(rows)} matchup odds to Supabase for {target_date}")
     except Exception as e:
         logger.warning(f"Failed to persist odds: {e}")
 
@@ -416,7 +430,8 @@ async def cron_fetch_odds():
         return {
             "success": True,
             "matchups": len(odds),
-            "persisted_to": str(get_odds_cache_path()),
+            "persisted_to": "supabase:nba_odds",
+            "date": date.today().isoformat(),
         }
     except Exception as e:
         return {
