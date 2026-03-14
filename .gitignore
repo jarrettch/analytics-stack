@@ -43,3 +43,6 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Cached data
+apps/api/data/

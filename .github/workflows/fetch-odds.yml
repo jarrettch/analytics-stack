@@ -1,0 +1,31 @@
+name: Fetch Daily Odds
+
+on:
+  schedule:
+    # Run at 11am ET (16:00 UTC) - after lines are posted, before games start
+    - cron: '0 16 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  fetch-odds:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake up Render and fetch odds
+        run: |
+          # First request wakes the server (may timeout)
+          curl -s --max-time 60 "${{ secrets.API_URL }}/api/nba/today" || true
+
+          # Wait for cold start
+          sleep 10
+
+          # Fetch and persist odds
+          response=$(curl -s --max-time 30 "${{ secrets.API_URL }}/api/nba/cron/fetch-odds")
+          echo "Response: $response"
+
+          # Check for success
+          if echo "$response" | grep -q '"success": true'; then
+            echo "Odds fetched successfully"
+          else
+            echo "Failed to fetch odds"
+            exit 1
+          fi

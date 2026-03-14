@@ -1,5 +1,8 @@
 import asyncio
 import os
+import json
+from pathlib import Path
+from datetime import date
 from fastapi import APIRouter, HTTPException
 from nba_api.live.nba.endpoints import scoreboard
 from nba_api.stats.endpoints import leaguestandingsv3, leaguestandings, leaguedashteamstats
@@ -9,6 +12,10 @@ import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Directory for persisting odds data
+ODDS_CACHE_DIR = Path(__file__).parent.parent / "data" / "odds"
+ODDS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Setup basic logging
 logging.basicConfig(level=logging.INFO)
@@ -248,12 +255,45 @@ def get_team_tricode_from_name(team_name: str) -> str:
     }
     return name_map.get(team_name, team_name[:3].upper())
 
+def get_odds_cache_path() -> Path:
+    """Get path for today's odds cache file."""
+    return ODDS_CACHE_DIR / f"odds_{date.today().isoformat()}.json"
+
+def load_persisted_odds() -> dict:
+    """Load persisted odds from today's cache file."""
+    cache_path = get_odds_cache_path()
+    if cache_path.exists():
+        try:
+            with open(cache_path, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load persisted odds: {e}")
+    return {}
+
+def save_persisted_odds(odds_map: dict):
+    """Save odds to today's cache file (merges with existing)."""
+    try:
+        existing = load_persisted_odds()
+        # Merge: new odds overwrite existing for same matchup
+        existing.update(odds_map)
+        with open(get_odds_cache_path(), "w") as f:
+            json.dump(existing, f)
+        logger.info(f"Persisted {len(existing)} matchup odds to disk")
+    except Exception as e:
+        logger.warning(f"Failed to persist odds: {e}")
+
 async def get_odds_map():
-    """Fetch odds from The Odds API (includes spreads, totals, moneylines)."""
+    """Fetch odds from The Odds API (includes spreads, totals, moneylines).
+
+    Merges fresh odds with persisted odds so finished games retain their lines.
+    """
+    # Start with persisted odds (keeps data for finished games)
+    odds_map = load_persisted_odds()
+
     api_key = os.getenv("ODDS_API_KEY")
     if not api_key:
-        logger.warning("ODDS_API_KEY not set, skipping odds fetch")
-        return {}
+        logger.warning("ODDS_API_KEY not set, returning persisted odds only")
+        return odds_map
 
     try:
         url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds/"
@@ -271,9 +311,9 @@ async def get_odds_map():
 
             # Log remaining requests (in headers)
             remaining = r.headers.get("x-requests-remaining", "?")
-            logger.info(f"Odds API: {len(games)} games, {remaining} requests remaining")
+            logger.info(f"Odds API: {len(games)} upcoming games, {remaining} requests remaining")
 
-        odds_map = {}
+        fresh_odds = {}
         for game in games:
             away_team = game.get("away_team", "")
             home_team = game.get("home_team", "")
@@ -325,7 +365,7 @@ async def get_odds_map():
                 away_ml, home_ml, away_spread, home_spread
             )
 
-            odds_map[matchup_key] = {
+            fresh_odds[matchup_key] = {
                 "awaySpread": away_spread,
                 "homeSpread": home_spread,
                 "overUnder": over_under,
@@ -335,14 +375,20 @@ async def get_odds_map():
                 "homeWinProbability": home_prob,
             }
 
-        logger.info(f"Odds map created with {len(odds_map)} matchups")
+        # Merge fresh odds into persisted (fresh overwrites)
+        odds_map.update(fresh_odds)
+
+        # Save merged odds to disk
+        save_persisted_odds(odds_map)
+
+        logger.info(f"Odds map: {len(fresh_odds)} fresh + {len(odds_map) - len(fresh_odds)} persisted = {len(odds_map)} total")
         return odds_map
     except httpx.HTTPStatusError as e:
         logger.error(f"Odds API HTTP error: {e.response.status_code} - {e.response.text}")
-        return {}
+        return odds_map  # Return persisted odds on error
     except Exception as e:
         logger.error(f"Odds fetch error: {e}")
-        return {}
+        return odds_map  # Return persisted odds on error
 
 @router.get("/debug/standings")
 def debug_standings():
@@ -360,6 +406,22 @@ def debug_standings():
             "success": False,
             "error": str(e),
             "error_type": type(e).__name__
+        }
+
+@router.get("/cron/fetch-odds")
+async def cron_fetch_odds():
+    """Endpoint for GitHub Actions to trigger daily odds fetch."""
+    try:
+        odds = await get_odds_map()
+        return {
+            "success": True,
+            "matchups": len(odds),
+            "persisted_to": str(get_odds_cache_path()),
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
         }
 
 @router.get("/debug/scoreboard")
