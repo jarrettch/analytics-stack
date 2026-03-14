@@ -345,9 +345,13 @@ async def get_odds_map():
 
             away_spread = None
             home_spread = None
+            away_spread_odds = None
+            home_spread_odds = None
             away_ml = None
             home_ml = None
             over_under = None
+            over_odds = None
+            under_odds = None
 
             # Find FanDuel first, fallback to first available book
             bookmakers = game.get("bookmakers", [])
@@ -367,13 +371,18 @@ async def get_odds_map():
                         for outcome in market.get("outcomes", []):
                             if outcome.get("name") == away_team:
                                 away_spread = outcome.get("point")
+                                away_spread_odds = outcome.get("price")
                             elif outcome.get("name") == home_team:
                                 home_spread = outcome.get("point")
+                                home_spread_odds = outcome.get("price")
 
                     elif market_key == "totals":
                         for outcome in market.get("outcomes", []):
                             if outcome.get("name") == "Over":
                                 over_under = outcome.get("point")
+                                over_odds = outcome.get("price")
+                            elif outcome.get("name") == "Under":
+                                under_odds = outcome.get("price")
 
                     elif market_key == "h2h":
                         for outcome in market.get("outcomes", []):
@@ -390,7 +399,11 @@ async def get_odds_map():
             odds_data = {
                 "awaySpread": away_spread,
                 "homeSpread": home_spread,
+                "awaySpreadOdds": away_spread_odds,
+                "homeSpreadOdds": home_spread_odds,
                 "overUnder": over_under,
+                "overOdds": over_odds,
+                "underOdds": under_odds,
                 "awayMoneyline": away_ml,
                 "homeMoneyline": home_ml,
                 "awayWinProbability": away_prob,
