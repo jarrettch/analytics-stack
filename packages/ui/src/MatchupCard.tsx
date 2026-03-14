@@ -603,8 +603,17 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
             O/U
           </span>
-          <span className="font-mono text-xs font-semibold tabular-nums text-foreground">
-            {(matchup.overUnder ?? 0).toFixed(1)}
+          <span className="font-mono text-xs font-semibold tabular-nums text-foreground flex items-center gap-1">
+            {matchup.overUnder ? matchup.overUnder.toFixed(1) : "N/A"}
+            {matchup.totalResult === "over" && (
+              <ArrowUp className="size-3 text-emerald-400" />
+            )}
+            {matchup.totalResult === "under" && (
+              <ArrowDown className="size-3 text-red-400" />
+            )}
+            {matchup.totalResult === "push" && (
+              <span className="text-[10px] text-muted-foreground">P</span>
+            )}
           </span>
         </div>
         {matchup.series && (

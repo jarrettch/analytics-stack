@@ -574,17 +574,30 @@ async def get_todays_games():
 
             # Calculate spread result for final games
             spread_result = None  # None = not final or no spread, True = covered, False = not covered
-            if g.get('gameStatus') == 3 and spread_value is not None:
+            total_result = None   # None = not final or no O/U, "over" = hit over, "under" = hit under
+            over_under = odds.get("overUnder")
+
+            if g.get('gameStatus') == 3:
                 away_score = g['awayTeam'].get('score', 0)
                 home_score = g['homeTeam'].get('score', 0)
-                margin = away_score - home_score  # positive = away won
 
-                if favorite == "away":
-                    # Away favored: they need to win by more than the spread
-                    spread_result = margin > abs(spread_value)
-                else:
-                    # Home favored: they need to win by more than the spread
-                    spread_result = (-margin) > abs(spread_value)
+                # Spread result
+                if spread_value is not None:
+                    margin = away_score - home_score  # positive = away won
+                    if favorite == "away":
+                        spread_result = margin > abs(spread_value)
+                    else:
+                        spread_result = (-margin) > abs(spread_value)
+
+                # Total result (over/under)
+                if over_under is not None:
+                    actual_total = away_score + home_score
+                    if actual_total > over_under:
+                        total_result = "over"
+                    elif actual_total < over_under:
+                        total_result = "under"
+                    else:
+                        total_result = "push"
 
             # Get arena from map, fallback to city name
             venue = arena_map.get(home_tri, f"{g['homeTeam'].get('teamCity', 'TBD')} Arena")
@@ -652,7 +665,8 @@ async def get_todays_games():
                 "model": "EV-MODEL-V1",
                 "spreadLine": spread_line,
                 "spreadResult": spread_result,  # True = favorite covered, False = didn't cover, None = not final
-                "overUnder": odds.get("overUnder"),  # Market total from The Odds API
+                "overUnder": over_under,  # Market total from The Odds API
+                "totalResult": total_result,  # "over", "under", "push", or None
                 "projectedTotal": round(total_points),  # Model's projected total
                 "away": {
                     "name": g['awayTeam']['teamName'],
