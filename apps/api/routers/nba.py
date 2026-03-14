@@ -1,7 +1,7 @@
 import asyncio
 import os
 import json
-from datetime import date
+from datetime import date, datetime
 from fastapi import APIRouter, HTTPException
 from nba_api.live.nba.endpoints import scoreboard
 from nba_api.stats.endpoints import leaguestandingsv3, leaguestandings, leaguedashteamstats
@@ -328,12 +328,20 @@ async def get_odds_map():
             logger.info(f"Odds API: {len(games)} upcoming games, {remaining} requests remaining")
 
         fresh_odds = {}
+        odds_by_date = {}  # Group odds by game date for saving
         for game in games:
             away_team = game.get("away_team", "")
             home_team = game.get("home_team", "")
             away_tri = get_team_tricode_from_name(away_team)
             home_tri = get_team_tricode_from_name(home_team)
             matchup_key = f"{away_tri}@{home_tri}"
+
+            # Parse game date from commence_time (e.g., "2026-03-14T23:40:00Z")
+            commence_time = game.get("commence_time", "")
+            try:
+                game_date = datetime.fromisoformat(commence_time.replace("Z", "+00:00")).date()
+            except:
+                game_date = date.today()
 
             away_spread = None
             home_spread = None
@@ -379,7 +387,7 @@ async def get_odds_map():
                 away_ml, home_ml, away_spread, home_spread
             )
 
-            fresh_odds[matchup_key] = {
+            odds_data = {
                 "awaySpread": away_spread,
                 "homeSpread": home_spread,
                 "overUnder": over_under,
@@ -388,12 +396,19 @@ async def get_odds_map():
                 "awayWinProbability": away_prob,
                 "homeWinProbability": home_prob,
             }
+            fresh_odds[matchup_key] = odds_data
+
+            # Group by date for saving
+            if game_date not in odds_by_date:
+                odds_by_date[game_date] = {}
+            odds_by_date[game_date][matchup_key] = odds_data
 
         # Merge fresh odds into persisted (fresh overwrites)
         odds_map.update(fresh_odds)
 
-        # Save merged odds to disk
-        save_persisted_odds(odds_map)
+        # Save odds grouped by their actual game date
+        for gd, gd_odds in odds_by_date.items():
+            save_persisted_odds(gd_odds, game_date=gd)
 
         logger.info(f"Odds map: {len(fresh_odds)} fresh + {len(odds_map) - len(fresh_odds)} persisted = {len(odds_map)} total")
         return odds_map
