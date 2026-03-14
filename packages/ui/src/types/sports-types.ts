@@ -72,6 +72,13 @@ export interface NBAMatchupData extends BaseMatchupData {
   gameStatus: number   // 1=scheduled, 2=live, 3=final
   period: number
   gameClock: string
+  pregameSpread?: number | null   // home perspective, negative = home favored
+  spreadOddsHome?: number | null
+  spreadOddsAway?: number | null
+  overOdds?: number | null
+  underOdds?: number | null
+  homeMoneyline?: number | null
+  awayMoneyline?: number | null
   away: NBATeamData
   home: NBATeamData
 }

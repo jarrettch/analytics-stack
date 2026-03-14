@@ -226,9 +226,9 @@ def calculate_win_probability_from_odds(away_ml, home_ml, away_spread, home_spre
     if away_spread is not None and home_spread is not None:
         # Use the favorite's spread (negative value)
         spread = away_spread if away_spread < 0 else home_spread
-        # Formula: prob = 1 / (1 + 10^(spread/15))
-        favorite_prob = 1 / (1 + 10 ** (abs(spread) / 15))
-        underdog_prob = 1 - favorite_prob
+        # Formula: underdog_prob = 1 / (1 + 10^(|spread|/15)), favorite_prob = 1 - underdog_prob
+        underdog_prob = 1 / (1 + 10 ** (abs(spread) / 15))
+        favorite_prob = 1 - underdog_prob
 
         if away_spread < 0:  # Away is favorite
             return favorite_prob, underdog_prob
@@ -557,6 +557,10 @@ async def get_todays_games():
         logger.info(f"Processing {len(games)} games (standings: {len(standings_map)}, advanced: {len(advanced_stats_map)}, odds: {len(odds_map)})")
 
         arena_map = get_arena_map()
+        # Persisted odds are the closing lines — use these for live/final games
+        # so CLV calculations aren't contaminated by live line movement.
+        persisted_odds_map = load_persisted_odds()
+
         refined_games = []
         for g in games:
             away_tri = g['awayTeam']['teamTricode']
@@ -566,7 +570,12 @@ async def get_todays_games():
 
             # Match odds by tricode (The Odds API uses team names -> tricodes)
             matchup_key = f"{away_tri}@{home_tri}"
-            odds = odds_map.get(matchup_key, {})
+            game_status = g.get('gameStatus', 1)
+            # For live/final games use persisted (closing) odds; for scheduled use merged map
+            if game_status >= 2:
+                odds = persisted_odds_map.get(matchup_key, odds_map.get(matchup_key, {}))
+            else:
+                odds = odds_map.get(matchup_key, {})
 
             # Format spread line with team abbreviation
             away_spread = odds.get("awaySpread")
@@ -678,7 +687,14 @@ async def get_todays_games():
                 "model": "EV-MODEL-V1",
                 "spreadLine": spread_line,
                 "spreadResult": spread_result,  # True = favorite covered, False = didn't cover, None = not final
+                "pregameSpread": odds.get("homeSpread"),  # home perspective, negative = home favored
+                "spreadOddsHome": odds.get("homeSpreadOdds"),
+                "spreadOddsAway": odds.get("awaySpreadOdds"),
+                "homeMoneyline": odds.get("homeMoneyline"),
+                "awayMoneyline": odds.get("awayMoneyline"),
                 "overUnder": over_under,  # Market total from The Odds API
+                "overOdds": odds.get("overOdds"),
+                "underOdds": odds.get("underOdds"),
                 "totalResult": total_result,  # "over", "under", "push", or None
                 "projectedTotal": round(total_points),  # Model's projected total
                 "away": {

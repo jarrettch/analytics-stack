@@ -5,3 +5,4 @@ export { NbaDashboard } from "./NbaDashboard";
 export * from "./MatchupCard";
 export * from "./types/sports-types";
 export * from "./lib/utils"; // Highly recommended to export this too
+export * from "./lib/winProb";

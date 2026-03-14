@@ -1,3 +1,6 @@
+"use client"
+
+import { useState, useEffect, useRef } from "react"
 import { Badge } from "./components/ui/badge"
 import { Separator } from "./components/ui/separator"
 import {
@@ -8,7 +11,17 @@ import {
   Timer,
   Check,
   X,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react"
+import {
+  getHistory,
+  hydrateWinProbHistory,
+  recordSnapshot,
+  calcCLV,
+  type WinProbSnapshot,
+  type BetSide,
+} from "./lib/winProb"
 import type {
   MatchupData,
   NBAMatchupData,
@@ -390,7 +403,305 @@ function TeamStats({ team, sport }: { team: NBATeamData | NFLTeamData | MLBTeamD
   }
 }
 
+// ─── Win Prob Sparkline ──────────────────────────────────────────────────────
+
+function WinProbSparkline({ snapshots }: { snapshots: WinProbSnapshot[] }) {
+  if (snapshots.length < 2) return null
+
+  const W = 300
+  const H = 40
+  const clamp = (v: number) => Math.min(0.98, Math.max(0.02, v))
+
+  const points = snapshots
+    .map((s) => {
+      const x = ((2880 - s.timeRemaining) / 2880) * W
+      const y = (1 - clamp(s.winProb)) * H
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(" ")
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="w-full"
+      preserveAspectRatio="none"
+      style={{ height: "40px" }}
+    >
+      <line
+        x1="0" y1={H / 2} x2={W} y2={H / 2}
+        stroke="currentColor" strokeOpacity="0.2"
+        strokeWidth="1" strokeDasharray="3,3"
+      />
+      <polyline
+        points={points}
+        fill="none"
+        stroke="#10b981"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+// ─── Live Win Prob Section ───────────────────────────────────────────────────
+
+function LiveWinProbSection({ matchup }: { matchup: NBAMatchupData }) {
+  const [chartData, setChartData] = useState<WinProbSnapshot[]>([])
+  const hydratedRef = useRef(false)
+
+  const pace = matchup.home.pace && matchup.away.pace
+    ? (matchup.home.pace + matchup.away.pace) / 2
+    : 100
+  const pregameSpread = matchup.pregameSpread ?? 0
+
+  // Hydrate full timeline from PBP on mount (runs once per gameId)
+  useEffect(() => {
+    if (hydratedRef.current) return
+    hydratedRef.current = true
+    hydrateWinProbHistory(matchup.gameId, pregameSpread, pace).then((history) => {
+      setChartData([...history])
+    })
+  }, [matchup.gameId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Append live snapshot whenever score or clock changes (driven by parent poll)
+  useEffect(() => {
+    recordSnapshot(
+      matchup.gameId,
+      matchup.home.score,
+      matchup.away.score,
+      matchup.period,
+      matchup.gameClock,
+      pregameSpread,
+      pace,
+    )
+    setChartData([...getHistory(matchup.gameId)])
+  }, [matchup.home.score, matchup.away.score, matchup.period, matchup.gameClock]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const current = chartData[chartData.length - 1]
+  if (!current) {
+    return (
+      <div className="px-3 py-4 flex justify-center">
+        <span className="font-mono text-[10px] text-muted-foreground animate-pulse">Loading timeline...</span>
+      </div>
+    )
+  }
+
+  const isFinal = matchup.gameStatus === 3
+  const homeProb = isFinal
+    ? (matchup.home.score > matchup.away.score ? 1 : matchup.home.score < matchup.away.score ? 0 : 0.5)
+    : Math.min(0.98, Math.max(0.02, current.winProb))
+  const awayProb = 1 - homeProb
+
+  return (
+    <div className="px-3 py-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          {isFinal ? "Win Prob" : "Live Win Prob"}
+        </span>
+        <span className="font-mono text-[10px] text-muted-foreground">Model</span>
+      </div>
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="w-12 text-right font-mono text-xs font-semibold tabular-nums text-emerald-400">
+          {(awayProb * 100).toFixed(1)}%
+        </span>
+        <div className="flex h-2.5 flex-1 overflow-hidden rounded-sm">
+          <div className="bg-emerald-500 transition-all" style={{ width: `${awayProb * 100}%` }} />
+          <div className="bg-red-500/80 transition-all" style={{ width: `${homeProb * 100}%` }} />
+        </div>
+        <span className="w-12 font-mono text-xs font-semibold tabular-nums text-red-400">
+          {(homeProb * 100).toFixed(1)}%
+        </span>
+      </div>
+      <div className="mb-2 flex justify-between">
+        <span className="font-mono text-[10px] text-muted-foreground">{matchup.away.abbreviation}</span>
+        <span className="font-mono text-[10px] text-muted-foreground">{matchup.home.abbreviation}</span>
+      </div>
+      <WinProbSparkline snapshots={chartData} />
+      <p className="mt-1 font-mono text-[9px] text-muted-foreground/50">
+        Heuristic based on score, time, and spread — not a live market feed
+      </p>
+    </div>
+  )
+}
+
+// ─── EV Panel (Spread / Total CLV + ML Edge) ─────────────────────────────────
+
+const BET_SIDES: { side: BetSide; label: string }[] = [
+  { side: 'home',    label: 'Home'    },
+  { side: 'away',    label: 'Away'    },
+  { side: 'over',    label: 'Over'    },
+  { side: 'under',   label: 'Under'   },
+  { side: 'home_ml', label: 'Home ML' },
+  { side: 'away_ml', label: 'Away ML' },
+]
+
+function EVPanel({ matchup }: { matchup: NBAMatchupData }) {
+  const [side, setSide] = useState<BetSide>('home')
+  const [lineInput, setLineInput] = useState('')
+  const [oddsInput, setOddsInput] = useState('')
+
+  const {
+    pregameSpread, spreadOddsHome, spreadOddsAway,
+    overUnder, overOdds, underOdds,
+    homeMoneyline, awayMoneyline,
+    home, away,
+  } = matchup
+
+  const isML = side === 'home_ml' || side === 'away_ml'
+  const isSpread = side === 'home' || side === 'away'
+  const isTotal = side === 'over' || side === 'under'
+
+  // Close line and odds based on bet type
+  const closeLine = isSpread ? (pregameSpread ?? 0) : isTotal ? (overUnder ?? 0) : 0
+  const closeOddsHome = isSpread
+    ? (spreadOddsHome ?? -110)
+    : isTotal
+      ? (overOdds ?? -110)
+      : (homeMoneyline ?? -110)
+  const closeOddsAway = isSpread
+    ? (spreadOddsAway ?? -110)
+    : isTotal
+      ? (underOdds ?? -110)
+      : (awayMoneyline ?? -110)
+
+  const hasCloseData = isML
+    ? homeMoneyline != null && awayMoneyline != null
+    : isTotal
+      ? overUnder != null && overOdds != null && underOdds != null
+      : pregameSpread != null && spreadOddsHome != null && spreadOddsAway != null
+
+  const yourLine = parseFloat(lineInput)
+  const yourOdds = parseFloat(oddsInput)
+  const canCalc = !isNaN(yourOdds) && oddsInput !== '' && hasCloseData && (isML || (!isNaN(yourLine) && lineInput !== ''))
+
+  // Adapter: normalize away spread to home perspective before calcCLV
+  const normalizedLine = side === 'away' ? -yourLine : yourLine
+
+  const result = canCalc
+    ? calcCLV(side, normalizedLine, yourOdds, closeLine, closeOddsHome, closeOddsAway)
+    : null
+
+  // Display close reference
+  const closeDisplay = isML
+    ? `${side === 'home_ml' ? home.abbreviation : away.abbreviation} ML: ${(side === 'home_ml' ? homeMoneyline : awayMoneyline) ?? 'N/A'}`
+    : isTotal
+      ? `O/U ${closeLine.toFixed(1)} (${closeOddsHome > 0 ? '+' : ''}${closeOddsHome} / ${closeOddsAway > 0 ? '+' : ''}${closeOddsAway})`
+      : `${closeLine > 0 ? '+' : ''}${closeLine.toFixed(1)} (${closeOddsHome > 0 ? '+' : ''}${closeOddsHome} / ${closeOddsAway > 0 ? '+' : ''}${closeOddsAway})`
+
+  const linePlaceholder = isTotal ? '220.5' : side === 'home' ? '-5.5' : '+5.5'
+
+  return (
+    <div className="px-3 py-2 border-t border-border">
+      {/* Side selector */}
+      <div className="mb-2 flex flex-wrap gap-1">
+        {BET_SIDES.map(({ side: s, label }) => (
+          <button
+            key={s}
+            onClick={() => { setSide(s); setLineInput(''); setOddsInput('') }}
+            className={`px-2 py-0.5 font-mono text-[10px] uppercase rounded-sm border transition-colors ${
+              side === s
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'border-border text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Inputs */}
+      <div className="flex gap-2 mb-2">
+        {!isML && (
+          <div className="flex flex-col flex-1">
+            <span className="text-[10px] text-muted-foreground mb-0.5">Your Line</span>
+            <input
+              type="number"
+              step="0.5"
+              placeholder={linePlaceholder}
+              value={lineInput}
+              onChange={(e) => setLineInput(e.target.value)}
+              className="bg-secondary border border-border rounded-sm px-2 py-1 font-mono text-xs text-foreground w-full"
+            />
+          </div>
+        )}
+        <div className="flex flex-col flex-1">
+          <span className="text-[10px] text-muted-foreground mb-0.5">Your Odds</span>
+          <input
+            type="number"
+            step="1"
+            placeholder="-110"
+            value={oddsInput}
+            onChange={(e) => setOddsInput(e.target.value)}
+            className="bg-secondary border border-border rounded-sm px-2 py-1 font-mono text-xs text-foreground w-full"
+          />
+        </div>
+      </div>
+
+      {/* Close reference */}
+      {hasCloseData && (
+        <div className="mb-2 font-mono text-[10px] text-muted-foreground">
+          Close: {closeDisplay}
+        </div>
+      )}
+      {!hasCloseData && (
+        <div className="mb-2 font-mono text-[10px] text-muted-foreground">No closing odds available</div>
+      )}
+
+      {/* Result */}
+      {result !== null && (
+        <div className="grid grid-cols-3 gap-2 pt-1.5 border-t border-border">
+          {result.isML ? (
+            // ML: show edge %, no-vig, break-even
+            <>
+              <div className="flex flex-col">
+                <span className="text-[10px] text-muted-foreground">Edge</span>
+                <span className={`font-mono text-xs font-semibold ${result.edgeVsClose > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {result.edgeVsClose > 0 ? '+' : ''}{(result.edgeVsClose * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] text-muted-foreground">No-vig</span>
+                <span className="font-mono text-xs text-foreground">
+                  {(result.closingNoVigProb * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] text-muted-foreground">Break-even</span>
+                <span className="font-mono text-xs text-foreground">
+                  {(result.breakEvenProb * 100).toFixed(1)}%
+                </span>
+              </div>
+            </>
+          ) : (
+            // Spread/Total: show CLV points + break-even (hide edge — not accurate for line bets)
+            <>
+              <div className="flex flex-col col-span-2">
+                <span className="text-[10px] text-muted-foreground">CLV</span>
+                <span className={`font-mono text-xs font-semibold ${result.clvPoints > 0 ? 'text-emerald-400' : result.clvPoints < 0 ? 'text-red-400' : 'text-foreground'}`}>
+                  {result.clvPoints > 0 ? '+' : ''}{result.clvPoints.toFixed(1)} pts
+                </span>
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  {result.clvPoints > 0 ? 'Beat close' : result.clvPoints < 0 ? 'Lost to close' : 'Push'}
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] text-muted-foreground">Break-even</span>
+                <span className="font-mono text-xs text-foreground">
+                  {(result.breakEvenProb * 100).toFixed(1)}%
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function MatchupCard({ matchup }: { matchup: MatchupData }) {
+  const [clvOpen, setClvOpen] = useState(false)
+
   if (!matchup || !matchup.away || !matchup.home) {
     return null
   }
@@ -398,6 +709,7 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
   const { away, home } = matchup
   const awayProbPct = (away.winProbability ?? 0.5) * 100
   const homeProbPct = (home.winProbability ?? 0.5) * 100
+  const isLiveNBA = matchup.sport === "nba" && (matchup as NBAMatchupData).gameStatus >= 2
 
   return (
     <div className="w-full max-w-md overflow-hidden rounded-md border border-border bg-card">
@@ -576,6 +888,34 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
       </div>
 
       <Separator className="bg-border" />
+
+      {/* Live win prob (only for live/final NBA games) */}
+      {isLiveNBA && (
+        <>
+          <LiveWinProbSection matchup={matchup as NBAMatchupData} />
+          <Separator className="bg-border" />
+        </>
+      )}
+
+      {/* EV Calculator (all NBA games) */}
+      {matchup.sport === "nba" && (
+        <>
+          <button
+            onClick={() => setClvOpen((v) => !v)}
+            className="flex w-full items-center justify-between px-3 py-1.5 text-left hover:bg-secondary/50 transition-colors"
+          >
+            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              EV Calculator
+            </span>
+            {clvOpen
+              ? <ChevronUp className="size-3 text-muted-foreground" />
+              : <ChevronDown className="size-3 text-muted-foreground" />
+            }
+          </button>
+          {clvOpen && <EVPanel matchup={matchup as NBAMatchupData} />}
+          <Separator className="bg-border" />
+        </>
+      )}
 
       {/* Advanced ratings comparison - sport specific */}
       {matchup.sport === "nba" && <NBARatings away={(matchup as NBAMatchupData).away} home={(matchup as NBAMatchupData).home} />}
