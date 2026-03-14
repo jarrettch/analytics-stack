@@ -9,6 +9,7 @@ on:
 jobs:
   fetch-odds:
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Wake up Render and fetch odds
         run: |
