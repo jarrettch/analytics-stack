@@ -353,11 +353,11 @@ async def get_odds_map():
             over_odds = None
             under_odds = None
 
-            # Find FanDuel first, fallback to first available book
+            # Find BetOnline first (sharper lines), fallback to first available book
             bookmakers = game.get("bookmakers", [])
             preferred_book = None
             for book in bookmakers:
-                if book.get("key") == "fanduel":
+                if book.get("key") == "betonlineag":
                     preferred_book = book
                     break
             if not preferred_book and bookmakers:
