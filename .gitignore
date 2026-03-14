@@ -46,3 +46,7 @@ venv/
 
 # Cached data
 apps/api/data/
+
+# Specs (local only)
+specs/
+**/specs/
