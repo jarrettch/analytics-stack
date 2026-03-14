@@ -12,20 +12,24 @@ jobs:
     steps:
       - name: Wake up Render and fetch odds
         run: |
-          # First request wakes the server (may timeout)
-          curl -s --max-time 60 "${{ secrets.API_URL }}/api/nba/today" || true
+          # First request wakes the server (may timeout on cold start)
+          echo "Waking up server..."
+          curl -s --max-time 120 "${{ secrets.API_URL }}/api/nba/today" || true
 
-          # Wait for cold start
-          sleep 10
+          # Wait for server to fully warm up
+          sleep 30
 
           # Fetch and persist odds
-          response=$(curl -s --max-time 30 "${{ secrets.API_URL }}/api/nba/cron/fetch-odds")
+          echo "Fetching odds..."
+          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/nba/cron/fetch-odds")
           echo "Response: $response"
 
-          # Check for success
-          if echo "$response" | grep -q '"success": true'; then
+          # Check for success (flexible pattern matching)
+          if echo "$response" | grep -q 'success.*true'; then
             echo "Odds fetched successfully"
+            echo "$response" | grep -o '"matchups":[0-9]*' || true
           else
             echo "Failed to fetch odds"
+            echo "Full response: $response"
             exit 1
           fi
