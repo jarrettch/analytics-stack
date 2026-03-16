@@ -2,8 +2,10 @@ name: Fetch Daily Odds
 
 on:
   schedule:
-    # Run at 11am ET (16:00 UTC) - after lines are posted, before games start
+    # 11am ET (16:00 UTC) - morning lines
     - cron: '0 16 * * *'
+    # 5pm ET (22:00 UTC) - closing lines, ~1hr before most evening tips
+    - cron: '0 22 * * *'
   workflow_dispatch: # Allow manual trigger
 
 jobs:

@@ -1,7 +1,7 @@
 import asyncio
 import os
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from fastapi import APIRouter, HTTPException
 from nba_api.live.nba.endpoints import scoreboard
 from nba_api.stats.endpoints import leaguestandingsv3, leaguestandings, leaguedashteamstats
@@ -257,18 +257,30 @@ def get_team_tricode_from_name(team_name: str) -> str:
     return name_map.get(team_name, team_name[:3].upper())
 
 def load_persisted_odds(game_date: date = None) -> dict:
-    """Load persisted odds from Supabase for a given date."""
+    """Load persisted odds from Supabase for a given date.
+
+    When no date is specified, queries today AND tomorrow (UTC) to handle the
+    ET/UTC boundary: a 7pm ET game has a UTC commence_time of midnight+, so it
+    gets saved with tomorrow's UTC date on the Render server.
+    """
     if not supabase:
         logger.warning("Supabase not configured, skipping odds load")
         return {}
 
-    target_date = game_date or date.today()
+    if game_date:
+        dates = [game_date.isoformat()]
+    else:
+        today = date.today()
+        dates = [today.isoformat(), (today + timedelta(days=1)).isoformat()]
+
     try:
-        response = supabase.table("nba_odds").select("matchup_key, odds_data").eq("game_date", target_date.isoformat()).execute()
+        response = supabase.table("nba_odds").select("matchup_key, odds_data, game_date").in_("game_date", dates).execute()
+        # Sort by game_date ascending so newer dates overwrite older ones
+        rows = sorted(response.data, key=lambda r: r["game_date"])
         odds_map = {}
-        for row in response.data:
+        for row in rows:
             odds_map[row["matchup_key"]] = row["odds_data"]
-        logger.info(f"Loaded {len(odds_map)} odds from Supabase for {target_date}")
+        logger.info(f"Loaded {len(odds_map)} odds from Supabase for {dates}")
         return odds_map
     except Exception as e:
         logger.warning(f"Failed to load persisted odds: {e}")
