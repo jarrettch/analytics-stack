@@ -268,23 +268,21 @@ def load_persisted_odds(game_date: date = None) -> dict:
         return {}
 
     if game_date:
-        dates = [game_date.isoformat()]
+        dates_to_query = [game_date]
     else:
         today = date.today()
-        dates = [today.isoformat(), (today + timedelta(days=1)).isoformat()]
+        dates_to_query = [today, today + timedelta(days=1)]
 
-    try:
-        response = supabase.table("nba_odds").select("matchup_key, odds_data, game_date").in_("game_date", dates).execute()
-        # Sort by game_date ascending so newer dates overwrite older ones
-        rows = sorted(response.data, key=lambda r: r["game_date"])
-        odds_map = {}
-        for row in rows:
-            odds_map[row["matchup_key"]] = row["odds_data"]
-        logger.info(f"Loaded {len(odds_map)} odds from Supabase for {dates}")
-        return odds_map
-    except Exception as e:
-        logger.warning(f"Failed to load persisted odds: {e}")
-        return {}
+    odds_map = {}
+    for d in dates_to_query:
+        try:
+            response = supabase.table("nba_odds").select("matchup_key, odds_data").eq("game_date", d.isoformat()).execute()
+            for row in response.data:
+                odds_map[row["matchup_key"]] = row["odds_data"]
+        except Exception as e:
+            logger.warning(f"Failed to load persisted odds for {d}: {e}")
+    logger.info(f"Loaded {len(odds_map)} odds from Supabase for {[d.isoformat() for d in dates_to_query]}")
+    return odds_map
 
 def save_persisted_odds(odds_map: dict, game_date: date = None):
     """Save odds to Supabase (upserts by game_date + matchup_key)."""
