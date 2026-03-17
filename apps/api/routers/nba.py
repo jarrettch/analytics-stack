@@ -320,7 +320,7 @@ async def get_odds_map():
     api_key = os.getenv("ODDS_API_KEY")
     if not api_key:
         logger.warning("ODDS_API_KEY not set, returning persisted odds only")
-        return odds_map
+        return odds_map, 0
 
     try:
         url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds/"
@@ -438,13 +438,13 @@ async def get_odds_map():
             save_persisted_odds(gd_odds, game_date=gd)
 
         logger.info(f"Odds map: {len(fresh_odds)} fresh + {len(odds_map) - len(fresh_odds)} persisted = {len(odds_map)} total")
-        return odds_map
+        return odds_map, len(fresh_odds)
     except httpx.HTTPStatusError as e:
         logger.error(f"Odds API HTTP error: {e.response.status_code} - {e.response.text}")
-        return odds_map  # Return persisted odds on error
+        return odds_map, 0
     except Exception as e:
         logger.error(f"Odds fetch error: {e}")
-        return odds_map  # Return persisted odds on error
+        return odds_map, 0
 
 @router.get("/debug/standings")
 def debug_standings():
@@ -468,12 +468,14 @@ def debug_standings():
 async def cron_fetch_odds():
     """Endpoint for GitHub Actions to trigger daily odds fetch."""
     try:
-        odds = await get_odds_map()
+        odds, fresh_count = await get_odds_map()
         return {
             "success": True,
-            "matchups": len(odds),
+            "fresh_from_api": fresh_count,
+            "persisted_loaded": len(odds) - fresh_count,
+            "total_matchups": len(odds),
             "persisted_to": "supabase:nba_odds",
-            "date": date.today().isoformat(),
+            "date": datetime.now(ET).date().isoformat(),
         }
     except Exception as e:
         return {
@@ -552,6 +554,8 @@ async def get_todays_games():
                     logger.warning(f"Failed to fetch {key}: {result}, using cached data")
                 elif key == "scoreboard":
                     set_cache("scoreboard", result)
+                elif key == "odds":
+                    set_cache("odds", result[0])
                 else:
                     set_cache(key, result)
 
