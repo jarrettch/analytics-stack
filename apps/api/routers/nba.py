@@ -241,23 +241,57 @@ def calculate_win_probability_from_odds(away_ml, home_ml, away_spread, home_spre
     # Default to 50/50
     return 0.5, 0.5
 
-def get_team_tricode_from_name(team_name: str) -> str:
-    """Map full team name to tricode for matching with scoreboard."""
-    name_map = {
-        "Atlanta Hawks": "ATL", "Boston Celtics": "BOS", "Brooklyn Nets": "BKN",
-        "Charlotte Hornets": "CHA", "Chicago Bulls": "CHI", "Cleveland Cavaliers": "CLE",
-        "Dallas Mavericks": "DAL", "Denver Nuggets": "DEN", "Detroit Pistons": "DET",
-        "Golden State Warriors": "GSW", "Houston Rockets": "HOU", "Indiana Pacers": "IND",
-        "Los Angeles Clippers": "LAC", "LA Clippers": "LAC",
-        "Los Angeles Lakers": "LAL", "LA Lakers": "LAL",
-        "Memphis Grizzlies": "MEM", "Miami Heat": "MIA", "Milwaukee Bucks": "MIL",
-        "Minnesota Timberwolves": "MIN", "New Orleans Pelicans": "NOP",
-        "New York Knicks": "NYK", "Oklahoma City Thunder": "OKC", "Orlando Magic": "ORL",
-        "Philadelphia 76ers": "PHI", "Phoenix Suns": "PHX", "Portland Trail Blazers": "POR",
-        "Sacramento Kings": "SAC", "San Antonio Spurs": "SAS", "Toronto Raptors": "TOR",
-        "Utah Jazz": "UTA", "Washington Wizards": "WAS",
+def get_tricode_from_sgo_team_id(team_id: str) -> str:
+    """Map SportsGameOdds teamID to NBA tricode.
+
+    SGO team IDs appear to follow an UPPER_SNAKE_CASE_NBA pattern based on
+    player ID conventions (e.g. LEBRON_JAMES_1_NBA). If the format differs
+    from what's mapped here, warnings will appear in logs on first run.
+    """
+    sgo_map = {
+        # With _NBA suffix (expected primary format)
+        "ATLANTA_HAWKS_NBA": "ATL", "BOSTON_CELTICS_NBA": "BOS",
+        "BROOKLYN_NETS_NBA": "BKN", "CHARLOTTE_HORNETS_NBA": "CHA",
+        "CHICAGO_BULLS_NBA": "CHI", "CLEVELAND_CAVALIERS_NBA": "CLE",
+        "DALLAS_MAVERICKS_NBA": "DAL", "DENVER_NUGGETS_NBA": "DEN",
+        "DETROIT_PISTONS_NBA": "DET", "GOLDEN_STATE_WARRIORS_NBA": "GSW",
+        "HOUSTON_ROCKETS_NBA": "HOU", "INDIANA_PACERS_NBA": "IND",
+        "LOS_ANGELES_CLIPPERS_NBA": "LAC", "LOS_ANGELES_LAKERS_NBA": "LAL",
+        "MEMPHIS_GRIZZLIES_NBA": "MEM", "MIAMI_HEAT_NBA": "MIA",
+        "MILWAUKEE_BUCKS_NBA": "MIL", "MINNESOTA_TIMBERWOLVES_NBA": "MIN",
+        "NEW_ORLEANS_PELICANS_NBA": "NOP", "NEW_YORK_KNICKS_NBA": "NYK",
+        "OKLAHOMA_CITY_THUNDER_NBA": "OKC", "ORLANDO_MAGIC_NBA": "ORL",
+        "PHILADELPHIA_76ERS_NBA": "PHI", "PHOENIX_SUNS_NBA": "PHX",
+        "PORTLAND_TRAIL_BLAZERS_NBA": "POR", "SACRAMENTO_KINGS_NBA": "SAC",
+        "SAN_ANTONIO_SPURS_NBA": "SAS", "TORONTO_RAPTORS_NBA": "TOR",
+        "UTAH_JAZZ_NBA": "UTA", "WASHINGTON_WIZARDS_NBA": "WAS",
+        # Without suffix (fallback)
+        "ATLANTA_HAWKS": "ATL", "BOSTON_CELTICS": "BOS",
+        "BROOKLYN_NETS": "BKN", "CHARLOTTE_HORNETS": "CHA",
+        "CHICAGO_BULLS": "CHI", "CLEVELAND_CAVALIERS": "CLE",
+        "DALLAS_MAVERICKS": "DAL", "DENVER_NUGGETS": "DEN",
+        "DETROIT_PISTONS": "DET", "GOLDEN_STATE_WARRIORS": "GSW",
+        "HOUSTON_ROCKETS": "HOU", "INDIANA_PACERS": "IND",
+        "LOS_ANGELES_CLIPPERS": "LAC", "LOS_ANGELES_LAKERS": "LAL",
+        "MEMPHIS_GRIZZLIES": "MEM", "MIAMI_HEAT": "MIA",
+        "MILWAUKEE_BUCKS": "MIL", "MINNESOTA_TIMBERWOLVES": "MIN",
+        "NEW_ORLEANS_PELICANS": "NOP", "NEW_YORK_KNICKS": "NYK",
+        "OKLAHOMA_CITY_THUNDER": "OKC", "ORLANDO_MAGIC": "ORL",
+        "PHILADELPHIA_76ERS": "PHI", "PHOENIX_SUNS": "PHX",
+        "PORTLAND_TRAIL_BLAZERS": "POR", "SACRAMENTO_KINGS": "SAC",
+        "SAN_ANTONIO_SPURS": "SAS", "TORONTO_RAPTORS": "TOR",
+        "UTAH_JAZZ": "UTA", "WASHINGTON_WIZARDS": "WAS",
+        # Short codes (if SGO uses tricodes directly)
+        "ATL": "ATL", "BOS": "BOS", "BKN": "BKN", "CHA": "CHA",
+        "CHI": "CHI", "CLE": "CLE", "DAL": "DAL", "DEN": "DEN",
+        "DET": "DET", "GSW": "GSW", "HOU": "HOU", "IND": "IND",
+        "LAC": "LAC", "LAL": "LAL", "MEM": "MEM", "MIA": "MIA",
+        "MIL": "MIL", "MIN": "MIN", "NOP": "NOP", "NYK": "NYK",
+        "OKC": "OKC", "ORL": "ORL", "PHI": "PHI", "PHX": "PHX",
+        "POR": "POR", "SAC": "SAC", "SAS": "SAS", "TOR": "TOR",
+        "UTA": "UTA", "WAS": "WAS",
     }
-    return name_map.get(team_name, team_name[:3].upper())
+    return sgo_map.get(team_id.upper(), "")
 
 def load_persisted_odds(game_date: date = None) -> dict:
     """Load persisted odds from Supabase for a given date.
@@ -309,141 +343,130 @@ def save_persisted_odds(odds_map: dict, game_date: date = None):
     except Exception as e:
         logger.warning(f"Failed to persist odds: {e}")
 
-async def get_odds_map():
-    """Fetch odds from The Odds API (includes spreads, totals, moneylines).
+def _sgo_book_val(odds: dict, odd_key: str, field: str):
+    """Extract a value from a SportsGameOdds odds object.
 
+    Prefers Circa lines; falls back to consensus book value.
+    field is one of: "odds", "spread", "overUnder"
+    """
+    odd = odds.get(odd_key, {})
+    circa = odd.get("byBookmaker", {}).get("circa", {})
+    if circa.get("available"):
+        return circa.get(field)
+    fallback_key = {"odds": "bookOdds", "spread": "bookSpread", "overUnder": "bookOverUnder"}.get(field, "bookOdds")
+    return odd.get(fallback_key)
+
+def _to_num(val):
+    """Parse a string/numeric odds value to int or float."""
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        return int(f) if f == int(f) else f
+    except (ValueError, TypeError):
+        return None
+
+async def get_odds_map():
+    """Fetch odds from SportsGameOdds API (spreads, totals, moneylines).
+
+    Prefers Circa lines; falls back to consensus bookOdds.
     Merges fresh odds with persisted odds so finished games retain their lines.
     """
-    # Start with persisted odds (keeps data for finished games)
     odds_map = load_persisted_odds()
 
-    api_key = os.getenv("ODDS_API_KEY")
+    api_key = os.getenv("SPORTS_GAME_ODDS_KEY")
     if not api_key:
-        logger.warning("ODDS_API_KEY not set, returning persisted odds only")
+        logger.warning("SPORTS_GAME_ODDS_KEY not set, returning persisted odds only")
         return odds_map, 0
 
     try:
-        url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds/"
+        url = "https://api.sportsgameodds.com/v2/events"
         params = {
-            "apiKey": api_key,
-            "regions": "us",
-            "markets": "spreads,totals,h2h",
-            "oddsFormat": "american",
+            "leagueID": "NBA",
+            "oddsAvailable": "true",
+            "oddID": ",".join([
+                "points-home-game-ml-home", "points-away-game-ml-away",
+                "points-home-game-sp-home", "points-away-game-sp-away",
+                "points-all-game-ou-over",  "points-all-game-ou-under",
+            ]),
+            "limit": 50,
         }
+        headers = {"x-api-key": api_key}
 
         async with httpx.AsyncClient() as client:
-            r = await client.get(url, params=params)
+            r = await client.get(url, params=params, headers=headers)
             r.raise_for_status()
-            games = r.json()
+            data = r.json()
 
-            # Log remaining requests (in headers)
-            remaining = r.headers.get("x-requests-remaining", "?")
-            logger.info(f"Odds API: {len(games)} upcoming games, {remaining} requests remaining")
+        games = data.get("data", [])
+        logger.info(f"SportsGameOdds: {len(games)} upcoming NBA games")
+        if games:
+            logger.info(f"Sample team IDs: {games[0].get('teams', {})}")
 
         fresh_odds = {}
-        odds_by_date = {}  # Group odds by game date for saving
+        odds_by_date = {}
+
         for game in games:
-            away_team = game.get("away_team", "")
-            home_team = game.get("home_team", "")
-            away_tri = get_team_tricode_from_name(away_team)
-            home_tri = get_team_tricode_from_name(home_team)
+            teams = game.get("teams", {})
+            home_team_id = teams.get("home", {}).get("teamID", "")
+            away_team_id = teams.get("away", {}).get("teamID", "")
+
+            home_tri = get_tricode_from_sgo_team_id(home_team_id)
+            away_tri = get_tricode_from_sgo_team_id(away_team_id)
+
+            if not home_tri or not away_tri:
+                logger.warning(f"Unrecognized SGO team IDs: home={home_team_id!r}, away={away_team_id!r} — skipping")
+                continue
+
             matchup_key = f"{away_tri}@{home_tri}"
 
-            # Parse game date from commence_time in ET so late-evening games
-            # (e.g., 8pm ET = midnight UTC) aren't assigned the next UTC date.
-            commence_time = game.get("commence_time", "")
+            starts_at = game.get("status", {}).get("startsAt", "")
             try:
-                game_date = datetime.fromisoformat(commence_time.replace("Z", "+00:00")).astimezone(ET).date()
-            except:
+                game_date = datetime.fromisoformat(starts_at.replace("Z", "+00:00")).astimezone(ET).date()
+            except Exception:
                 game_date = datetime.now(ET).date()
 
-            away_spread = None
-            home_spread = None
-            away_spread_odds = None
-            home_spread_odds = None
-            away_ml = None
-            home_ml = None
-            over_under = None
-            over_odds = None
-            under_odds = None
+            odds = game.get("odds", {})
 
-            # Find BetOnline first (sharper lines), fallback to first available book
-            bookmakers = game.get("bookmakers", [])
-            preferred_book = None
-            for book in bookmakers:
-                if book.get("key") == "betonlineag":
-                    preferred_book = book
-                    break
-            if not preferred_book and bookmakers:
-                preferred_book = bookmakers[0]
+            away_spread      = _to_num(_sgo_book_val(odds, "points-away-game-sp-away", "spread"))
+            home_spread      = _to_num(_sgo_book_val(odds, "points-home-game-sp-home", "spread"))
+            away_spread_odds = _to_num(_sgo_book_val(odds, "points-away-game-sp-away", "odds"))
+            home_spread_odds = _to_num(_sgo_book_val(odds, "points-home-game-sp-home", "odds"))
+            away_ml          = _to_num(_sgo_book_val(odds, "points-away-game-ml-away", "odds"))
+            home_ml          = _to_num(_sgo_book_val(odds, "points-home-game-ml-home", "odds"))
+            over_under       = _to_num(_sgo_book_val(odds, "points-all-game-ou-over",  "overUnder"))
+            over_odds        = _to_num(_sgo_book_val(odds, "points-all-game-ou-over",  "odds"))
+            under_odds       = _to_num(_sgo_book_val(odds, "points-all-game-ou-under", "odds"))
 
-            if preferred_book:
-                for market in preferred_book.get("markets", []):
-                    market_key = market.get("key")
-
-                    if market_key == "spreads":
-                        for outcome in market.get("outcomes", []):
-                            if outcome.get("name") == away_team:
-                                away_spread = outcome.get("point")
-                                away_spread_odds = outcome.get("price")
-                            elif outcome.get("name") == home_team:
-                                home_spread = outcome.get("point")
-                                home_spread_odds = outcome.get("price")
-
-                    elif market_key == "totals":
-                        for outcome in market.get("outcomes", []):
-                            if outcome.get("name") == "Over":
-                                over_under = outcome.get("point")
-                                over_odds = outcome.get("price")
-                            elif outcome.get("name") == "Under":
-                                under_odds = outcome.get("price")
-
-                    elif market_key == "h2h":
-                        for outcome in market.get("outcomes", []):
-                            if outcome.get("name") == away_team:
-                                away_ml = outcome.get("price")
-                            elif outcome.get("name") == home_team:
-                                home_ml = outcome.get("price")
-
-            # Calculate win probabilities
             away_prob, home_prob = calculate_win_probability_from_odds(
                 away_ml, home_ml, away_spread, home_spread
             )
 
             odds_data = {
-                "awaySpread": away_spread,
-                "homeSpread": home_spread,
-                "awaySpreadOdds": away_spread_odds,
-                "homeSpreadOdds": home_spread_odds,
-                "overUnder": over_under,
-                "overOdds": over_odds,
-                "underOdds": under_odds,
-                "awayMoneyline": away_ml,
-                "homeMoneyline": home_ml,
-                "awayWinProbability": away_prob,
-                "homeWinProbability": home_prob,
+                "awaySpread": away_spread, "homeSpread": home_spread,
+                "awaySpreadOdds": away_spread_odds, "homeSpreadOdds": home_spread_odds,
+                "overUnder": over_under, "overOdds": over_odds, "underOdds": under_odds,
+                "awayMoneyline": away_ml, "homeMoneyline": home_ml,
+                "awayWinProbability": away_prob, "homeWinProbability": home_prob,
             }
             fresh_odds[matchup_key] = odds_data
 
-            # Group by date for saving
             if game_date not in odds_by_date:
                 odds_by_date[game_date] = {}
             odds_by_date[game_date][matchup_key] = odds_data
 
-        # Merge fresh odds into persisted (fresh overwrites)
         odds_map.update(fresh_odds)
 
-        # Save odds grouped by their actual game date
         for gd, gd_odds in odds_by_date.items():
             save_persisted_odds(gd_odds, game_date=gd)
 
         logger.info(f"Odds map: {len(fresh_odds)} fresh + {len(odds_map) - len(fresh_odds)} persisted = {len(odds_map)} total")
         return odds_map, len(fresh_odds)
     except httpx.HTTPStatusError as e:
-        logger.error(f"Odds API HTTP error: {e.response.status_code} - {e.response.text}")
+        logger.error(f"SportsGameOdds HTTP error: {e.response.status_code} - {e.response.text}")
         return odds_map, 0
     except Exception as e:
-        logger.error(f"Odds fetch error: {e}")
+        logger.error(f"SportsGameOdds fetch error: {e}")
         return odds_map, 0
 
 @router.get("/debug/standings")
