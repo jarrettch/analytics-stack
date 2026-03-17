@@ -543,7 +543,7 @@ async def get_todays_games():
             tasks.append(loop.run_in_executor(None, get_advanced_stats_map))
             fetch_keys.append("advanced_stats")
         if not cached_odds:
-            tasks.append(get_odds_map())
+            tasks.append(loop.run_in_executor(None, load_persisted_odds))
             fetch_keys.append("odds")
 
         # Fetch only what's needed
@@ -555,7 +555,7 @@ async def get_todays_games():
                 elif key == "scoreboard":
                     set_cache("scoreboard", result)
                 elif key == "odds":
-                    set_cache("odds", result[0])
+                    set_cache("odds", result)
                 else:
                     set_cache(key, result)
 
