@@ -217,13 +217,10 @@ def calculate_win_probability_from_odds(away_ml, home_ml, away_spread, home_spre
             # Use spread instead
             pass
         else:
-            # Convert American odds to probability
+            # Convert American odds to implied probability
             away_prob = abs(away_ml) / (abs(away_ml) + 100) if away_ml < 0 else 100 / (away_ml + 100)
             home_prob = abs(home_ml) / (abs(home_ml) + 100) if home_ml < 0 else 100 / (home_ml + 100)
-
-            # Normalize to remove vig (they won't sum to 1.0)
-            total = away_prob + home_prob
-            return away_prob / total, home_prob / total
+            return away_prob, home_prob
 
     # Fallback to spread
     if away_spread is not None and home_spread is not None:
@@ -438,8 +435,12 @@ async def get_odds_map():
             over_odds        = _to_num(_sgo_book_val(odds, "points-all-game-ou-over",  "odds"))
             under_odds       = _to_num(_sgo_book_val(odds, "points-all-game-ou-under", "odds"))
 
+            # Use fairOdds (vig already removed by SGO) for win probability;
+            # fall back to bookOdds if unavailable.
+            away_fair_ml = _to_num(odds.get("points-away-game-ml-away", {}).get("fairOdds"))
+            home_fair_ml = _to_num(odds.get("points-home-game-ml-home", {}).get("fairOdds"))
             away_prob, home_prob = calculate_win_probability_from_odds(
-                away_ml, home_ml, away_spread, home_spread
+                away_fair_ml or away_ml, home_fair_ml or home_ml, away_spread, home_spread
             )
 
             odds_data = {
