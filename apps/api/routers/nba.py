@@ -2,6 +2,9 @@ import asyncio
 import os
 import json
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+ET = ZoneInfo("America/New_York")
 from fastapi import APIRouter, HTTPException
 from nba_api.live.nba.endpoints import scoreboard
 from nba_api.stats.endpoints import leaguestandingsv3, leaguestandings, leaguedashteamstats
@@ -270,8 +273,8 @@ def load_persisted_odds(game_date: date = None) -> dict:
     if game_date:
         dates_to_query = [game_date]
     else:
-        today = date.today()
-        dates_to_query = [today, today + timedelta(days=1)]
+        today_et = datetime.now(ET).date()
+        dates_to_query = [today_et, today_et + timedelta(days=1)]
 
     odds_map = {}
     for d in dates_to_query:
@@ -346,12 +349,13 @@ async def get_odds_map():
             home_tri = get_team_tricode_from_name(home_team)
             matchup_key = f"{away_tri}@{home_tri}"
 
-            # Parse game date from commence_time (e.g., "2026-03-14T23:40:00Z")
+            # Parse game date from commence_time in ET so late-evening games
+            # (e.g., 8pm ET = midnight UTC) aren't assigned the next UTC date.
             commence_time = game.get("commence_time", "")
             try:
-                game_date = datetime.fromisoformat(commence_time.replace("Z", "+00:00")).date()
+                game_date = datetime.fromisoformat(commence_time.replace("Z", "+00:00")).astimezone(ET).date()
             except:
-                game_date = date.today()
+                game_date = datetime.now(ET).date()
 
             away_spread = None
             home_spread = None
