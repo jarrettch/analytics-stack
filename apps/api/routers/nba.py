@@ -313,7 +313,7 @@ def load_persisted_odds(game_date: date = None) -> dict:
         try:
             response = supabase.table("nba_odds").select("matchup_key, odds_data").eq("game_date", d.isoformat()).execute()
             for row in response.data:
-                odds_map[row["matchup_key"]] = row["odds_data"]
+                odds_map[(d.isoformat(), row["matchup_key"])] = row["odds_data"]
         except Exception as e:
             logger.warning(f"Failed to load persisted odds for {d}: {e}")
     logger.info(f"Loaded {len(odds_map)} odds from Supabase for {[d.isoformat() for d in dates_to_query]}")
@@ -451,7 +451,7 @@ async def get_odds_map():
                 "awayMoneyline": away_ml, "homeMoneyline": home_ml,
                 "awayWinProbability": away_prob, "homeWinProbability": home_prob,
             }
-            fresh_odds[matchup_key] = odds_data
+            fresh_odds[(game_date.isoformat(), matchup_key)] = odds_data
 
             if game_date not in odds_by_date:
                 odds_by_date[game_date] = {}
@@ -610,7 +610,8 @@ async def get_todays_games():
 
             matchup_key = f"{away_tri}@{home_tri}"
             game_status = g.get('gameStatus', 1)
-            odds = odds_map.get(matchup_key, {})
+            game_date_str = g.get('gameEt', '').split('T')[0]
+            odds = odds_map.get((game_date_str, matchup_key), {})
 
             # Format spread line with team abbreviation
             away_spread = odds.get("awaySpread")
