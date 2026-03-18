@@ -405,6 +405,12 @@ function TeamStats({ team, sport }: { team: NBATeamData | NFLTeamData | MLBTeamD
 
 // ─── Win Prob Sparkline ──────────────────────────────────────────────────────
 
+// Monotonically increasing elapsed seconds — OT periods continue past 2880
+function snapshotElapsed(period: number, timeRemaining: number): number {
+  if (period <= 4) return 2880 - timeRemaining
+  return 2880 + (period - 4) * 300 - timeRemaining
+}
+
 function WinProbSparkline({ snapshots }: { snapshots: WinProbSnapshot[] }) {
   if (snapshots.length < 2) return null
 
@@ -412,9 +418,12 @@ function WinProbSparkline({ snapshots }: { snapshots: WinProbSnapshot[] }) {
   const H = 40
   const clamp = (v: number) => Math.min(0.98, Math.max(0.02, v))
 
+  const maxPeriod = snapshots.reduce((m, s) => Math.max(m, s.period), 4)
+  const totalSeconds = maxPeriod <= 4 ? 2880 : 2880 + (maxPeriod - 4) * 300
+
   const points = snapshots
     .map((s) => {
-      const x = ((2880 - s.timeRemaining) / 2880) * W
+      const x = (snapshotElapsed(s.period, s.timeRemaining) / totalSeconds) * W
       const y = (1 - clamp(s.winProb)) * H
       return `${x.toFixed(1)},${y.toFixed(1)}`
     })

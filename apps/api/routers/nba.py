@@ -253,7 +253,7 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
         "DALLAS_MAVERICKS_NBA": "DAL", "DENVER_NUGGETS_NBA": "DEN",
         "DETROIT_PISTONS_NBA": "DET", "GOLDEN_STATE_WARRIORS_NBA": "GSW",
         "HOUSTON_ROCKETS_NBA": "HOU", "INDIANA_PACERS_NBA": "IND",
-        "LOS_ANGELES_CLIPPERS_NBA": "LAC", "LOS_ANGELES_LAKERS_NBA": "LAL",
+        "LOS_ANGELES_CLIPPERS_NBA": "LAC", "LA_CLIPPERS_NBA": "LAC", "LOS_ANGELES_LAKERS_NBA": "LAL",
         "MEMPHIS_GRIZZLIES_NBA": "MEM", "MIAMI_HEAT_NBA": "MIA",
         "MILWAUKEE_BUCKS_NBA": "MIL", "MINNESOTA_TIMBERWOLVES_NBA": "MIN",
         "NEW_ORLEANS_PELICANS_NBA": "NOP", "NEW_YORK_KNICKS_NBA": "NYK",
@@ -269,7 +269,7 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
         "DALLAS_MAVERICKS": "DAL", "DENVER_NUGGETS": "DEN",
         "DETROIT_PISTONS": "DET", "GOLDEN_STATE_WARRIORS": "GSW",
         "HOUSTON_ROCKETS": "HOU", "INDIANA_PACERS": "IND",
-        "LOS_ANGELES_CLIPPERS": "LAC", "LOS_ANGELES_LAKERS": "LAL",
+        "LOS_ANGELES_CLIPPERS": "LAC", "LA_CLIPPERS": "LAC", "LOS_ANGELES_LAKERS": "LAL",
         "MEMPHIS_GRIZZLIES": "MEM", "MIAMI_HEAT": "MIA",
         "MILWAUKEE_BUCKS": "MIL", "MINNESOTA_TIMBERWOLVES": "MIN",
         "NEW_ORLEANS_PELICANS": "NOP", "NEW_YORK_KNICKS": "NYK",
@@ -413,7 +413,11 @@ async def get_odds_map():
             away_tri = get_tricode_from_sgo_team_id(away_team_id)
 
             if not home_tri or not away_tri:
-                logger.warning(f"Unrecognized SGO team IDs: home={home_team_id!r}, away={away_team_id!r} — skipping")
+                logger.warning(
+                    f"Skipping SGO event {game.get('eventID', '?')} — "
+                    f"home_team_id={home_team_id!r}, away_team_id={away_team_id!r}, "
+                    f"teams_raw={teams!r}"
+                )
                 continue
 
             matchup_key = f"{away_tri}@{home_tri}"
@@ -440,14 +444,27 @@ async def get_odds_map():
             # fall back to bookOdds if unavailable.
             away_fair_ml = _to_num(odds.get("points-away-game-ml-away", {}).get("fairOdds"))
             home_fair_ml = _to_num(odds.get("points-home-game-ml-home", {}).get("fairOdds"))
+
+            # Preserve non-null spread/O-U from persisted when the fresh API has null.
+            # Lines are often unavailable early in the day or temporarily off-board,
+            # and we don't want to wipe out yesterday's data in those cases.
+            persisted = odds_map.get((game_date.isoformat(), matchup_key), {})
+            eff_away_spread      = away_spread      if away_spread      is not None else persisted.get("awaySpread")
+            eff_home_spread      = home_spread      if home_spread      is not None else persisted.get("homeSpread")
+            eff_away_spread_odds = away_spread_odds if away_spread_odds is not None else persisted.get("awaySpreadOdds")
+            eff_home_spread_odds = home_spread_odds if home_spread_odds is not None else persisted.get("homeSpreadOdds")
+            eff_over_under       = over_under       if over_under       is not None else persisted.get("overUnder")
+            eff_over_odds        = over_odds        if over_odds        is not None else persisted.get("overOdds")
+            eff_under_odds       = under_odds       if under_odds       is not None else persisted.get("underOdds")
+
             away_prob, home_prob = calculate_win_probability_from_odds(
-                away_fair_ml or away_ml, home_fair_ml or home_ml, away_spread, home_spread
+                away_fair_ml or away_ml, home_fair_ml or home_ml, eff_away_spread, eff_home_spread
             )
 
             odds_data = {
-                "awaySpread": away_spread, "homeSpread": home_spread,
-                "awaySpreadOdds": away_spread_odds, "homeSpreadOdds": home_spread_odds,
-                "overUnder": over_under, "overOdds": over_odds, "underOdds": under_odds,
+                "awaySpread": eff_away_spread, "homeSpread": eff_home_spread,
+                "awaySpreadOdds": eff_away_spread_odds, "homeSpreadOdds": eff_home_spread_odds,
+                "overUnder": eff_over_under, "overOdds": eff_over_odds, "underOdds": eff_under_odds,
                 "awayMoneyline": away_ml, "homeMoneyline": home_ml,
                 "awayWinProbability": away_prob, "homeWinProbability": home_prob,
             }
@@ -494,6 +511,7 @@ async def cron_fetch_odds():
     """Endpoint for GitHub Actions to trigger daily odds fetch."""
     try:
         odds, fresh_count = await get_odds_map()
+        set_cache("odds", odds)  # Bust the 30-min cache so the next /games request sees updated data
         return {
             "success": True,
             "fresh_from_api": fresh_count,
