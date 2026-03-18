@@ -305,7 +305,8 @@ def load_persisted_odds(game_date: date = None) -> dict:
         dates_to_query = [game_date]
     else:
         today_et = datetime.now(ET).date()
-        dates_to_query = [today_et, today_et + timedelta(days=1)]
+        # Include yesterday so post-midnight cache fills still find last night's final games
+        dates_to_query = [today_et - timedelta(days=1), today_et, today_et + timedelta(days=1)]
 
     odds_map = {}
     for d in dates_to_query:
