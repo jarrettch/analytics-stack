@@ -599,9 +599,6 @@ async def get_todays_games():
         logger.info(f"Processing {len(games)} games (standings: {len(standings_map)}, advanced: {len(advanced_stats_map)}, odds: {len(odds_map)})")
 
         arena_map = get_arena_map()
-        # Persisted odds are the closing lines — use these for live/final games
-        # so CLV calculations aren't contaminated by live line movement.
-        persisted_odds_map = load_persisted_odds()
 
         refined_games = []
         for g in games:
@@ -610,14 +607,9 @@ async def get_todays_games():
             away_team_id = str(g['awayTeam']['teamId'])
             home_team_id = str(g['homeTeam']['teamId'])
 
-            # Match odds by tricode (The Odds API uses team names -> tricodes)
             matchup_key = f"{away_tri}@{home_tri}"
             game_status = g.get('gameStatus', 1)
-            # For live/final games use persisted (closing) odds; for scheduled use merged map
-            if game_status >= 2:
-                odds = persisted_odds_map.get(matchup_key, odds_map.get(matchup_key, {}))
-            else:
-                odds = odds_map.get(matchup_key, {})
+            odds = odds_map.get(matchup_key, {})
 
             # Format spread line with team abbreviation
             away_spread = odds.get("awaySpread")
