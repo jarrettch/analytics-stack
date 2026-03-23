@@ -820,16 +820,18 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
 
       {/* Score Section - Dynamic based on game status */}
       <div className="px-3 py-2">
-        {matchup.sport === "nba" && (matchup as NBAMatchupData).gameStatus >= 2 ? (
+        {(matchup.sport === "nba" || matchup.sport === "mlb") && (matchup as NBAMatchupData | MLBMatchupData).gameStatus >= 2 ? (
           // Live or Final game - show actual score
           <>
             <div className="mb-1 flex items-center justify-between">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                {(matchup as NBAMatchupData).gameStatus === 3 ? "Final" : "Live"}
+                {(matchup as NBAMatchupData | MLBMatchupData).gameStatus === 3 ? "Final" : "Live"}
               </span>
-              {(matchup as NBAMatchupData).gameStatus === 2 && (
+              {(matchup as NBAMatchupData | MLBMatchupData).gameStatus === 2 && (
                 <span className="font-mono text-[10px] text-primary animate-pulse">
-                  Q{(matchup as NBAMatchupData).period} {parseGameClock((matchup as NBAMatchupData).gameClock)}
+                  {matchup.sport === "nba"
+                    ? `Q${(matchup as NBAMatchupData).period} ${parseGameClock((matchup as NBAMatchupData).gameClock)}`
+                    : matchup.status}
                 </span>
               )}
             </div>
@@ -839,9 +841,9 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
                   {away.abbreviation}
                 </span>
                 <span
-                  className={`font-mono text-2xl font-bold tabular-nums ${(away as NBATeamData).score > (home as NBATeamData).score ? "text-emerald-400" : "text-foreground"}`}
+                  className={`font-mono text-2xl font-bold tabular-nums ${(away as NBATeamData | MLBTeamData).score > (home as NBATeamData | MLBTeamData).score ? "text-emerald-400" : "text-foreground"}`}
                 >
-                  {(away as NBATeamData).score}
+                  {(away as NBATeamData | MLBTeamData).score}
                 </span>
               </div>
               <span className="px-3 font-mono text-xs text-muted-foreground">
@@ -852,9 +854,9 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
                   {home.abbreviation}
                 </span>
                 <span
-                  className={`font-mono text-2xl font-bold tabular-nums ${(home as NBATeamData).score > (away as NBATeamData).score ? "text-emerald-400" : "text-foreground"}`}
+                  className={`font-mono text-2xl font-bold tabular-nums ${(home as NBATeamData | MLBTeamData).score > (away as NBATeamData | MLBTeamData).score ? "text-emerald-400" : "text-foreground"}`}
                 >
-                  {(home as NBATeamData).score}
+                  {(home as NBATeamData | MLBTeamData).score}
                 </span>
               </div>
             </div>

@@ -33,6 +33,7 @@ export interface NFLTeamData extends BaseTeamData {
 
 // MLB-specific team data
 export interface MLBTeamData extends BaseTeamData {
+  score: number        // Live/final score
   runsScored: number
   runsAllowed: number
   era: number
@@ -92,9 +93,17 @@ export interface NFLMatchupData extends BaseMatchupData {
 
 export interface MLBMatchupData extends BaseMatchupData {
   sport: "mlb"
+  gameNumber?: number
+  gameStatus: number           // 1=scheduled, 2=live, 3=final
+  pregameSpread?: number | null
+  spreadOddsHome?: number | null
+  spreadOddsAway?: number | null
+  overOdds?: number | null
+  underOdds?: number | null
+  homeMoneyline?: number | null
+  awayMoneyline?: number | null
   away: MLBTeamData
   home: MLBTeamData
-  gameNumber?: number
 }
 
 export interface NHLMatchupData extends BaseMatchupData {

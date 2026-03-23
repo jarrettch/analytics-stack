@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { SportsDashboard, type Sport, type MatchupData, SPORT_LABELS, SPORT_MODELS } from "@repo/ui";
 import { Activity } from "lucide-react";
 
-const SPORTS: Sport[] = ["nba", "nfl", "mlb", "nhl"];
+const SPORTS: Sport[] = ["nba", "mlb"];
 
 export default function Home() {
   const [activeSport, setActiveSport] = useState<Sport>("nba");
@@ -19,12 +19,12 @@ export default function Home() {
 
   useEffect(() => {
     const fetchData = async (isInitial = false) => {
-      // For now, only NBA has an API endpoint
-      if (activeSport === "nba") {
+      if (activeSport === "nba" || activeSport === "mlb") {
         if (isInitial) setLoading(true);
 
+        const endpoint = activeSport === "nba" ? "nba/today" : "mlb/today";
         try {
-          const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/nba/today`);
+          const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/${endpoint}`);
           const data = await res.json();
 
           // Only update if data actually changed (prevents unnecessary re-renders)
@@ -38,11 +38,11 @@ export default function Home() {
 
           setLoading(false);
         } catch (err) {
-          console.error("Failed to fetch NBA data:", err);
+          console.error(`Failed to fetch ${activeSport.toUpperCase()} data:`, err);
           setLoading(false);
         }
       } else {
-        // Other sports coming soon
+        // NFL/NHL coming soon
         setMatchups([]);
         setLoading(false);
       }
@@ -51,7 +51,7 @@ export default function Home() {
     // Initial fetch
     fetchData(true);
 
-    // Set up polling for live games
+    // Set up polling for live games (NBA only — MLB updates slowly)
     let pollInterval: NodeJS.Timeout | null = null;
 
     if (activeSport === "nba") {
@@ -132,7 +132,7 @@ export default function Home() {
             ) : (
               <div className="flex flex-col items-center justify-center py-20 font-mono text-xs text-muted-foreground">
                 <span className="uppercase">No {SPORT_LABELS[activeSport]} games scheduled today</span>
-                {activeSport !== "nba" && (
+                {activeSport !== "nba" && activeSport !== "mlb" && (
                   <span className="mt-2 text-[10px] text-muted-foreground/60">
                     ({SPORT_LABELS[activeSport]} data coming soon)
                   </span>

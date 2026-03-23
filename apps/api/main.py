@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import ev, dodgers, nba
+from routers import ev, dodgers, nba, mlb
 
 app = FastAPI(title="Analytics Stack API")
 
@@ -20,6 +20,7 @@ app.add_middleware(
 app.include_router(ev.router)
 app.include_router(dodgers.router)
 app.include_router(nba.router)
+app.include_router(mlb.router)
 
 @app.get("/health")
 def health_check():
