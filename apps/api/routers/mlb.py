@@ -209,22 +209,38 @@ async def get_schedule(date_str: str) -> list:
                 if game.get("gameType") not in ("S", "R"):
                     continue
 
-                abstract_state = game.get("status", {}).get("abstractGameState", "Preview")
+                status_obj     = game.get("status", {})
+                abstract_state = status_obj.get("abstractGameState", "Preview")
+                detailed_state = status_obj.get("detailedState", "")
                 STATUS_MAP = {"Preview": 1, "Live": 2, "Final": 3}
                 game_status = STATUS_MAP.get(abstract_state, 1)
 
                 starts_at = game.get("gameDate", "")
                 official_date = game.get("officialDate", date_str)
 
-                if game_status == 1:
+                if "Postponed" in detailed_state:
+                    status_text = "PPD"
+                    game_status = 1
+                elif "Suspended" in detailed_state:
+                    status_text = "Suspended"
+                    game_status = 1
+                elif "Delayed" in detailed_state:
+                    status_text = f"Delayed ({_format_et_time(starts_at)})"
+                elif game_status == 1:
                     status_text = _format_et_time(starts_at)
                 elif game_status == 2:
-                    status_text = "Live"
+                    linescore  = game.get("linescore", {})
+                    inning     = linescore.get("currentInning", 0)
+                    half       = linescore.get("inningHalf", "")
+                    status_text = f"{'T' if half == 'Top' else 'B'}{inning}" if inning else "Live"
                 else:
-                    linescore = game.get("linescore", {})
-                    current = linescore.get("currentInning", 0)
-                    scheduled = linescore.get("scheduledInnings", 9)
+                    linescore  = game.get("linescore", {})
+                    current    = linescore.get("currentInning", 0)
+                    scheduled  = linescore.get("scheduledInnings", 9)
                     status_text = f"F/{current}" if current > scheduled else "Final"
+
+                if abstract_state not in ("Preview", "Live", "Final"):
+                    logger.warning(f"Unrecognized MLB game state: abstractGameState={abstract_state!r} detailedState={detailed_state!r} gamePk={game.get('gamePk')}")
 
                 home_team = game["teams"]["home"]
                 away_team = game["teams"]["away"]
