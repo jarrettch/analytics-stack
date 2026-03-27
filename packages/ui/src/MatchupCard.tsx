@@ -828,7 +828,7 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
                 {(matchup as NBAMatchupData | MLBMatchupData).gameStatus === 3 ? "Final" : "Live"}
               </span>
               {(matchup as NBAMatchupData | MLBMatchupData).gameStatus === 2 && (
-                <span className="font-mono text-[10px] text-primary animate-pulse">
+                <span className="font-mono text-[10px] text-emerald-400 animate-pulse rounded-sm bg-emerald-500/10 px-0.5 py-0.5 [filter:drop-shadow(0_0_6px_#34d399)]">
                   {matchup.sport === "nba"
                     ? `Q${(matchup as NBAMatchupData).period} ${parseGameClock((matchup as NBAMatchupData).gameClock)}`
                     : matchup.status}

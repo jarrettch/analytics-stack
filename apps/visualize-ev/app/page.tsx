@@ -79,7 +79,7 @@ export default function Home() {
               Sports Analytics Terminal
             </h1>
             {hasLiveGames && (
-              <span className="font-mono text-[10px] uppercase tracking-widest text-primary animate-pulse">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-emerald-400 animate-pulse rounded-sm bg-emerald-500/10 px-0.5 py-0.5 [filter:drop-shadow(0_0_6px_#34d399)]">
                 Live
               </span>
             )}
