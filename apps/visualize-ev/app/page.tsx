@@ -66,6 +66,7 @@ export default function Home() {
   }, [activeSport]);
 
   const gameCount = matchups.length;
+  const hasLiveGames = matchups.some(m => 'gameStatus' in m && (m as any).gameStatus === 2);
 
   return (
     <main className="min-h-screen bg-background px-4 py-6">
@@ -77,9 +78,11 @@ export default function Home() {
             <h1 className="font-sans text-lg font-bold text-foreground">
               Sports Analytics Terminal
             </h1>
-            <span className="font-mono text-[10px] uppercase tracking-widest text-primary animate-pulse">
-              Live
-            </span>
+            {hasLiveGames && (
+              <span className="font-mono text-[10px] uppercase tracking-widest text-primary animate-pulse">
+                Live
+              </span>
+            )}
           </div>
           <span className="font-mono text-[11px] text-muted-foreground">
             {now?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()} &mdash; MULTI-SPORT
