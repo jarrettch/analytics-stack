@@ -784,7 +784,7 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
       <div className="px-3 py-2">
         <div className="mb-1 flex items-center justify-between">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Win Probability
+            Pregame Win Probability
           </span>
           <TrendingUp className="size-3 text-muted-foreground" />
         </div>
