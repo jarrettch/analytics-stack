@@ -937,18 +937,27 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
       {/* Footer: line + O/U */}
       <div className="flex items-center justify-between border-t border-border bg-secondary px-3 py-1.5">
         <div className="flex items-center gap-3">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Spread
-          </span>
-          <span className="font-mono text-xs font-semibold tabular-nums text-foreground flex items-center gap-1">
-            {matchup.spreadLine}
-            {matchup.spreadResult === true && (
-              <Check className="size-3 text-emerald-400" />
-            )}
-            {matchup.spreadResult === false && (
-              <X className="size-3 text-red-400" />
-            )}
-          </span>
+          {matchup.sport === "mlb" ? (
+            <>
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">ML</span>
+              <span className="font-mono text-xs font-semibold tabular-nums text-foreground">
+                {(() => {
+                  const m = matchup as MLBMatchupData
+                  const fmt = (v: number | null | undefined) => v != null ? (v > 0 ? `+${v}` : `${v}`) : "N/A"
+                  return `${away.abbreviation} ${fmt(m.awayMoneyline)} // ${home.abbreviation} ${fmt(m.homeMoneyline)}`
+                })()}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Spread</span>
+              <span className="font-mono text-xs font-semibold tabular-nums text-foreground flex items-center gap-1">
+                {matchup.spreadLine}
+                {matchup.spreadResult === true && <Check className="size-3 text-emerald-400" />}
+                {matchup.spreadResult === false && <X className="size-3 text-red-400" />}
+              </span>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
