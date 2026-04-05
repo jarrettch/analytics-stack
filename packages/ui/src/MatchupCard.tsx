@@ -17,7 +17,9 @@ import {
 import {
   getHistory,
   hydrateWinProbHistory,
+  hydrateMLBWinProbHistory,
   recordSnapshot,
+  recordMLBSnapshot,
   calcCLV,
   type WinProbSnapshot,
   type BetSide,
@@ -411,23 +413,34 @@ function snapshotElapsed(period: number, timeRemaining: number): number {
   return 2880 + (period - 4) * 300 - timeRemaining
 }
 
-function WinProbSparkline({ snapshots }: { snapshots: WinProbSnapshot[] }) {
+function WinProbSparkline({ snapshots, sport = "nba" }: { snapshots: WinProbSnapshot[], sport?: string }) {
   if (snapshots.length < 2) return null
 
   const W = 300
   const H = 40
   const clamp = (v: number) => Math.min(0.98, Math.max(0.02, v))
 
-  const maxPeriod = snapshots.reduce((m, s) => Math.max(m, s.period), 4)
-  const totalSeconds = maxPeriod <= 4 ? 2880 : 2880 + (maxPeriod - 4) * 300
-
-  const points = snapshots
-    .map((s) => {
-      const x = (snapshotElapsed(s.period, s.timeRemaining) / totalSeconds) * W
-      const y = (1 - clamp(s.winProb)) * H
-      return `${x.toFixed(1)},${y.toFixed(1)}`
-    })
-    .join(" ")
+  let points: string
+  if (sport === "mlb") {
+    const maxAtBat = Math.max(...snapshots.map((s) => s.timeRemaining), 1)
+    points = snapshots
+      .map((s) => {
+        const x = (s.timeRemaining / maxAtBat) * W
+        const y = (1 - clamp(s.winProb)) * H
+        return `${x.toFixed(1)},${y.toFixed(1)}`
+      })
+      .join(" ")
+  } else {
+    const maxPeriod = snapshots.reduce((m, s) => Math.max(m, s.period), 4)
+    const totalSeconds = maxPeriod <= 4 ? 2880 : 2880 + (maxPeriod - 4) * 300
+    points = snapshots
+      .map((s) => {
+        const x = (snapshotElapsed(s.period, s.timeRemaining) / totalSeconds) * W
+        const y = (1 - clamp(s.winProb)) * H
+        return `${x.toFixed(1)},${y.toFixed(1)}`
+      })
+      .join(" ")
+  }
 
   return (
     <svg
@@ -529,6 +542,75 @@ function LiveWinProbSection({ matchup }: { matchup: NBAMatchupData }) {
       <WinProbSparkline snapshots={chartData} />
       <p className="mt-1 font-mono text-[9px] text-muted-foreground/50">
         Heuristic based on score, time, and spread — not a live market feed
+      </p>
+    </div>
+  )
+}
+
+// ─── Live MLB Win Prob Section ────────────────────────────────────────────────
+
+function LiveMLBWinProbSection({ matchup }: { matchup: MLBMatchupData }) {
+  const [chartData, setChartData] = useState<WinProbSnapshot[]>([])
+  const hydratedRef = useRef(false)
+
+  useEffect(() => {
+    if (hydratedRef.current) return
+    hydratedRef.current = true
+    hydrateMLBWinProbHistory(matchup.gameId).then((history) => {
+      setChartData([...history])
+    })
+  }, [matchup.gameId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const winProb = matchup.home.liveWinProbability ?? matchup.home.winProbability
+    const scoreDiff = matchup.home.score - matchup.away.score
+    recordMLBSnapshot(matchup.gameId, winProb, scoreDiff, matchup.currentInning)
+    setChartData([...getHistory(String(matchup.gameId))])
+  }, [matchup.home.score, matchup.away.score, matchup.home.liveWinProbability, matchup.currentInning]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const current = chartData[chartData.length - 1]
+  if (!current) {
+    return (
+      <div className="px-3 py-4 flex justify-center">
+        <span className="font-mono text-[10px] text-muted-foreground animate-pulse">Loading timeline...</span>
+      </div>
+    )
+  }
+
+  const isFinal = matchup.gameStatus === 3
+  const liveProb = matchup.home.liveWinProbability ?? current.winProb
+  const homeProb = isFinal
+    ? (matchup.home.score > matchup.away.score ? 1 : matchup.home.score < matchup.away.score ? 0 : 0.5)
+    : Math.min(0.98, Math.max(0.02, liveProb))
+  const awayProb = 1 - homeProb
+
+  return (
+    <div className="px-3 py-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          {isFinal ? "Win Prob" : "Live Win Prob"}
+        </span>
+        <span className="font-mono text-[10px] text-muted-foreground">MLB API</span>
+      </div>
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="w-12 text-right font-mono text-xs font-semibold tabular-nums text-emerald-400">
+          {(awayProb * 100).toFixed(1)}%
+        </span>
+        <div className="flex h-2.5 flex-1 overflow-hidden rounded-sm">
+          <div className="bg-emerald-500 transition-all" style={{ width: `${awayProb * 100}%` }} />
+          <div className="bg-red-500/80 transition-all" style={{ width: `${homeProb * 100}%` }} />
+        </div>
+        <span className="w-12 font-mono text-xs font-semibold tabular-nums text-red-400">
+          {(homeProb * 100).toFixed(1)}%
+        </span>
+      </div>
+      <div className="mb-2 flex justify-between">
+        <span className="font-mono text-[10px] text-muted-foreground">{matchup.away.abbreviation}</span>
+        <span className="font-mono text-[10px] text-muted-foreground">{matchup.home.abbreviation}</span>
+      </div>
+      <WinProbSparkline snapshots={chartData} sport="mlb" />
+      <p className="mt-1 font-mono text-[9px] text-muted-foreground/50">
+        Live win probability via MLB Stats API
       </p>
     </div>
   )
@@ -719,6 +801,7 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
   const awayProbPct = (away.winProbability ?? 0.5) * 100
   const homeProbPct = (home.winProbability ?? 0.5) * 100
   const isLiveNBA = matchup.sport === "nba" && (matchup as NBAMatchupData).gameStatus >= 2
+  const isLiveMLB = matchup.sport === "mlb" && (matchup as MLBMatchupData).gameStatus >= 2
 
   return (
     <div className="w-full max-w-md overflow-hidden rounded-md border border-border bg-card">
@@ -900,10 +983,18 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
 
       <Separator className="bg-border" />
 
-      {/* Live win prob (only for live/final NBA games) */}
+      {/* Live win prob — NBA (heuristic) */}
       {isLiveNBA && (
         <>
           <LiveWinProbSection matchup={matchup as NBAMatchupData} />
+          <Separator className="bg-border" />
+        </>
+      )}
+
+      {/* Live win prob — MLB (API-sourced) */}
+      {isLiveMLB && (
+        <>
+          <LiveMLBWinProbSection matchup={matchup as MLBMatchupData} />
           <Separator className="bg-border" />
         </>
       )}

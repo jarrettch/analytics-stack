@@ -154,6 +154,81 @@ export function getHistory(gameId: string): WinProbSnapshot[] {
   return winProbHistory.get(gameId) ?? []
 }
 
+// ─── MLB Win Probability (API-sourced) ───────────────────────────────────────
+
+interface MLBWinProbPlay {
+  atBatIndex: number
+  homeTeamWinProbability: number  // 0–100
+  awayTeamWinProbability: number
+  homeScore: number
+  awayScore: number
+  about?: { inning: number; halfInning: "top" | "bottom" }
+}
+
+
+/**
+ * Fetches full play-by-play win probability history from the MLB Stats API.
+ * Call once on mount for live games — seeds the sparkline from the current point in the game.
+ */
+export async function hydrateMLBWinProbHistory(
+  gamePk: string | number,
+): Promise<WinProbSnapshot[]> {
+  const key = String(gamePk)
+
+  // If we already have history (from a previous mount), return it instead of re-fetching
+  const existing = winProbHistory.get(key)
+  if (existing && existing.length > 0) return existing
+
+  try {
+    const res = await fetch(`/api/mlb-stats/game/${gamePk}/winProbability`)
+    if (!res.ok) return []
+    const plays: MLBWinProbPlay[] = await res.json()
+    if (!plays.length) return []
+
+    const history: WinProbSnapshot[] = plays.map((play) => ({
+      timestamp: Date.now(),
+      winProb: play.homeTeamWinProbability / 100,
+      scoreDiff: play.homeScore - play.awayScore,
+      timeRemaining: play.atBatIndex,  // used as x-axis unit for MLB sparkline
+      period: play.about?.inning ?? 0,
+    }))
+
+    winProbHistory.set(key, history)
+    return history
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Appends a snapshot from the latest contextMetrics poll.
+ * timeRemaining continues from where atBatIndex left off, keyed per gamePk.
+ */
+export function recordMLBSnapshot(
+  gamePk: string | number,
+  winProb: number,
+  scoreDiff: number,
+  inning: number,
+): void {
+  const key = String(gamePk)
+  if (!winProbHistory.has(key)) winProbHistory.set(key, [])
+  const history = winProbHistory.get(key)!
+  const last = history[history.length - 1]
+
+  if (last && Math.abs(last.winProb - winProb) < 0.001 && last.scoreDiff === scoreDiff) return
+
+  // Continue x-axis from where hydration left off
+  const nextIndex = last ? last.timeRemaining + 1 : 0
+
+  history.push({
+    timestamp: Date.now(),
+    winProb,
+    scoreDiff,
+    timeRemaining: nextIndex,
+    period: inning,
+  })
+}
+
 // ─── CLV / ML Edge Calculator ─────────────────────────────────────────────────
 
 /**

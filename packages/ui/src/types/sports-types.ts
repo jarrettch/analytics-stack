@@ -41,6 +41,7 @@ export interface MLBTeamData extends BaseTeamData {
   ops: number
   probablePitcher?: string
   pitcherRecord?: string
+  liveWinProbability?: number  // from contextMetrics, only set for gameStatus === 2
 }
 
 // NHL-specific team data
@@ -95,6 +96,7 @@ export interface MLBMatchupData extends BaseMatchupData {
   sport: "mlb"
   gameNumber?: number
   gameStatus: number           // 1=scheduled, 2=live, 3=final
+  currentInning: number        // 0 when not started
   pregameSpread?: number | null
   spreadOddsHome?: number | null
   spreadOddsAway?: number | null

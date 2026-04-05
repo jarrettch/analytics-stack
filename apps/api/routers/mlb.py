@@ -52,6 +52,25 @@ def get_cached_data(cache_key: str):
     return caches[cache_key]["data"]
 
 # MLB Stats API team ID → tricode
+def _implied_prob(odds: float) -> float:
+    return -odds / (-odds + 100) if odds < 0 else 100 / (odds + 100)
+
+def _de_vig_ml(home_ml: float, away_ml: float):
+    raw = _implied_prob(home_ml) + _implied_prob(away_ml)
+    return _implied_prob(home_ml) / raw, _implied_prob(away_ml) / raw
+
+async def get_context_metrics(client: httpx.AsyncClient, game_pk: int):
+    try:
+        resp = await client.get(
+            f"https://statsapi.mlb.com/api/v1/game/{game_pk}/contextMetrics",
+            timeout=5.0,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
 MLB_TEAM_ID_TO_TRI = {
     108: "LAA", 109: "AZ",  110: "BAL", 111: "BOS", 112: "CHC",
     113: "CIN", 114: "CLE", 115: "COL", 116: "DET", 117: "HOU",
@@ -233,11 +252,16 @@ async def get_schedule(date_str: str) -> list:
                     inning     = linescore.get("currentInning", 0)
                     half       = linescore.get("inningHalf", "")
                     status_text = f"{'T' if half == 'Top' else 'B'}{inning}" if inning else "Live"
+                    current_inning = inning
                 else:
                     linescore  = game.get("linescore", {})
                     current    = linescore.get("currentInning", 0)
                     scheduled  = linescore.get("scheduledInnings", 9)
                     status_text = f"F/{current}" if current > scheduled else "Final"
+                    current_inning = current
+
+                if game_status == 1:
+                    current_inning = 0
 
                 if abstract_state not in ("Preview", "Live", "Final"):
                     logger.warning(f"Unrecognized MLB game state: abstractGameState={abstract_state!r} detailedState={detailed_state!r} gamePk={game.get('gamePk')}")
@@ -264,9 +288,10 @@ async def get_schedule(date_str: str) -> list:
                     "venue": game.get("venue", {}).get("name", ""),
                     "isDoubleHeader": double_header == "Y",
                     "gameNumber": game_number if double_header == "Y" else None,
-                    # Scores for final games
+                    # Scores for live/final games
                     "homeScore": home_team.get("score"),
                     "awayScore": away_team.get("score"),
+                    "currentInning": current_inning,
                 })
 
         logger.info(f"MLB schedule: {len(games)} ST games on {date_str}")
@@ -559,6 +584,19 @@ async def get_todays_games():
 
         logger.info(f"MLB: {len(schedule)} games, {len(standings)} standings, {len(stats)} stats, {len(odds_map)} odds")
 
+        # Fetch contextMetrics for live games (win probability)
+        live_pks = [g["gamePk"] for g in schedule if g.get("gameStatus") == 2]
+        context_metrics_map: dict[int, dict] = {}
+        if live_pks:
+            async with httpx.AsyncClient() as client:
+                cm_results = await asyncio.gather(
+                    *[get_context_metrics(client, pk) for pk in live_pks],
+                    return_exceptions=True,
+                )
+            for pk, result in zip(live_pks, cm_results):
+                if isinstance(result, dict):
+                    context_metrics_map[pk] = result
+
         refined_games = []
         for g in schedule:
             away_tri      = g["awayAbbr"]
@@ -643,8 +681,25 @@ async def get_todays_games():
                 proj_away = round(naive_away)
                 proj_home = round(naive_home)
 
-            away_prob = odds.get("awayWinProbability", 0.5)
-            home_prob = odds.get("homeWinProbability", 0.5)
+            game_pk = g["gamePk"]
+            home_ml = odds.get("homeMoneyline")
+            away_ml = odds.get("awayMoneyline")
+            if home_ml and away_ml:
+                home_prob, away_prob = _de_vig_ml(home_ml, away_ml)
+            else:
+                home_prob = away_prob = 0.5
+
+            live_home_prob = None
+            live_away_prob = None
+            if game_status == 2 and game_pk in context_metrics_map:
+                cm = context_metrics_map[game_pk]
+                raw_home = cm.get("homeWinProbability")
+                raw_away = cm.get("awayWinProbability")
+                if raw_home is not None and raw_away is not None:
+                    live_home_prob = raw_home / 100
+                    live_away_prob = raw_away / 100
+                elif home_ml and away_ml:
+                    live_home_prob, live_away_prob = _de_vig_ml(home_ml, away_ml)
 
             game_number = g.get("gameNumber")
 
@@ -652,6 +707,7 @@ async def get_todays_games():
                 "sport": "mlb",
                 "gameId": g["gamePk"],
                 "gameStatus": game_status,
+                "currentInning": g.get("currentInning", 0),
                 "status": g["statusText"],
                 "date": official_date,
                 "time": g["localTimeHHMM"],
@@ -683,6 +739,7 @@ async def get_todays_games():
                     "streak": away_std.get("streak", "N/A"),
                     "predictedScore": proj_away,
                     "winProbability": away_prob,
+                    "liveWinProbability": live_away_prob,
                     "runsScored": away_rs,
                     "runsAllowed": away_ra,
                     "era": away_stat.get("era", 4.50),
@@ -703,6 +760,7 @@ async def get_todays_games():
                     "streak": home_std.get("streak", "N/A"),
                     "predictedScore": proj_home,
                     "winProbability": home_prob,
+                    "liveWinProbability": live_home_prob,
                     "runsScored": home_rs,
                     "runsAllowed": home_ra,
                     "era": home_stat.get("era", 4.50),
@@ -713,7 +771,8 @@ async def get_todays_games():
                 },
             })
 
-        set_cache("mlb_assembled", refined_games)
+        assembled_ttl = CACHE_TTL_LIVE if live_pks else CACHE_TTL_DEFAULT
+        set_cache("mlb_assembled", refined_games, ttl=assembled_ttl)
         logger.info(f"MLB response assembled: {len(refined_games)} games")
         return refined_games
 

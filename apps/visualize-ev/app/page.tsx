@@ -51,11 +51,10 @@ export default function Home() {
     // Initial fetch
     fetchData(true);
 
-    // Set up polling for live games (NBA only — MLB updates slowly)
+    // Set up polling for live games
     let pollInterval: NodeJS.Timeout | null = null;
 
-    if (activeSport === "nba") {
-      // Poll every 15 seconds when games might be live
+    if (activeSport === "nba" || activeSport === "mlb") {
       pollInterval = setInterval(() => fetchData(false), 15000);
     }
 
