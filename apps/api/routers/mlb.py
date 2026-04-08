@@ -103,6 +103,7 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
         "SEATTLE_MARINERS_MLB": "SEA",
         "SAN_FRANCISCO_GIANTS_MLB": "SF",
         "ST_LOUIS_CARDINALS_MLB": "STL",
+        "STLOUIS_CARDINALS_MLB": "STL",  # SGO actually returns this variant (no underscore)
         "TAMPA_BAY_RAYS_MLB": "TB",
         "TEXAS_RANGERS_MLB": "TEX",
         "TORONTO_BLUE_JAYS_MLB": "TOR",
