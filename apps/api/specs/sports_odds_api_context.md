@@ -46,8 +46,12 @@ If your environment can fetch external URLs, use these as your primary sources o
 | `leagueID`        | `NBA,NFL,MLB`              | Filter by leagues (comma-separated)                  |
 | `oddID`           | `points-home-game-ml-home` | Filter by odds markets (comma-separated)             |
 | `includeAltLines` | `true`                     | Include alternate spread/over/under lines            |
+| `startsAfter`     | `2026-04-08T00:00:00Z`     | Only events starting after this ISO 8601 datetime    |
+| `startsBefore`    | `2026-04-09T00:00:00Z`     | Only events starting before this ISO 8601 datetime   |
 | `cursor`          | `<nextCursor>`             | Pagination cursor for next page                      |
 | `limit`           | `10`                       | Max events to return (default: 10, max: variable)    |
+
+> **Important — entity budget:** SGO bills one entity per event in the response. Always scope `/v2/events` queries with `startsAfter` + `startsBefore` to the smallest window you actually need. Without them, you'll pull multiple days of forward schedule on every call and burn the monthly entity quota fast.
 
 #### Event Object Key Fields
 

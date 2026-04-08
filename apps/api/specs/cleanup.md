@@ -26,6 +26,35 @@ _Created: 2026-04-02_
 - [ ] **6. New `httpx.AsyncClient` per request**
   Both routers create a new `AsyncClient` per call. Use a module-level client or reuse within a request cycle to reduce connection overhead.
 
+## Users / Auth / Bet Tracking (next major unlock)
+
+This is the unlock that turns visualize-ev from a one-shot tool into something users come back to. Treat the whole block as one unit — shipping just auth (with no bet log) adds maintenance burden with zero user value.
+
+- [ ] **Decide: shared vs separate Supabase project for visualize-ev and IDMR**
+  Leaning separate. Different audiences (bettors vs Bible study), independent quotas/billing, can kill or sell either independently. Shared "save setup work" gain is small and one-time. Confirm before standing anything up.
+
+- [ ] **Scope `profiles` table (minimal first)**
+  Start with `id` (FK to `auth.users`), `email`, `display_name`, `created_at`. Add `odds_format_preference`, `favorite_teams`, `default_unit_size`, etc. only when a feature actually needs them. Don't speculatively design columns.
+
+- [ ] **Scope bet tracking tables (this is where the design time goes)**
+  Rough shape to flesh out:
+  - `bets`: id, user_id, sport, event_id, market, selection, odds_at_placement, stake, placed_at, status (pending/won/lost/push/void), settled_at, payout
+  - `bet_legs` (for parlays): bet_id, leg_index, selection, odds, result
+  - Capture **CLV at time of bet**: snapshot the closing line so historical CLV is queryable without re-fetching
+  - Decide: manual entry only at first, or attempt auto-import from screenshots/CSV later?
+
+- [ ] **RLS policies on all user-owned tables**
+  Every new table in `public` needs `enable row level security` + a policy restricting to `auth.uid() = user_id`. Same gotcha as item #1 — Supabase defaults to wide open.
+
+- [ ] **Auth provider decision**
+  Magic link is lowest friction. Google OAuth is the obvious second. Skip password auth unless there's a reason.
+
+- [ ] **Anonymous-user behavior for existing tools**
+  Decide before building auth: does the CLV calculator still work logged-out? (It should.) Are any existing tools gated? Lock this in now so you're not retrofitting later.
+
+- [ ] **Bet history view (must ship with auth, not after)**
+  Minimum: list of bets with filters (sport, status, date range), running P&L, CLV summary. This is the "why come back" surface — auth without it is plumbing.
+
 ## Frontend
 
 - [x] **7. MLB sparkline x-axis granularity**

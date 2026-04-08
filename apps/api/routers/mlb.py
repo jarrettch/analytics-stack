@@ -418,16 +418,25 @@ async def get_odds_map():
         return odds_map, 0
 
     try:
+        # Scope to today's ET window so SGO only returns today's slate.
+        # Without these filters, SGO returns up to `limit` upcoming events
+        # spanning multiple days, billing entities for games we don't need.
+        today_et = datetime.now(ET).date()
+        starts_after_utc = datetime.combine(today_et, datetime.min.time(), ET).astimezone(ZoneInfo("UTC"))
+        starts_before_utc = datetime.combine(today_et + timedelta(days=1), datetime.min.time(), ET).astimezone(ZoneInfo("UTC"))
+
         url = "https://api.sportsgameodds.com/v2/events"
         params = {
             "leagueID": "MLB",
             "oddsAvailable": "true",
+            "startsAfter": starts_after_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "startsBefore": starts_before_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "oddID": ",".join([
                 "points-home-game-ml-home", "points-away-game-ml-away",
                 "points-home-game-sp-home", "points-away-game-sp-away",
                 "points-all-game-ou-over",  "points-all-game-ou-under",
             ]),
-            "limit": 50,
+            "limit": 20,
         }
         headers = {"x-api-key": api_key}
 
