@@ -29,16 +29,13 @@ The SGO `/v2/events` endpoint **does** support date filtering — confirmed via 
 - [x] **1. Audit complete — only the cron path hits SGO**
   Confirmed `/today` for both sports reads only from `load_persisted_odds`. The cache-bust at `nba.py:514` is in the cron handler, not the request path. No per-request burn exists.
 
-- [ ] **2. Scope the SGO query to today's ET window**
-  In `get_odds_map()` for both `nba.py` and `mlb.py`, add to the query params:
-  - `startsAfter`: today 00:00 ET → UTC ISO 8601
-  - `startsBefore`: tomorrow 00:00 ET → UTC ISO 8601 (catches all late west-coast games)
-  - Drop `limit` from 50 to 20 (no slate has more than ~16 games)
+- [x] **2. Scope the SGO query to today's ET window** _(shipped 2026-04-08)_
+  Added `startsAfter` / `startsBefore` (today 00:00 ET → tomorrow 00:00 ET, converted to UTC) and dropped `limit` from 50 to 20 in both `nba.py` and `mlb.py` `get_odds_map()`.
 
-  Expected impact: cuts entities-per-call from up to 50 down to actual day-of game count (~10 NBA, ~15 MLB). Daily burn drops from ~354 to under 50. Monthly: well under the 2500 cap.
+  **Verified in Render logs:** NBA cron `fresh_from_api` dropped from 32 → 7. MLB dropped from 35 → 15. Persistence now only writes to today's date. Total per cron run: 22 entities. Two runs/day = 44/day. Monthly projection: ~1320 entities (53% of 2500 cap). ~85% reduction from the broken state.
 
-- [ ] **3. Update `sports_odds_api_context.md` reference table**
-  Add `startsAfter` / `startsBefore` to the Common Query Parameters section so future-you doesn't write another query without them.
+- [x] **3. Update `sports_odds_api_context.md` reference table** _(shipped 2026-04-08)_
+  Added `startsAfter` / `startsBefore` to the Common Query Parameters table plus a warning about the entity budget.
 
 ## Stretch (only if #2 isn't enough)
 

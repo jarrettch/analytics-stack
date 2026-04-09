@@ -1,0 +1,57 @@
+name: Fetch Tomorrow's Odds
+
+# Fires at 2am ET (after the latest west coast MLB game ends ~1am ET, when
+# books have posted tomorrow's opening lines). This pre-populates the
+# persisted odds store so the dashboard has data for tomorrow's slate
+# before the 11am ET refresh runs.
+#
+# Note: cron times are UTC. 2am ET == 6am UTC during EDT (March–Nov) and
+# 7am UTC during EST (Nov–March). The existing workflow's morning/evening
+# crons assume EDT; matching that convention here. Both will drift by 1hr
+# during EST — acceptable for this use case.
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  fetch-tomorrow-odds:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Wake up Render and fetch tomorrow's NBA odds
+        run: |
+          echo "Waking up server..."
+          curl -s --max-time 120 "${{ secrets.API_URL }}/api/nba/today" || true
+          sleep 30
+
+          echo "Fetching tomorrow's NBA odds..."
+          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/nba/cron/fetch-odds?offset=1")
+          echo "Response: $response"
+
+          if echo "$response" | grep -q 'success.*true'; then
+            fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
+            echo "Tomorrow NBA odds fetched: fresh=${fresh}"
+            # fresh=0 is acceptable here — tomorrow may be a dark day, or
+            # lines may not yet be posted. Don't fail the job.
+          else
+            echo "Failed to fetch tomorrow's NBA odds"
+            echo "Full response: $response"
+            exit 1
+          fi
+
+      - name: Fetch tomorrow's MLB odds
+        run: |
+          echo "Fetching tomorrow's MLB odds..."
+          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/mlb/cron/fetch-odds?offset=1")
+          echo "Response: $response"
+
+          if echo "$response" | grep -q 'success.*true'; then
+            fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
+            echo "Tomorrow MLB odds fetched: fresh=${fresh}"
+            # fresh=0 is acceptable — off-day or lines not yet posted.
+          else
+            echo "Failed to fetch tomorrow's MLB odds"
+            echo "Full response: $response"
+            exit 1
+          fi

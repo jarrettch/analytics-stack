@@ -364,7 +364,7 @@ def _to_num(val):
     except (ValueError, TypeError):
         return None
 
-async def get_odds_map():
+async def get_odds_map(target_date: date | None = None):
     """Fetch odds from SportsGameOdds API (spreads, totals, moneylines).
 
     Prefers Circa lines; falls back to consensus bookOdds.
@@ -378,12 +378,12 @@ async def get_odds_map():
         return odds_map, 0
 
     try:
-        # Scope to today's ET window so SGO only returns today's slate.
+        # Scope to a single ET day's window so SGO only returns that day's slate.
         # Without these filters, SGO returns up to `limit` upcoming events
         # spanning multiple days, billing entities for games we don't need.
-        today_et = datetime.now(ET).date()
-        starts_after_utc = datetime.combine(today_et, datetime.min.time(), ET).astimezone(ZoneInfo("UTC"))
-        starts_before_utc = datetime.combine(today_et + timedelta(days=1), datetime.min.time(), ET).astimezone(ZoneInfo("UTC"))
+        target = target_date or datetime.now(ET).date()
+        starts_after_utc = datetime.combine(target, datetime.min.time(), ET).astimezone(ZoneInfo("UTC"))
+        starts_before_utc = datetime.combine(target + timedelta(days=1), datetime.min.time(), ET).astimezone(ZoneInfo("UTC"))
 
         url = "https://api.sportsgameodds.com/v2/events"
         params = {
@@ -516,10 +516,16 @@ def debug_standings():
         }
 
 @router.get("/cron/fetch-odds")
-async def cron_fetch_odds():
-    """Endpoint for GitHub Actions to trigger daily odds fetch."""
+async def cron_fetch_odds(offset: int = 0):
+    """Endpoint for GitHub Actions to trigger daily odds fetch.
+
+    `offset` selects which ET day to fetch: 0 = today (default), 1 = tomorrow.
+    Used by the 2am ET workflow to pre-fetch tomorrow's opening lines so the
+    UI has data when it rolls the slate forward after the last game ends.
+    """
     try:
-        odds, fresh_count = await get_odds_map()
+        target = datetime.now(ET).date() + timedelta(days=offset)
+        odds, fresh_count = await get_odds_map(target_date=target)
         set_cache("odds", odds)  # Bust the 30-min cache so the next /games request sees updated data
         return {
             "success": True,
@@ -527,7 +533,7 @@ async def cron_fetch_odds():
             "persisted_loaded": len(odds) - fresh_count,
             "total_matchups": len(odds),
             "persisted_to": "supabase:nba_odds",
-            "date": datetime.now(ET).date().isoformat(),
+            "date": target.isoformat(),
         }
     except Exception as e:
         return {
