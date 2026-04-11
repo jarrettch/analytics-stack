@@ -33,8 +33,7 @@ jobs:
             persisted=$(echo "$response" | grep -o '"persisted_loaded":[0-9]*' | grep -o '[0-9]*' || echo "0")
             echo "Odds fetched: fresh=${fresh} persisted=${persisted}"
             if [ "$fresh" = "0" ]; then
-              echo "WARNING: No fresh odds from API — check Odds API quota or errors"
-              exit 1
+              echo "WARNING: No fresh odds from API — dark day or lines not yet posted"
             fi
           else
             echo "Failed to fetch odds"
@@ -53,8 +52,7 @@ jobs:
             persisted=$(echo "$response" | grep -o '"persisted_loaded":[0-9]*' | grep -o '[0-9]*' || echo "0")
             echo "MLB odds fetched: fresh=${fresh} persisted=${persisted}"
             if [ "$fresh" = "0" ]; then
-              echo "WARNING: No fresh MLB odds from API — may be off-season or API issue"
-              exit 1
+              echo "WARNING: No fresh MLB odds from API — dark day or lines not yet posted"
             fi
           else
             echo "Failed to fetch MLB odds"
