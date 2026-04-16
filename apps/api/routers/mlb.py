@@ -179,7 +179,7 @@ def save_persisted_odds(odds_map: dict, game_date: date = None):
     if not supabase:
         return
 
-    target_date = game_date or date.today()
+    target_date = game_date or datetime.now(ET).date()
     try:
         rows = [
             {"game_date": target_date.isoformat(), "matchup_key": matchup_key, "odds_data": odds_data}
@@ -226,7 +226,7 @@ async def get_schedule(date_str: str) -> list:
         for date_entry in data.get("dates", []):
             for game in date_entry.get("games", []):
                 # Spring training filter — flip to "R" for regular season
-                if game.get("gameType") not in ("S", "R"):
+                if game.get("gameType") != "R":
                     continue
 
                 status_obj     = game.get("status", {})

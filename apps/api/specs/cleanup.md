@@ -9,11 +9,11 @@ _Created: 2026-04-02_
 - [x] **1. CRITICAL — Enable Row-Level Security on Supabase tables**
   RLS enabled + service_role policy added on all four public tables (`nba_odds`, `chunks`, `sync_metadata`, `issues`). Completed 2026-04-02. **Note:** Any new table in `public` schema needs the same treatment — Supabase defaults to wide open.
 
-- [ ] **2. `save_persisted_odds` timezone bug**
-  `mlb.py:181` — `date.today()` uses system time, not ET. Should be `datetime.now(ET).date()`. Check `nba.py` for the same pattern. Can cause odds to persist under the wrong date near midnight.
+- [x] **2. `save_persisted_odds` timezone bug**
+  `mlb.py:181` — `date.today()` uses system time, not ET. Should be `datetime.now(ET).date()`. Check `nba.py` for the same pattern. Can cause odds to persist under the wrong date near midnight. Fixed 2026-04-16 in both routers.
 
-- [ ] **3. Spring training filter still active**
-  `mlb.py:228` accepts both `"S"` and `"R"` game types. Drop `"S"` now that regular season has started — spring training exhibitions shouldn't appear alongside real games.
+- [x] **3. Spring training filter still active**
+  `mlb.py:228` accepts both `"S"` and `"R"` game types. Drop `"S"` now that regular season has started — spring training exhibitions shouldn't appear alongside real games. Fixed 2026-04-16.
 
 ## Architecture / before NHL
 

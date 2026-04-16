@@ -325,7 +325,7 @@ def save_persisted_odds(odds_map: dict, game_date: date = None):
         logger.warning("Supabase not configured, skipping odds save")
         return
 
-    target_date = game_date or date.today()
+    target_date = game_date or datetime.now(ET).date()
     try:
         rows = [
             {
