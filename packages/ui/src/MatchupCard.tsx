@@ -486,8 +486,11 @@ function LiveWinProbSection({ matchup }: { matchup: NBAMatchupData }) {
     })
   }, [matchup.gameId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Append live snapshot whenever score or clock changes (driven by parent poll)
+  // Append live snapshot whenever score or clock changes (driven by parent poll).
+  // Skip post-final: the scoreboard can drop period to 0 or blank the clock, and
+  // naiveWinProb then regresses toward 0.5 — bending the sparkline toward midline.
   useEffect(() => {
+    if (matchup.gameStatus === 3) return
     recordSnapshot(
       matchup.gameId,
       matchup.home.score,
@@ -498,7 +501,7 @@ function LiveWinProbSection({ matchup }: { matchup: NBAMatchupData }) {
       pace,
     )
     setChartData([...getHistory(matchup.gameId)])
-  }, [matchup.home.score, matchup.away.score, matchup.period, matchup.gameClock]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchup.home.score, matchup.away.score, matchup.period, matchup.gameClock, matchup.gameStatus]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const current = chartData[chartData.length - 1]
   if (!current) {
@@ -561,12 +564,15 @@ function LiveMLBWinProbSection({ matchup }: { matchup: MLBMatchupData }) {
     })
   }, [matchup.gameId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Skip post-final: liveWinProbability can fall back to pregame ~0.5 once the
+  // contextMetrics feed stops, which would bend the sparkline toward midline.
   useEffect(() => {
+    if (matchup.gameStatus === 3) return
     const winProb = matchup.home.liveWinProbability ?? matchup.home.winProbability
     const scoreDiff = matchup.home.score - matchup.away.score
     recordMLBSnapshot(matchup.gameId, winProb, scoreDiff, matchup.currentInning)
     setChartData([...getHistory(String(matchup.gameId))])
-  }, [matchup.home.score, matchup.away.score, matchup.home.liveWinProbability, matchup.currentInning]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchup.home.score, matchup.away.score, matchup.home.liveWinProbability, matchup.currentInning, matchup.gameStatus]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const current = chartData[chartData.length - 1]
   if (!current) {
