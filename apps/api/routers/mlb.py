@@ -33,12 +33,56 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/mlb", tags=["MLB"])
 
 cache = Cache({
-    "schedule":  CACHE_TTL_DEFAULT,
-    "standings": 300,
-    "stats":     600,
-    "odds":      CACHE_TTL_ODDS,
-    "assembled": CACHE_TTL_DEFAULT,
+    "schedule":         CACHE_TTL_DEFAULT,
+    "standings":        300,
+    "stats":            600,
+    "odds":             CACHE_TTL_ODDS,
+    "pitcher_records":  600,
+    "assembled":        CACHE_TTL_DEFAULT,
 })
+
+
+async def get_pitcher_records(pitcher_ids: list[int]) -> dict[int, str]:
+    """Fetch season W-L for the given pitcher IDs in one MLB Stats API call.
+
+    Returns a dict mapping pitcher_id → "W-L" string. Pitchers with no season
+    stats yet (e.g. just promoted) are omitted from the map.
+    """
+    if not pitcher_ids:
+        return {}
+    try:
+        client = get_http_client()
+        r = await client.get(
+            "https://statsapi.mlb.com/api/v1/people",
+            params={
+                "personIds": ",".join(str(pid) for pid in pitcher_ids),
+                "hydrate": f"stats(group=[pitching],type=[season],season={datetime.now().year})",
+            },
+            timeout=10.0,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        logger.warning(f"Pitcher records fetch failed: {e}")
+        return {}
+
+    records: dict[int, str] = {}
+    for person in data.get("people", []):
+        pid = person.get("id")
+        for stats_group in person.get("stats", []):
+            if stats_group.get("group", {}).get("displayName") != "pitching":
+                continue
+            for split in stats_group.get("splits", []):
+                stat = split.get("stat", {})
+                wins = stat.get("wins")
+                losses = stat.get("losses")
+                if wins is not None and losses is not None:
+                    records[pid] = f"{wins}-{losses}"
+                    break
+            if pid in records:
+                break
+    logger.info(f"MLB pitcher records: {len(records)}/{len(pitcher_ids)} resolved")
+    return records
 
 
 async def get_context_metrics(client: httpx.AsyncClient, game_pk: int):
@@ -177,6 +221,8 @@ async def get_schedule(date_str: str) -> list:
                     "awayAbbr": away_team["team"].get("abbreviation", ""),
                     "homePitcher": home_team.get("probablePitcher", {}).get("fullName"),
                     "awayPitcher": away_team.get("probablePitcher", {}).get("fullName"),
+                    "homePitcherId": home_team.get("probablePitcher", {}).get("id"),
+                    "awayPitcherId": away_team.get("probablePitcher", {}).get("id"),
                     "venue": game.get("venue", {}).get("name", ""),
                     "isDoubleHeader": double_header == "Y",
                     "gameNumber": game_number if double_header == "Y" else None,
@@ -487,7 +533,17 @@ async def get_todays_games():
         stats     = cache.get("stats")     or cache.get_stale("stats")     or {}
         odds_map  = cache.get("odds")      or cache.get_stale("odds")      or {}
 
-        logger.info(f"MLB: {len(schedule)} games, {len(standings)} standings, {len(stats)} stats, {len(odds_map)} odds")
+        pitcher_records = cache.get("pitcher_records")
+        if pitcher_records is None:
+            pitcher_ids = [
+                pid for g in schedule
+                for pid in (g.get("homePitcherId"), g.get("awayPitcherId"))
+                if pid is not None
+            ]
+            pitcher_records = await get_pitcher_records(pitcher_ids)
+            cache.set("pitcher_records", pitcher_records)
+
+        logger.info(f"MLB: {len(schedule)} games, {len(standings)} standings, {len(stats)} stats, {len(odds_map)} odds, {len(pitcher_records)} pitcher records")
 
         # Fetch contextMetrics for live games (win probability)
         live_pks = [g["gamePk"] for g in schedule if g.get("gameStatus") == 2]
@@ -651,7 +707,7 @@ async def get_todays_games():
                     "battingAvg": away_stat.get("battingAvg", 0.250),
                     "ops": away_stat.get("ops", 0.700),
                     "probablePitcher": g.get("awayPitcher"),
-                    "pitcherRecord": None,
+                    "pitcherRecord": pitcher_records.get(g.get("awayPitcherId")),
                 },
                 "home": {
                     "name": home_tri,
@@ -672,7 +728,7 @@ async def get_todays_games():
                     "battingAvg": home_stat.get("battingAvg", 0.250),
                     "ops": home_stat.get("ops", 0.700),
                     "probablePitcher": g.get("homePitcher"),
-                    "pitcherRecord": None,
+                    "pitcherRecord": pitcher_records.get(g.get("homePitcherId")),
                 },
             })
 
