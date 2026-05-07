@@ -1,6 +1,8 @@
 # MLB Dashboard — Implementation Spec
 
-_Last updated: 2026-03-22_
+_Last updated: 2026-05-07_
+
+> **Status:** Shipped. This doc is now a historical design reference; consult the code (`routers/mlb.py`, `routers/utils.py`, `apps/visualize-ev/app/page.tsx`) for current behavior.
 
 ---
 
@@ -8,13 +10,16 @@ _Last updated: 2026-03-22_
 
 | Layer | Status |
 |---|---|
-| `MLBTeamData` / `MLBMatchupData` types | Partial — missing odds fields (see §Types) |
+| `MLBTeamData` / `MLBMatchupData` types | Done |
 | `MLBTeamStats` card component | Done |
 | `MLBRatings` comparison bars | Done |
-| `apps/api/routers/mlb.py` | **Not started** |
-| `apps/api/main.py` wiring | **Not started** |
-| `apps/visualize-ev/app/page.tsx` MLB fetch | **Not started** |
-| `.github/workflows/fetch-odds.yml` MLB cron | **Not started** |
+| `apps/api/routers/mlb.py` | Done |
+| `apps/api/main.py` wiring | Done |
+| `apps/visualize-ev/app/page.tsx` MLB fetch | Done |
+| `.github/workflows/fetch-odds.yml` MLB cron | Done |
+| Live score / inning display | Done (post-v1) |
+| Win-probability sparkline | Done (post-v1) |
+| Shared helpers extracted to `routers/utils.py` | Done (2026-05-07) |
 
 ---
 

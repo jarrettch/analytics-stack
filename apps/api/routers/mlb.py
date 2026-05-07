@@ -1,63 +1,45 @@
+from __future__ import annotations
+
 import asyncio
+import logging
 import os
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-ET = ZoneInfo("America/New_York")
-from fastapi import APIRouter
-import time
-import logging
 import httpx
-from dotenv import load_dotenv
-from supabase import create_client
+from fastapi import APIRouter
 
-load_dotenv()
-
-supabase = None
-if os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_KEY"):
-    supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+from .utils import (
+    CACHE_TTL_DEFAULT,
+    CACHE_TTL_LIVE,
+    CACHE_TTL_ODDS,
+    ET,
+    UTC,
+    Cache,
+    calculate_win_probability_from_odds,
+    de_vig_ml,
+    format_et_time,
+    get_http_client,
+    load_persisted_odds,
+    local_time_hhmm,
+    save_persisted_odds,
+    sgo_book_val,
+    to_num,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mlb", tags=["MLB"])
 
-CACHE_TTL_LIVE    = 20
-CACHE_TTL_DEFAULT = 60
-CACHE_TTL_ODDS    = 1800
+cache = Cache({
+    "schedule":  CACHE_TTL_DEFAULT,
+    "standings": 300,
+    "stats":     600,
+    "odds":      CACHE_TTL_ODDS,
+    "assembled": CACHE_TTL_DEFAULT,
+})
 
-caches = {
-    "mlb_schedule":  {"data": None, "last_fetch": 0, "ttl": CACHE_TTL_DEFAULT},
-    "mlb_standings": {"data": None, "last_fetch": 0, "ttl": 300},
-    "mlb_stats":     {"data": None, "last_fetch": 0, "ttl": 600},
-    "mlb_odds":      {"data": None, "last_fetch": 0, "ttl": CACHE_TTL_ODDS},
-    "mlb_assembled": {"data": None, "last_fetch": 0, "ttl": CACHE_TTL_DEFAULT},
-}
-
-def get_cached(cache_key: str):
-    cache = caches[cache_key]
-    if cache["data"] and (time.time() - cache["last_fetch"] < cache["ttl"]):
-        return cache["data"]
-    return None
-
-def set_cache(cache_key: str, data, ttl: int = None):
-    cache = caches[cache_key]
-    if data:
-        cache["data"] = data
-        cache["last_fetch"] = time.time()
-        if ttl:
-            cache["ttl"] = ttl
-
-def get_cached_data(cache_key: str):
-    return caches[cache_key]["data"]
-
-# MLB Stats API team ID → tricode
-def _implied_prob(odds: float) -> float:
-    return -odds / (-odds + 100) if odds < 0 else 100 / (odds + 100)
-
-def _de_vig_ml(home_ml: float, away_ml: float):
-    raw = _implied_prob(home_ml) + _implied_prob(away_ml)
-    return _implied_prob(home_ml) / raw, _implied_prob(away_ml) / raw
 
 async def get_context_metrics(client: httpx.AsyncClient, game_pk: int):
     try:
@@ -117,97 +99,6 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
     }
     return sgo_map.get(team_id.upper(), "")
 
-def _sgo_book_val(odds: dict, odd_key: str, field: str):
-    """Extract value from SGO odds object. Prefers Circa; falls back to consensus."""
-    odd = odds.get(odd_key, {})
-    circa = odd.get("byBookmaker", {}).get("circa", {})
-    if circa.get("available"):
-        return circa.get(field)
-    fallback_key = {"odds": "bookOdds", "spread": "bookSpread", "overUnder": "bookOverUnder"}.get(field, "bookOdds")
-    return odd.get(fallback_key)
-
-def _to_num(val):
-    if val is None:
-        return None
-    try:
-        f = float(val)
-        return int(f) if f == int(f) else f
-    except (ValueError, TypeError):
-        return None
-
-def _format_et_time(utc_str: str) -> str:
-    """Convert UTC ISO string to '7:05 PM ET' display format."""
-    try:
-        dt = datetime.fromisoformat(utc_str.replace("Z", "+00:00")).astimezone(ET)
-        return dt.strftime("%-I:%M %p ET")
-    except Exception:
-        return ""
-
-def _local_time_hhmm(utc_str: str) -> str:
-    """Convert UTC ISO string to 'HH:MM' in ET."""
-    try:
-        dt = datetime.fromisoformat(utc_str.replace("Z", "+00:00")).astimezone(ET)
-        return dt.strftime("%H:%M")
-    except Exception:
-        return ""
-
-def load_persisted_odds(game_date: date = None) -> dict:
-    """Load persisted MLB odds from Supabase (reuses nba_odds table)."""
-    if not supabase:
-        logger.warning("Supabase not configured, skipping odds load")
-        return {}
-
-    if game_date:
-        dates_to_query = [game_date]
-    else:
-        today_et = datetime.now(ET).date()
-        dates_to_query = [today_et - timedelta(days=1), today_et, today_et + timedelta(days=1)]
-
-    odds_map = {}
-    for d in dates_to_query:
-        try:
-            response = supabase.table("nba_odds").select("matchup_key, odds_data").eq("game_date", d.isoformat()).execute()
-            for row in response.data:
-                odds_map[(d.isoformat(), row["matchup_key"])] = row["odds_data"]
-        except Exception as e:
-            logger.warning(f"Failed to load persisted MLB odds for {d}: {e}")
-    logger.info(f"Loaded {len(odds_map)} MLB odds from Supabase for {[d.isoformat() for d in dates_to_query]}")
-    return odds_map
-
-def save_persisted_odds(odds_map: dict, game_date: date = None):
-    """Save MLB odds to Supabase (reuses nba_odds table; MLB keys won't collide with NBA)."""
-    if not supabase:
-        return
-
-    target_date = game_date or datetime.now(ET).date()
-    try:
-        rows = [
-            {"game_date": target_date.isoformat(), "matchup_key": matchup_key, "odds_data": odds_data}
-            for matchup_key, odds_data in odds_map.items()
-        ]
-        supabase.table("nba_odds").upsert(rows, on_conflict="game_date,matchup_key").execute()
-        logger.info(f"Persisted {len(rows)} MLB matchup odds to Supabase for {target_date}")
-    except Exception as e:
-        logger.warning(f"Failed to persist MLB odds: {e}")
-
-def calculate_win_probability_from_odds(away_ml, home_ml, away_spread, home_spread):
-    if away_ml and home_ml:
-        if abs(away_ml - home_ml) >= 20:
-            away_prob = abs(away_ml) / (abs(away_ml) + 100) if away_ml < 0 else 100 / (away_ml + 100)
-            home_prob = abs(home_ml) / (abs(home_ml) + 100) if home_ml < 0 else 100 / (home_ml + 100)
-            return away_prob, home_prob
-
-    if away_spread is not None and home_spread is not None:
-        spread = away_spread if away_spread < 0 else home_spread
-        underdog_prob = 1 / (1 + 10 ** (abs(spread) / 15))
-        favorite_prob = 1 - underdog_prob
-        if away_spread < 0:
-            return favorite_prob, underdog_prob
-        else:
-            return underdog_prob, favorite_prob
-
-    return 0.5, 0.5
-
 async def get_schedule(date_str: str) -> list:
     """Fetch today's MLB schedule from the MLB Stats API."""
     try:
@@ -217,10 +108,10 @@ async def get_schedule(date_str: str) -> list:
             "date": date_str,
             "hydrate": "probablePitcher,linescore,team",
         }
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, params=params, timeout=15)
-            r.raise_for_status()
-            data = r.json()
+        client = get_http_client()
+        r = await client.get(url, params=params, timeout=15)
+        r.raise_for_status()
+        data = r.json()
 
         games = []
         for date_entry in data.get("dates", []):
@@ -245,9 +136,9 @@ async def get_schedule(date_str: str) -> list:
                     status_text = "Suspended"
                     game_status = 1
                 elif "Delayed" in detailed_state:
-                    status_text = f"Delayed ({_format_et_time(starts_at)})"
+                    status_text = f"Delayed ({format_et_time(starts_at)})"
                 elif game_status == 1:
-                    status_text = _format_et_time(starts_at)
+                    status_text = format_et_time(starts_at)
                 elif game_status == 2:
                     linescore  = game.get("linescore", {})
                     inning     = linescore.get("currentInning", 0)
@@ -278,7 +169,7 @@ async def get_schedule(date_str: str) -> list:
                     "gameStatus": game_status,
                     "statusText": status_text,
                     "officialDate": official_date,
-                    "localTimeHHMM": _local_time_hhmm(starts_at),
+                    "localTimeHHMM": local_time_hhmm(starts_at),
                     "startsAt": starts_at,
                     "homeTeamId": home_team["team"]["id"],
                     "awayTeamId": away_team["team"]["id"],
@@ -311,10 +202,10 @@ async def get_standings_map() -> dict:
             "season": current_year,
             "standingsType": "regularSeason",
         }
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, params=params, timeout=15)
-            r.raise_for_status()
-            data = r.json()
+        client = get_http_client()
+        r = await client.get(url, params=params, timeout=15)
+        r.raise_for_status()
+        data = r.json()
 
         standings_map = {}
         for division in data.get("records", []):
@@ -357,13 +248,13 @@ async def get_stats_map() -> dict:
         base = "https://statsapi.mlb.com/api/v1/teams/stats"
         base_params = {"sportId": 1, "stats": "season"}
 
-        async with httpx.AsyncClient() as client:
-            hitting_r = await client.get(base, params={**base_params, "season": current_year, "group": "hitting"}, timeout=15)
-            pitching_r = await client.get(base, params={**base_params, "season": current_year, "group": "pitching"}, timeout=15)
-            hitting_r.raise_for_status()
-            pitching_r.raise_for_status()
-            hitting_data = hitting_r.json()
-            pitching_data = pitching_r.json()
+        client = get_http_client()
+        hitting_r = await client.get(base, params={**base_params, "season": current_year, "group": "hitting"}, timeout=15)
+        pitching_r = await client.get(base, params={**base_params, "season": current_year, "group": "pitching"}, timeout=15)
+        hitting_r.raise_for_status()
+        pitching_r.raise_for_status()
+        hitting_data = hitting_r.json()
+        pitching_data = pitching_r.json()
 
         hitting_records = hitting_data.get("stats", [{}])[0].get("splits", [])
         pitching_records = pitching_data.get("stats", [{}])[0].get("splits", [])
@@ -371,16 +262,14 @@ async def get_stats_map() -> dict:
         # Fall back to prior season if current year is sparse (early spring training)
         if len(hitting_records) < 5:
             logger.warning(f"MLB hitting stats sparse for {current_year} ({len(hitting_records)} teams), falling back to {current_year - 1}")
-            async with httpx.AsyncClient() as client:
-                r = await client.get(base, params={**base_params, "season": current_year - 1, "group": "hitting"}, timeout=15)
-                r.raise_for_status()
-                hitting_records = r.json().get("stats", [{}])[0].get("splits", [])
+            r = await client.get(base, params={**base_params, "season": current_year - 1, "group": "hitting"}, timeout=15)
+            r.raise_for_status()
+            hitting_records = r.json().get("stats", [{}])[0].get("splits", [])
         if len(pitching_records) < 5:
             logger.warning(f"MLB pitching stats sparse for {current_year} ({len(pitching_records)} teams), falling back to {current_year - 1}")
-            async with httpx.AsyncClient() as client:
-                r = await client.get(base, params={**base_params, "season": current_year - 1, "group": "pitching"}, timeout=15)
-                r.raise_for_status()
-                pitching_records = r.json().get("stats", [{}])[0].get("splits", [])
+            r = await client.get(base, params={**base_params, "season": current_year - 1, "group": "pitching"}, timeout=15)
+            r.raise_for_status()
+            pitching_records = r.json().get("stats", [{}])[0].get("splits", [])
 
         stats_map = {}
 
@@ -423,8 +312,8 @@ async def get_odds_map(target_date: date | None = None):
         # Without these filters, SGO returns up to `limit` upcoming events
         # spanning multiple days, billing entities for games we don't need.
         target = target_date or datetime.now(ET).date()
-        starts_after_utc = datetime.combine(target, datetime.min.time(), ET).astimezone(ZoneInfo("UTC"))
-        starts_before_utc = datetime.combine(target + timedelta(days=1), datetime.min.time(), ET).astimezone(ZoneInfo("UTC"))
+        starts_after_utc = datetime.combine(target, datetime.min.time(), ET).astimezone(UTC)
+        starts_before_utc = datetime.combine(target + timedelta(days=1), datetime.min.time(), ET).astimezone(UTC)
 
         url = "https://api.sportsgameodds.com/v2/events"
         params = {
@@ -441,10 +330,10 @@ async def get_odds_map(target_date: date | None = None):
         }
         headers = {"x-api-key": api_key}
 
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, params=params, headers=headers, timeout=15)
-            r.raise_for_status()
-            data = r.json()
+        client = get_http_client()
+        r = await client.get(url, params=params, headers=headers, timeout=15)
+        r.raise_for_status()
+        data = r.json()
 
         games = data.get("data", [])
         logger.info(f"SportsGameOdds: {len(games)} MLB games")
@@ -477,18 +366,18 @@ async def get_odds_map(target_date: date | None = None):
 
             odds = game.get("odds", {})
 
-            away_spread      = _to_num(_sgo_book_val(odds, "points-away-game-sp-away", "spread"))
-            home_spread      = _to_num(_sgo_book_val(odds, "points-home-game-sp-home", "spread"))
-            away_spread_odds = _to_num(_sgo_book_val(odds, "points-away-game-sp-away", "odds"))
-            home_spread_odds = _to_num(_sgo_book_val(odds, "points-home-game-sp-home", "odds"))
-            away_ml          = _to_num(_sgo_book_val(odds, "points-away-game-ml-away", "odds"))
-            home_ml          = _to_num(_sgo_book_val(odds, "points-home-game-ml-home", "odds"))
-            over_under       = _to_num(_sgo_book_val(odds, "points-all-game-ou-over",  "overUnder"))
-            over_odds        = _to_num(_sgo_book_val(odds, "points-all-game-ou-over",  "odds"))
-            under_odds       = _to_num(_sgo_book_val(odds, "points-all-game-ou-under", "odds"))
+            away_spread      = to_num(sgo_book_val(odds, "points-away-game-sp-away", "spread"))
+            home_spread      = to_num(sgo_book_val(odds, "points-home-game-sp-home", "spread"))
+            away_spread_odds = to_num(sgo_book_val(odds, "points-away-game-sp-away", "odds"))
+            home_spread_odds = to_num(sgo_book_val(odds, "points-home-game-sp-home", "odds"))
+            away_ml          = to_num(sgo_book_val(odds, "points-away-game-ml-away", "odds"))
+            home_ml          = to_num(sgo_book_val(odds, "points-home-game-ml-home", "odds"))
+            over_under       = to_num(sgo_book_val(odds, "points-all-game-ou-over",  "overUnder"))
+            over_odds        = to_num(sgo_book_val(odds, "points-all-game-ou-over",  "odds"))
+            under_odds       = to_num(sgo_book_val(odds, "points-all-game-ou-under", "odds"))
 
-            away_fair_ml = _to_num(odds.get("points-away-game-ml-away", {}).get("fairOdds"))
-            home_fair_ml = _to_num(odds.get("points-home-game-ml-home", {}).get("fairOdds"))
+            away_fair_ml = to_num(odds.get("points-away-game-ml-away", {}).get("fairOdds"))
+            home_fair_ml = to_num(odds.get("points-home-game-ml-home", {}).get("fairOdds"))
 
             persisted = odds_map.get((game_date.isoformat(), matchup_key), {})
             eff_away_spread      = away_spread      if away_spread      is not None else persisted.get("awaySpread")
@@ -541,7 +430,7 @@ async def cron_fetch_odds(offset: int = 0):
     try:
         target = datetime.now(ET).date() + timedelta(days=offset)
         odds, fresh_count = await get_odds_map(target_date=target)
-        set_cache("mlb_odds", odds)
+        cache.set("odds", odds)
         return {
             "success": True,
             "fresh_from_api": fresh_count,
@@ -555,7 +444,7 @@ async def cron_fetch_odds(offset: int = 0):
 
 @router.get("/today")
 async def get_todays_games():
-    cached_response = get_cached("mlb_assembled")
+    cached_response = cache.get("assembled")
     if cached_response:
         return cached_response
 
@@ -564,26 +453,26 @@ async def get_todays_games():
         date_str = today_et.isoformat()
 
         # Fetch uncached data sources in parallel
-        cached_schedule  = get_cached("mlb_schedule")
-        cached_standings = get_cached("mlb_standings")
-        cached_stats     = get_cached("mlb_stats")
-        cached_odds      = get_cached("mlb_odds")
+        cached_schedule  = cache.get("schedule")
+        cached_standings = cache.get("standings")
+        cached_stats     = cache.get("stats")
+        cached_odds      = cache.get("odds")
 
         tasks = []
         keys  = []
 
         if not cached_schedule:
             tasks.append(get_schedule(date_str))
-            keys.append("mlb_schedule")
+            keys.append("schedule")
         if not cached_standings:
             tasks.append(get_standings_map())
-            keys.append("mlb_standings")
+            keys.append("standings")
         if not cached_stats:
             tasks.append(get_stats_map())
-            keys.append("mlb_stats")
+            keys.append("stats")
         if not cached_odds:
             tasks.append(asyncio.get_event_loop().run_in_executor(None, load_persisted_odds))
-            keys.append("mlb_odds")
+            keys.append("odds")
 
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -591,12 +480,12 @@ async def get_todays_games():
                 if isinstance(result, Exception):
                     logger.warning(f"Failed to fetch {key}: {result}")
                 else:
-                    set_cache(key, result)
+                    cache.set(key, result)
 
-        schedule  = get_cached("mlb_schedule")  or get_cached_data("mlb_schedule")  or []
-        standings = get_cached("mlb_standings") or get_cached_data("mlb_standings") or {}
-        stats     = get_cached("mlb_stats")     or get_cached_data("mlb_stats")     or {}
-        odds_map  = get_cached("mlb_odds")      or get_cached_data("mlb_odds")      or {}
+        schedule  = cache.get("schedule")  or cache.get_stale("schedule")  or []
+        standings = cache.get("standings") or cache.get_stale("standings") or {}
+        stats     = cache.get("stats")     or cache.get_stale("stats")     or {}
+        odds_map  = cache.get("odds")      or cache.get_stale("odds")      or {}
 
         logger.info(f"MLB: {len(schedule)} games, {len(standings)} standings, {len(stats)} stats, {len(odds_map)} odds")
 
@@ -604,11 +493,11 @@ async def get_todays_games():
         live_pks = [g["gamePk"] for g in schedule if g.get("gameStatus") == 2]
         context_metrics_map: dict[int, dict] = {}
         if live_pks:
-            async with httpx.AsyncClient() as client:
-                cm_results = await asyncio.gather(
-                    *[get_context_metrics(client, pk) for pk in live_pks],
-                    return_exceptions=True,
-                )
+            client = get_http_client()
+            cm_results = await asyncio.gather(
+                *[get_context_metrics(client, pk) for pk in live_pks],
+                return_exceptions=True,
+            )
             for pk, result in zip(live_pks, cm_results):
                 if isinstance(result, dict):
                     context_metrics_map[pk] = result
@@ -701,7 +590,7 @@ async def get_todays_games():
             home_ml = odds.get("homeMoneyline")
             away_ml = odds.get("awayMoneyline")
             if home_ml and away_ml:
-                home_prob, away_prob = _de_vig_ml(home_ml, away_ml)
+                home_prob, away_prob = de_vig_ml(home_ml, away_ml)
             else:
                 home_prob = away_prob = 0.5
 
@@ -715,7 +604,7 @@ async def get_todays_games():
                     live_home_prob = raw_home / 100
                     live_away_prob = raw_away / 100
                 elif home_ml and away_ml:
-                    live_home_prob, live_away_prob = _de_vig_ml(home_ml, away_ml)
+                    live_home_prob, live_away_prob = de_vig_ml(home_ml, away_ml)
 
             game_number = g.get("gameNumber")
 
@@ -788,13 +677,13 @@ async def get_todays_games():
             })
 
         assembled_ttl = CACHE_TTL_LIVE if live_pks else CACHE_TTL_DEFAULT
-        set_cache("mlb_assembled", refined_games, ttl=assembled_ttl)
+        cache.set("assembled", refined_games, ttl=assembled_ttl)
         logger.info(f"MLB response assembled: {len(refined_games)} games")
         return refined_games
 
     except Exception as e:
         logger.error(f"MLB API error: {e}", exc_info=True)
-        cached = get_cached_data("mlb_assembled")
+        cached = cache.get_stale("assembled")
         if cached:
             return cached
         return []

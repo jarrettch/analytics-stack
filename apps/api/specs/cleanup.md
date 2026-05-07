@@ -17,21 +17,21 @@ _Created: 2026-04-02_
 
 ## Architecture / before NHL
 
-- [ ] **4. Duplicated code between `nba.py` and `mlb.py`**
-  Cache helpers, Supabase persistence, odds math are copy-pasted. Extract into a shared `routers/utils.py` — especially important before adding NHL since you'd otherwise be copying a third time.
+- [x] **4. Duplicated code between `nba.py` and `mlb.py`**
+  Extracted to `routers/utils.py` (cache class, SGO helpers, odds math, persistence, time formatters, shared httpx client). Completed 2026-05-07.
 
-- [ ] **5. Preferred bookmaker set to Circa but unavailable on SGO free tier**
-  Both `nba.py` and `mlb.py` `_sgo_book_val` prefer Circa, but Circa isn't available on the SGO free plan — so it always falls through to the consensus fallback. Switch to BetOnline (sharper lines, available on free tier) as the spec originally intended.
+- [x] **5. Preferred bookmaker set to Circa but unavailable on SGO free tier**
+  Switched to BetOnline via `PREFERRED_BOOK` in `utils.py`. Completed 2026-05-07.
 
-- [ ] **6. New `httpx.AsyncClient` per request**
-  Both routers create a new `AsyncClient` per call. Use a module-level client or reuse within a request cycle to reduce connection overhead.
+- [x] **6. New `httpx.AsyncClient` per request**
+  Replaced with module-level `get_http_client()` + `close_http_client()` wired to FastAPI lifespan in `main.py`. Completed 2026-05-07.
 
 ## Users / Auth / Bet Tracking (next major unlock)
 
 This is the unlock that turns visualize-ev from a one-shot tool into something users come back to. Treat the whole block as one unit — shipping just auth (with no bet log) adds maintenance burden with zero user value.
 
-- [ ] **Decide: shared vs separate Supabase project for visualize-ev and IDMR**
-  Leaning separate. Different audiences (bettors vs Bible study), independent quotas/billing, can kill or sell either independently. Shared "save setup work" gain is small and one-time. Confirm before standing anything up.
+- [x] **Decide: shared vs separate Supabase project for visualize-ev and IDMR**
+  Separated — each has its own Supabase project. Different audiences (bettors vs Bible study), independent quotas/billing, can kill or sell either independently.
 
 - [ ] **Scope `profiles` table (minimal first)**
   Start with `id` (FK to `auth.users`), `email`, `display_name`, `created_at`. Add `odds_format_preference`, `favorite_teams`, `default_unit_size`, etc. only when a feature actually needs them. Don't speculatively design columns.
@@ -76,14 +76,14 @@ This is the unlock that turns visualize-ev from a one-shot tool into something u
 - [ ] **Confirm `.env` is gitignored**
   `apps/api/.env` contains API keys and Supabase credentials. Verified never committed to GitHub. Just ensure `.gitignore` continues to cover it.
 
-- [ ] **Dead code: `NbaDashboard.tsx`**
-  `packages/ui/src/NbaDashboard.tsx` (~400 lines) is the old NBA-only card, fully superseded by `MatchupCard.tsx`. Still exported from `packages/ui/src/index.ts`. Remove the file and its export.
+- [x] **Dead code: `NbaDashboard.tsx`**
+  Deleted file and export. Completed 2026-05-07.
 
-- [ ] **Stub routers: `ev.py` and `dodgers.py`**
-  Both return hardcoded placeholder data. Remove or gate behind a feature flag to reduce API surface noise.
+- [x] **Stub routers: `ev.py` and `dodgers.py`**
+  Deleted both routers and removed their `include_router` calls in `main.py`. Completed 2026-05-07.
 
-- [ ] **Stale `Untitled` file in `apps/api/`**
-  Early draft of `main.py`, not imported anywhere. Delete it.
+- [x] **Stale `Untitled` file in `apps/api/`**
+  Deleted. Completed 2026-05-07.
 
-- [ ] **MLB dashboard spec status table is stale**
-  `mlb_dashboard.md` status table still shows most items as "Not started" — all are implemented. Update it.
+- [x] **MLB dashboard spec status table is stale**
+  Refreshed status table; doc flagged as historical design reference. Completed 2026-05-07.

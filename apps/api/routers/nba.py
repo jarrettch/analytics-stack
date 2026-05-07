@@ -1,66 +1,43 @@
+from __future__ import annotations
+
 import asyncio
+import logging
 import os
-import json
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-ET = ZoneInfo("America/New_York")
-from fastapi import APIRouter, HTTPException
-from nba_api.live.nba.endpoints import scoreboard
-from nba_api.stats.endpoints import leaguestandingsv3, leaguestandings, leaguedashteamstats
-import time
-import logging
 import httpx
-from dotenv import load_dotenv
-from supabase import create_client
+from fastapi import APIRouter
+from nba_api.live.nba.endpoints import scoreboard
+from nba_api.stats.endpoints import leaguestandingsv3, leaguedashteamstats
 
-load_dotenv()
+from .utils import (
+    CACHE_TTL_DEFAULT,
+    CACHE_TTL_LIVE,
+    CACHE_TTL_ODDS,
+    ET,
+    UTC,
+    Cache,
+    calculate_win_probability_from_odds,
+    get_http_client,
+    load_persisted_odds,
+    save_persisted_odds,
+    sgo_book_val,
+    to_num,
+)
 
-# Supabase client for odds persistence
-supabase = None
-if os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_KEY"):
-    supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-
-# Setup basic logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/nba", tags=["NBA"])
 
-# Configuration for Dynamic TTL
-CACHE_TTL_LIVE = 20     # 20 seconds during live action
-CACHE_TTL_DEFAULT = 60  # 1 minute for pre/post-game
-CACHE_TTL_ODDS = 1800   # 30 minutes - The Odds API free tier is 500 req/month (~16/day)
-
-# Independent caches for each data source with appropriate TTLs
-caches = {
-    "scoreboard": {"data": None, "last_fetch": 0, "ttl": CACHE_TTL_DEFAULT},
-    "standings": {"data": None, "last_fetch": 0, "ttl": 300},       # 5 minutes
-    "advanced_stats": {"data": None, "last_fetch": 0, "ttl": 600},  # 10 minutes
-    "odds": {"data": None, "last_fetch": 0, "ttl": CACHE_TTL_ODDS}, # 30 minutes (rate limited)
-    "assembled": {"data": None, "last_fetch": 0, "ttl": CACHE_TTL_DEFAULT},
-}
-
-def get_cached(cache_key: str):
-    """Get data from cache if still fresh."""
-    cache = caches[cache_key]
-    current_time = time.time()
-    if cache["data"] and (current_time - cache["last_fetch"] < cache["ttl"]):
-        return cache["data"]
-    return None
-
-def set_cache(cache_key: str, data, ttl: int = None):
-    """Update cache with new data."""
-    cache = caches[cache_key]
-    if data:  # Only cache non-empty data
-        cache["data"] = data
-        cache["last_fetch"] = time.time()
-        if ttl:
-            cache["ttl"] = ttl
-
-def get_cached_data(cache_key: str):
-    """Get last known good data (even if stale) for fallback."""
-    return caches[cache_key]["data"]
+cache = Cache({
+    "scoreboard":     CACHE_TTL_DEFAULT,
+    "standings":      300,
+    "advanced_stats": 600,
+    "odds":           CACHE_TTL_ODDS,
+    "assembled":      CACHE_TTL_DEFAULT,
+})
 
 # Get the standings map
 # def get_standings_map():
@@ -205,39 +182,6 @@ def get_arena_map():
         "WAS": "Capital One Arena",
     }
 
-def calculate_win_probability_from_odds(away_ml, home_ml, away_spread, home_spread):
-    """
-    Calculate win probabilities from moneyline and spread.
-    Priority: ML > Spread > 50/50
-    """
-    # Try moneyline first (if both are available and not a pick'em)
-    if away_ml and home_ml:
-        # Check if it's a pick'em (both around -110)
-        if abs(away_ml - home_ml) < 20:  # Within 20 units = pick'em
-            # Use spread instead
-            pass
-        else:
-            # Convert American odds to implied probability
-            away_prob = abs(away_ml) / (abs(away_ml) + 100) if away_ml < 0 else 100 / (away_ml + 100)
-            home_prob = abs(home_ml) / (abs(home_ml) + 100) if home_ml < 0 else 100 / (home_ml + 100)
-            return away_prob, home_prob
-
-    # Fallback to spread
-    if away_spread is not None and home_spread is not None:
-        # Use the favorite's spread (negative value)
-        spread = away_spread if away_spread < 0 else home_spread
-        # Formula: underdog_prob = 1 / (1 + 10^(|spread|/15)), favorite_prob = 1 - underdog_prob
-        underdog_prob = 1 / (1 + 10 ** (abs(spread) / 15))
-        favorite_prob = 1 - underdog_prob
-
-        if away_spread < 0:  # Away is favorite
-            return favorite_prob, underdog_prob
-        else:  # Home is favorite
-            return underdog_prob, favorite_prob
-
-    # Default to 50/50
-    return 0.5, 0.5
-
 def get_tricode_from_sgo_team_id(team_id: str) -> str:
     """Map SportsGameOdds teamID to NBA tricode.
 
@@ -290,80 +234,6 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
     }
     return sgo_map.get(team_id.upper(), "")
 
-def load_persisted_odds(game_date: date = None) -> dict:
-    """Load persisted odds from Supabase for a given date.
-
-    When no date is specified, queries today AND tomorrow (UTC) to handle the
-    ET/UTC boundary: a 7pm ET game has a UTC commence_time of midnight+, so it
-    gets saved with tomorrow's UTC date on the Render server.
-    """
-    if not supabase:
-        logger.warning("Supabase not configured, skipping odds load")
-        return {}
-
-    if game_date:
-        dates_to_query = [game_date]
-    else:
-        today_et = datetime.now(ET).date()
-        # Include yesterday so post-midnight cache fills still find last night's final games
-        dates_to_query = [today_et - timedelta(days=1), today_et, today_et + timedelta(days=1)]
-
-    odds_map = {}
-    for d in dates_to_query:
-        try:
-            response = supabase.table("nba_odds").select("matchup_key, odds_data").eq("game_date", d.isoformat()).execute()
-            for row in response.data:
-                odds_map[(d.isoformat(), row["matchup_key"])] = row["odds_data"]
-        except Exception as e:
-            logger.warning(f"Failed to load persisted odds for {d}: {e}")
-    logger.info(f"Loaded {len(odds_map)} odds from Supabase for {[d.isoformat() for d in dates_to_query]}")
-    return odds_map
-
-def save_persisted_odds(odds_map: dict, game_date: date = None):
-    """Save odds to Supabase (upserts by game_date + matchup_key)."""
-    if not supabase:
-        logger.warning("Supabase not configured, skipping odds save")
-        return
-
-    target_date = game_date or datetime.now(ET).date()
-    try:
-        rows = [
-            {
-                "game_date": target_date.isoformat(),
-                "matchup_key": matchup_key,
-                "odds_data": odds_data,
-            }
-            for matchup_key, odds_data in odds_map.items()
-        ]
-        # Upsert: insert or update on conflict
-        supabase.table("nba_odds").upsert(rows, on_conflict="game_date,matchup_key").execute()
-        logger.info(f"Persisted {len(rows)} matchup odds to Supabase for {target_date}")
-    except Exception as e:
-        logger.warning(f"Failed to persist odds: {e}")
-
-def _sgo_book_val(odds: dict, odd_key: str, field: str):
-    """Extract a value from a SportsGameOdds odds object.
-
-    Prefers Circa lines; falls back to consensus book value.
-    field is one of: "odds", "spread", "overUnder"
-    """
-    odd = odds.get(odd_key, {})
-    circa = odd.get("byBookmaker", {}).get("circa", {})
-    if circa.get("available"):
-        return circa.get(field)
-    fallback_key = {"odds": "bookOdds", "spread": "bookSpread", "overUnder": "bookOverUnder"}.get(field, "bookOdds")
-    return odd.get(fallback_key)
-
-def _to_num(val):
-    """Parse a string/numeric odds value to int or float."""
-    if val is None:
-        return None
-    try:
-        f = float(val)
-        return int(f) if f == int(f) else f
-    except (ValueError, TypeError):
-        return None
-
 async def get_odds_map(target_date: date | None = None):
     """Fetch odds from SportsGameOdds API (spreads, totals, moneylines).
 
@@ -382,8 +252,8 @@ async def get_odds_map(target_date: date | None = None):
         # Without these filters, SGO returns up to `limit` upcoming events
         # spanning multiple days, billing entities for games we don't need.
         target = target_date or datetime.now(ET).date()
-        starts_after_utc = datetime.combine(target, datetime.min.time(), ET).astimezone(ZoneInfo("UTC"))
-        starts_before_utc = datetime.combine(target + timedelta(days=1), datetime.min.time(), ET).astimezone(ZoneInfo("UTC"))
+        starts_after_utc = datetime.combine(target, datetime.min.time(), ET).astimezone(UTC)
+        starts_before_utc = datetime.combine(target + timedelta(days=1), datetime.min.time(), ET).astimezone(UTC)
 
         url = "https://api.sportsgameodds.com/v2/events"
         params = {
@@ -400,10 +270,10 @@ async def get_odds_map(target_date: date | None = None):
         }
         headers = {"x-api-key": api_key}
 
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, params=params, headers=headers)
-            r.raise_for_status()
-            data = r.json()
+        client = get_http_client()
+        r = await client.get(url, params=params, headers=headers)
+        r.raise_for_status()
+        data = r.json()
 
         games = data.get("data", [])
         logger.info(f"SportsGameOdds: {len(games)} upcoming NBA games")
@@ -439,20 +309,20 @@ async def get_odds_map(target_date: date | None = None):
 
             odds = game.get("odds", {})
 
-            away_spread      = _to_num(_sgo_book_val(odds, "points-away-game-sp-away", "spread"))
-            home_spread      = _to_num(_sgo_book_val(odds, "points-home-game-sp-home", "spread"))
-            away_spread_odds = _to_num(_sgo_book_val(odds, "points-away-game-sp-away", "odds"))
-            home_spread_odds = _to_num(_sgo_book_val(odds, "points-home-game-sp-home", "odds"))
-            away_ml          = _to_num(_sgo_book_val(odds, "points-away-game-ml-away", "odds"))
-            home_ml          = _to_num(_sgo_book_val(odds, "points-home-game-ml-home", "odds"))
-            over_under       = _to_num(_sgo_book_val(odds, "points-all-game-ou-over",  "overUnder"))
-            over_odds        = _to_num(_sgo_book_val(odds, "points-all-game-ou-over",  "odds"))
-            under_odds       = _to_num(_sgo_book_val(odds, "points-all-game-ou-under", "odds"))
+            away_spread      = to_num(sgo_book_val(odds, "points-away-game-sp-away", "spread"))
+            home_spread      = to_num(sgo_book_val(odds, "points-home-game-sp-home", "spread"))
+            away_spread_odds = to_num(sgo_book_val(odds, "points-away-game-sp-away", "odds"))
+            home_spread_odds = to_num(sgo_book_val(odds, "points-home-game-sp-home", "odds"))
+            away_ml          = to_num(sgo_book_val(odds, "points-away-game-ml-away", "odds"))
+            home_ml          = to_num(sgo_book_val(odds, "points-home-game-ml-home", "odds"))
+            over_under       = to_num(sgo_book_val(odds, "points-all-game-ou-over",  "overUnder"))
+            over_odds        = to_num(sgo_book_val(odds, "points-all-game-ou-over",  "odds"))
+            under_odds       = to_num(sgo_book_val(odds, "points-all-game-ou-under", "odds"))
 
             # Use fairOdds (vig already removed by SGO) for win probability;
             # fall back to bookOdds if unavailable.
-            away_fair_ml = _to_num(odds.get("points-away-game-ml-away", {}).get("fairOdds"))
-            home_fair_ml = _to_num(odds.get("points-home-game-ml-home", {}).get("fairOdds"))
+            away_fair_ml = to_num(odds.get("points-away-game-ml-away", {}).get("fairOdds"))
+            home_fair_ml = to_num(odds.get("points-home-game-ml-home", {}).get("fairOdds"))
 
             # Preserve non-null spread/O-U from persisted when the fresh API has null.
             # Lines are often unavailable early in the day or temporarily off-board,
@@ -526,7 +396,7 @@ async def cron_fetch_odds(offset: int = 0):
     try:
         target = datetime.now(ET).date() + timedelta(days=offset)
         odds, fresh_count = await get_odds_map(target_date=target)
-        set_cache("odds", odds)  # Bust the 30-min cache so the next /games request sees updated data
+        cache.set("odds", odds)  # Bust the 30-min cache so the next /games request sees updated data
         return {
             "success": True,
             "fresh_from_api": fresh_count,
@@ -573,7 +443,7 @@ def debug_scoreboard():
 @router.get("/today")
 async def get_todays_games():
     # Check if assembled response is still fresh
-    cached_response = get_cached("assembled")
+    cached_response = cache.get("assembled")
     if cached_response:
         return cached_response
 
@@ -582,10 +452,10 @@ async def get_todays_games():
 
         # Fetch each data source, using cache when fresh
         # Scoreboard always needs fresh data for live games
-        cached_scoreboard = get_cached("scoreboard")
-        cached_standings = get_cached("standings")
-        cached_advanced = get_cached("advanced_stats")
-        cached_odds = get_cached("odds")
+        cached_scoreboard = cache.get("scoreboard")
+        cached_standings = cache.get("standings")
+        cached_advanced = cache.get("advanced_stats")
+        cached_odds = cache.get("odds")
 
         # Build list of fetches needed
         tasks = []
@@ -610,22 +480,18 @@ async def get_todays_games():
             for key, result in zip(fetch_keys, results):
                 if isinstance(result, Exception):
                     logger.warning(f"Failed to fetch {key}: {result}, using cached data")
-                elif key == "scoreboard":
-                    set_cache("scoreboard", result)
-                elif key == "odds":
-                    set_cache("odds", result)
                 else:
-                    set_cache(key, result)
+                    cache.set(key, result)
 
         # Get data (fresh or cached, with fallback to stale)
-        sb = get_cached("scoreboard") or get_cached_data("scoreboard")
-        standings_map = get_cached("standings") or get_cached_data("standings") or {}
-        advanced_stats_map = get_cached("advanced_stats") or get_cached_data("advanced_stats") or {}
-        odds_map = get_cached("odds") or get_cached_data("odds") or {}
+        sb = cache.get("scoreboard") or cache.get_stale("scoreboard")
+        standings_map = cache.get("standings") or cache.get_stale("standings") or {}
+        advanced_stats_map = cache.get("advanced_stats") or cache.get_stale("advanced_stats") or {}
+        odds_map = cache.get("odds") or cache.get_stale("odds") or {}
 
         if not sb:
             logger.error("No scoreboard data available")
-            return get_cached_data("assembled") or []
+            return cache.get_stale("assembled") or []
 
         data = sb.get_dict()
         games = data.get('scoreboard', {}).get('games', [])
@@ -806,9 +672,9 @@ async def get_todays_games():
 
         # Also update scoreboard cache TTL for live games
         if has_live_games:
-            caches["scoreboard"]["ttl"] = CACHE_TTL_LIVE
+            cache.set_ttl("scoreboard", CACHE_TTL_LIVE)
 
-        set_cache("assembled", refined_games, ttl=assembled_ttl)
+        cache.set("assembled", refined_games, ttl=assembled_ttl)
 
         logger.info(f"Response assembled with TTL={assembled_ttl}s (live games: {has_live_games})")
         return refined_games
@@ -816,7 +682,7 @@ async def get_todays_games():
         logger.error(f"NBA API Fetch Error: {str(e)}", exc_info=True)
 
         # Fallback to stale cache so the frontend stays hydrated
-        cached = get_cached_data("assembled")
+        cached = cache.get_stale("assembled")
         if cached:
             logger.info("Returning stale cached data due to error")
             return cached
