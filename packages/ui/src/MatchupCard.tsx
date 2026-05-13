@@ -86,9 +86,12 @@ function TeamLogo({
     lg: "size-12",
   }
 
+  // MLB Stats API returns "AZ" for Arizona; ESPN's CDN expects "ari".
+  const espnSlug = abbreviation === "AZ" ? "ari" : abbreviation.toLowerCase()
+
   return (
     <img
-      src={`https://a.espncdn.com/i/teamlogos/${sport}/500/${abbreviation.toLowerCase()}.png`}
+      src={`https://a.espncdn.com/i/teamlogos/${sport}/500/${espnSlug}.png`}
       alt={`${abbreviation} logo`}
       className={`${sizeClasses[size]} mr-1 inline-block`}
       onError={(e) => (e.currentTarget.style.display = "none")}
