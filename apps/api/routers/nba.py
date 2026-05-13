@@ -29,6 +29,21 @@ from .utils import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# NBA's CDN (Akamai) 403s requests without a www.nba.com Referer, regardless of
+# User-Agent. nba_api's bundled headers don't set one, so override them here.
+NBA_LIVE_HEADERS = {
+    "Accept": "*/*",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Host": "cdn.nba.com",
+    "Origin": "https://www.nba.com",
+    "Referer": "https://www.nba.com/",
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+}
+
 router = APIRouter(prefix="/api/nba", tags=["NBA"])
 
 cache = Cache({
@@ -415,7 +430,7 @@ async def cron_fetch_odds(offset: int = 0):
 def debug_scoreboard():
     """See what data the scoreboard actually provides"""
     try:
-        sb = scoreboard.ScoreBoard()
+        sb = scoreboard.ScoreBoard(headers=NBA_LIVE_HEADERS)
         data = sb.get_dict()
         games = data.get('scoreboard', {}).get('games', [])
 
@@ -462,7 +477,7 @@ async def get_todays_games():
         fetch_keys = []
 
         if not cached_scoreboard:
-            tasks.append(loop.run_in_executor(None, lambda: scoreboard.ScoreBoard()))
+            tasks.append(loop.run_in_executor(None, lambda: scoreboard.ScoreBoard(headers=NBA_LIVE_HEADERS)))
             fetch_keys.append("scoreboard")
         if not cached_standings:
             tasks.append(loop.run_in_executor(None, get_standings_map))
