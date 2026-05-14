@@ -73,10 +73,12 @@ function StatValue({
 
 function TeamLogo({
   abbreviation,
+  espnSlug,
   sport,
   size = "sm",
 }: {
   abbreviation: string
+  espnSlug?: string
   sport: string
   size?: "sm" | "md" | "lg"
 }) {
@@ -86,12 +88,13 @@ function TeamLogo({
     lg: "size-12",
   }
 
-  // MLB Stats API returns "AZ" for Arizona; ESPN's CDN expects "ari".
-  const espnSlug = abbreviation === "AZ" ? "ari" : abbreviation.toLowerCase()
+  // Prefer the slug the server picked (NHL emits this; NHL/MLB/NBA all eventually
+  // should). Falls back to legacy logic so MLB's "AZ" → "ari" keeps working.
+  const slug = espnSlug ?? (abbreviation === "AZ" ? "ari" : abbreviation.toLowerCase())
 
   return (
     <img
-      src={`https://a.espncdn.com/i/teamlogos/${sport}/500/${espnSlug}.png`}
+      src={`https://a.espncdn.com/i/teamlogos/${sport}/500/${slug}.png`}
       alt={`${abbreviation} logo`}
       className={`${sizeClasses[size]} mr-1 inline-block`}
       onError={(e) => (e.currentTarget.style.display = "none")}
@@ -102,7 +105,7 @@ function TeamLogo({
 function TeamRow({ team, side, sport }: { team: BaseTeamData; side: "away" | "home"; sport: string }) {
   return (
     <div className="flex items-center gap-3">
-      <TeamLogo abbreviation={team.abbreviation} sport={sport} />
+      <TeamLogo abbreviation={team.abbreviation} espnSlug={team.espnSlug} sport={sport} />
       <div className="flex min-w-0 flex-1 items-baseline gap-2">
         {team.seed && (
           <span className="font-mono text-[10px] text-muted-foreground">
@@ -250,6 +253,9 @@ function MLBTeamStats({ team }: { team: MLBTeamData }) {
 
 // NHL Stats Row
 function NHLTeamStats({ team }: { team: NHLTeamData }) {
+  // None-means-hide: render "--" for missing fields rather than zero, so a real
+  // shutout (0) and "no data" don't look identical.
+  const fmt = (v: number | null, digits: number) => v == null ? "--" : v.toFixed(digits)
   return (
     <div className="grid grid-cols-5 gap-x-3 gap-y-0.5">
       <div className="flex flex-col">
@@ -258,19 +264,19 @@ function NHLTeamStats({ team }: { team: NHLTeamData }) {
       </div>
       <div className="flex flex-col">
         <StatLabel>GF/G</StatLabel>
-        <StatValue>{team.goalsFor.toFixed(2)}</StatValue>
+        <StatValue>{fmt(team.goalsFor, 2)}</StatValue>
       </div>
       <div className="flex flex-col">
         <StatLabel>GA/G</StatLabel>
-        <StatValue>{team.goalsAgainst.toFixed(2)}</StatValue>
+        <StatValue>{fmt(team.goalsAgainst, 2)}</StatValue>
       </div>
       <div className="flex flex-col">
         <StatLabel>PP%</StatLabel>
-        <StatValue>{team.powerPlayPct.toFixed(1)}</StatValue>
+        <StatValue>{fmt(team.powerPlayPct, 1)}</StatValue>
       </div>
       <div className="flex flex-col">
         <StatLabel>PK%</StatLabel>
-        <StatValue>{team.penaltyKillPct.toFixed(1)}</StatValue>
+        <StatValue>{fmt(team.penaltyKillPct, 1)}</StatValue>
       </div>
     </div>
   )
@@ -376,8 +382,13 @@ function MLBRatings({ away, home }: { away: MLBTeamData; home: MLBTeamData }) {
   )
 }
 
-// NHL Advanced Ratings
+// NHL Advanced Ratings — each row hides when either side is missing data.
 function NHLRatings({ away, home }: { away: NHLTeamData; home: NHLTeamData }) {
+  const pair = <T,>(a: T | null, b: T | null): [T, T] | null =>
+    a != null && b != null ? [a, b] : null
+  const pp = pair(away.powerPlayPct, home.powerPlayPct)
+  const pk = pair(away.penaltyKillPct, home.penaltyKillPct)
+  const sv = pair(away.savesPct, home.savesPct)
   return (
     <div className="flex flex-col gap-0.5 px-3 py-2">
       <div className="mb-0.5">
@@ -385,9 +396,9 @@ function NHLRatings({ away, home }: { away: NHLTeamData; home: NHLTeamData }) {
           Special Teams & Goaltending
         </span>
       </div>
-      <RatingBar label="PP%" awayVal={away.powerPlayPct} homeVal={home.powerPlayPct} format="pct" />
-      <RatingBar label="PK%" awayVal={away.penaltyKillPct} homeVal={home.penaltyKillPct} format="pct" />
-      <RatingBar label="SV%" awayVal={away.savesPct * 100} homeVal={home.savesPct * 100} format="fixed1" />
+      {pp && <RatingBar label="PP%" awayVal={pp[0]} homeVal={pp[1]} format="pct" />}
+      {pk && <RatingBar label="PK%" awayVal={pk[0]} homeVal={pk[1]} format="pct" />}
+      {sv && <RatingBar label="SV%" awayVal={sv[0] * 100} homeVal={sv[1] * 100} format="fixed1" />}
     </div>
   )
 }
@@ -572,6 +583,7 @@ function LiveMLBWinProbSection({ matchup }: { matchup: MLBMatchupData }) {
   useEffect(() => {
     if (matchup.gameStatus === 3) return
     const winProb = matchup.home.liveWinProbability ?? matchup.home.winProbability
+    if (winProb == null) return  // No probability signal — don't bend the sparkline with a fabricated midline.
     const scoreDiff = matchup.home.score - matchup.away.score
     recordMLBSnapshot(matchup.gameId, winProb, scoreDiff, matchup.currentInning)
     setChartData([...getHistory(String(matchup.gameId))])
@@ -807,8 +819,9 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
   }
 
   const { away, home } = matchup
-  const awayProbPct = (away.winProbability ?? 0.5) * 100
-  const homeProbPct = (home.winProbability ?? 0.5) * 100
+  const hasWinProb = away.winProbability !== null && home.winProbability !== null
+  const awayProbPct = hasWinProb ? (away.winProbability as number) * 100 : 0
+  const homeProbPct = hasWinProb ? (home.winProbability as number) * 100 : 0
   const isLiveNBA = matchup.sport === "nba" && (matchup as NBAMatchupData).gameStatus >= 2
   const isLiveMLB = matchup.sport === "mlb" && (matchup as MLBMatchupData).gameStatus >= 2
 
@@ -872,7 +885,8 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
 
       <Separator className="bg-border" />
 
-      {/* Win Probability Bar */}
+      {/* Win Probability Bar — hidden entirely when odds unavailable; no even-split fallback. */}
+      {hasWinProb && (
       <div className="px-3 py-2">
         <div className="mb-1 flex items-center justify-between">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -907,19 +921,20 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
           </span>
         </div>
       </div>
+      )}
 
       <Separator className="bg-border" />
 
       {/* Score Section - Dynamic based on game status */}
       <div className="px-3 py-2">
-        {(matchup.sport === "nba" || matchup.sport === "mlb") && (matchup as NBAMatchupData | MLBMatchupData).gameStatus >= 2 ? (
+        {(matchup.sport === "nba" || matchup.sport === "mlb" || matchup.sport === "nhl") && (matchup as NBAMatchupData | MLBMatchupData | NHLMatchupData).gameStatus >= 2 ? (
           // Live or Final game - show actual score
           <>
             <div className="mb-1 flex items-center justify-between">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                {(matchup as NBAMatchupData | MLBMatchupData).gameStatus === 3 ? "Final" : "Live"}
+                {(matchup as NBAMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 3 ? "Final" : "Live"}
               </span>
-              {(matchup as NBAMatchupData | MLBMatchupData).gameStatus === 2 && (
+              {(matchup as NBAMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 2 && (
                 <span className="font-mono text-[10px] text-emerald-400 animate-pulse rounded-sm bg-emerald-500/10 px-0.5 py-0.5 [filter:drop-shadow(0_0_6px_#34d399)]">
                   {matchup.sport === "nba"
                     ? `Q${(matchup as NBAMatchupData).period} ${parseGameClock((matchup as NBAMatchupData).gameClock)}`
@@ -933,9 +948,9 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
                   {away.abbreviation}
                 </span>
                 <span
-                  className={`font-mono text-2xl font-bold tabular-nums ${(away as NBATeamData | MLBTeamData).score > (home as NBATeamData | MLBTeamData).score ? "text-emerald-400" : "text-foreground"}`}
+                  className={`font-mono text-2xl font-bold tabular-nums ${(away as NBATeamData | MLBTeamData | NHLTeamData).score > (home as NBATeamData | MLBTeamData | NHLTeamData).score ? "text-emerald-400" : "text-foreground"}`}
                 >
-                  {(away as NBATeamData | MLBTeamData).score}
+                  {(away as NBATeamData | MLBTeamData | NHLTeamData).score}
                 </span>
               </div>
               <span className="px-3 font-mono text-xs text-muted-foreground">
@@ -946,9 +961,9 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
                   {home.abbreviation}
                 </span>
                 <span
-                  className={`font-mono text-2xl font-bold tabular-nums ${(home as NBATeamData | MLBTeamData).score > (away as NBATeamData | MLBTeamData).score ? "text-emerald-400" : "text-foreground"}`}
+                  className={`font-mono text-2xl font-bold tabular-nums ${(home as NBATeamData | MLBTeamData | NHLTeamData).score > (away as NBATeamData | MLBTeamData | NHLTeamData).score ? "text-emerald-400" : "text-foreground"}`}
                 >
-                  {(home as NBATeamData | MLBTeamData).score}
+                  {(home as NBATeamData | MLBTeamData | NHLTeamData).score}
                 </span>
               </div>
             </div>

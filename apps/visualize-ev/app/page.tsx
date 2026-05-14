@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { SportsDashboard, type Sport, type MatchupData, SPORT_LABELS, SPORT_MODELS } from "@repo/ui";
 import { Activity } from "lucide-react";
 
-const SPORTS: Sport[] = ["nba", "mlb"];
+const SPORTS: Sport[] = ["nba", "mlb", "nhl"];
 
 export default function Home() {
   const [activeSport, setActiveSport] = useState<Sport>("nba");
@@ -19,10 +19,10 @@ export default function Home() {
 
   useEffect(() => {
     const fetchData = async (isInitial = false) => {
-      if (activeSport === "nba" || activeSport === "mlb") {
+      if (activeSport === "nba" || activeSport === "mlb" || activeSport === "nhl") {
         if (isInitial) setLoading(true);
 
-        const endpoint = activeSport === "nba" ? "nba/today" : "mlb/today";
+        const endpoint = `${activeSport}/today`;
         try {
           const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/${endpoint}`);
           const data = await res.json();
@@ -42,7 +42,7 @@ export default function Home() {
           setLoading(false);
         }
       } else {
-        // NFL/NHL coming soon
+        // NFL coming soon
         setMatchups([]);
         setLoading(false);
       }
@@ -54,7 +54,7 @@ export default function Home() {
     // Set up polling for live games
     let pollInterval: NodeJS.Timeout | null = null;
 
-    if (activeSport === "nba" || activeSport === "mlb") {
+    if (activeSport === "nba" || activeSport === "mlb" || activeSport === "nhl") {
       pollInterval = setInterval(() => fetchData(false), 15000);
     }
 
@@ -134,7 +134,7 @@ export default function Home() {
             ) : (
               <div className="flex flex-col items-center justify-center py-20 font-mono text-xs text-muted-foreground">
                 <span className="uppercase">No {SPORT_LABELS[activeSport]} games scheduled today</span>
-                {activeSport !== "nba" && activeSport !== "mlb" && (
+                {activeSport !== "nba" && activeSport !== "mlb" && activeSport !== "nhl" && (
                   <span className="mt-2 text-[10px] text-muted-foreground/60">
                     ({SPORT_LABELS[activeSport]} data coming soon)
                   </span>

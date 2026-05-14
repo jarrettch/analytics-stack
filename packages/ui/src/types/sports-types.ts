@@ -3,6 +3,7 @@ export type Sport = "nba" | "nfl" | "mlb" | "nhl"
 export interface BaseTeamData {
   name: string
   abbreviation: string
+  espnSlug?: string  // Optional override for ESPN CDN team-logo slug; falls back to abbreviation.toLowerCase()
   record: string
   winPct: number
   seed?: number
@@ -10,7 +11,7 @@ export interface BaseTeamData {
   conference: string
   streak: string
   predictedScore: number
-  winProbability: number
+  winProbability: number | null  // null when no odds available — render rule: hide the bar, don't render an even split
 }
 
 // NBA-specific team data
@@ -46,11 +47,12 @@ export interface MLBTeamData extends BaseTeamData {
 
 // NHL-specific team data
 export interface NHLTeamData extends BaseTeamData {
-  goalsFor: number
-  goalsAgainst: number
-  powerPlayPct: number
-  penaltyKillPct: number
-  savesPct: number
+  score: number             // Live/final score
+  goalsFor: number | null   // None when team-summary data is missing
+  goalsAgainst: number | null
+  powerPlayPct: number | null
+  penaltyKillPct: number | null
+  savesPct: number | null
 }
 
 export interface BaseMatchupData {
@@ -110,6 +112,18 @@ export interface MLBMatchupData extends BaseMatchupData {
 
 export interface NHLMatchupData extends BaseMatchupData {
   sport: "nhl"
+  gameStatus: number             // 1=scheduled, 2=live, 3=final
+  period: number | null          // null pre-game; 1–3 REG, 4 OT, 5 SO when live/final
+  gameClock: string | null       // "mm:ss" when live REG/OT; null in pre-game, intermission, SO, and final
+  pregameSpread?: number | null
+  spreadOddsHome?: number | null
+  spreadOddsAway?: number | null
+  overOdds?: number | null
+  underOdds?: number | null
+  homeMoneyline?: number | null
+  awayMoneyline?: number | null
+  seriesGameNumber: number | null  // Playoff context, populated by a later feature; v1 emits null.
+  seriesStatus: string | null
   away: NHLTeamData
   home: NHLTeamData
 }
