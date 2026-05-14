@@ -59,3 +59,22 @@ jobs:
             echo "Full response: $response"
             exit 1
           fi
+
+      - name: Fetch NHL odds
+        run: |
+          echo "Fetching NHL odds..."
+          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/nhl/cron/fetch-odds")
+          echo "Response: $response"
+
+          if echo "$response" | grep -q 'success.*true'; then
+            fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
+            persisted=$(echo "$response" | grep -o '"persisted_loaded":[0-9]*' | grep -o '[0-9]*' || echo "0")
+            echo "NHL odds fetched: fresh=${fresh} persisted=${persisted}"
+            if [ "$fresh" = "0" ]; then
+              echo "WARNING: No fresh NHL odds from API — dark day or lines not yet posted"
+            fi
+          else
+            echo "Failed to fetch NHL odds"
+            echo "Full response: $response"
+            exit 1
+          fi
