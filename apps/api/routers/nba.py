@@ -255,7 +255,7 @@ async def get_odds_map(target_date: date | None = None):
     Prefers Circa lines; falls back to consensus bookOdds.
     Merges fresh odds with persisted odds so finished games retain their lines.
     """
-    odds_map = load_persisted_odds()
+    odds_map = load_persisted_odds(table_name="nba_odds")
 
     api_key = os.getenv("SPORTS_GAME_ODDS_KEY")
     if not api_key:
@@ -371,7 +371,7 @@ async def get_odds_map(target_date: date | None = None):
         odds_map.update(fresh_odds)
 
         for gd, gd_odds in odds_by_date.items():
-            save_persisted_odds(gd_odds, game_date=gd)
+            save_persisted_odds(gd_odds, game_date=gd, table_name="nba_odds")
 
         logger.info(f"Odds map: {len(fresh_odds)} fresh + {len(odds_map) - len(fresh_odds)} persisted = {len(odds_map)} total")
         return odds_map, len(fresh_odds)
@@ -486,7 +486,7 @@ async def get_todays_games():
             tasks.append(loop.run_in_executor(None, get_advanced_stats_map))
             fetch_keys.append("advanced_stats")
         if not cached_odds:
-            tasks.append(loop.run_in_executor(None, load_persisted_odds))
+            tasks.append(loop.run_in_executor(None, lambda: load_persisted_odds(table_name="nba_odds")))
             fetch_keys.append("odds")
 
         # Fetch only what's needed

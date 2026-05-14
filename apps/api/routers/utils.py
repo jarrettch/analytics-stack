@@ -163,13 +163,13 @@ def local_time_hhmm(utc_str: str) -> str:
         return ""
 
 
-def load_persisted_odds(game_date: date | None = None, table_name: str = "nba_odds") -> dict:
+def load_persisted_odds(game_date: date | None = None, *, table_name: str) -> dict:
     """Load persisted odds from Supabase.
 
     With no date, queries yesterday/today/tomorrow ET to absorb timezone boundaries
-    and post-midnight refreshes. `table_name` defaults to the shared `nba_odds`
-    table that currently holds NBA + MLB; pass an explicit name once per-sport
-    tables exist.
+    and post-midnight refreshes. `table_name` is required and keyword-only — every
+    caller must name the per-sport table explicitly so we can't silently land in
+    the wrong one.
     """
     if not supabase:
         logger.warning("Supabase not configured, skipping odds load")
@@ -198,7 +198,7 @@ def load_persisted_odds(game_date: date | None = None, table_name: str = "nba_od
     return odds_map
 
 
-def save_persisted_odds(odds_map: dict, game_date: date | None = None, table_name: str = "nba_odds"):
+def save_persisted_odds(odds_map: dict, game_date: date | None = None, *, table_name: str):
     """Upsert odds to Supabase (keyed by game_date + matchup_key)."""
     if not supabase:
         return

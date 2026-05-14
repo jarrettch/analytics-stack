@@ -346,7 +346,7 @@ async def get_stats_map() -> dict:
 
 async def get_odds_map(target_date: date | None = None):
     """Fetch MLB odds from SportsGameOdds. Same oddIDs as NBA (confirmed)."""
-    odds_map = load_persisted_odds()
+    odds_map = load_persisted_odds(table_name="mlb_odds")
 
     api_key = os.getenv("SPORTS_GAME_ODDS_KEY")
     if not api_key:
@@ -454,7 +454,7 @@ async def get_odds_map(target_date: date | None = None):
         odds_map.update(fresh_odds)
 
         for gd, gd_odds in odds_by_date.items():
-            save_persisted_odds(gd_odds, game_date=gd)
+            save_persisted_odds(gd_odds, game_date=gd, table_name="mlb_odds")
 
         logger.info(f"MLB odds map: {len(fresh_odds)} fresh + {len(odds_map) - len(fresh_odds)} persisted = {len(odds_map)} total")
         return odds_map, len(fresh_odds)
@@ -482,7 +482,7 @@ async def cron_fetch_odds(offset: int = 0):
             "fresh_from_api": fresh_count,
             "persisted_loaded": len(odds) - fresh_count,
             "total_matchups": len(odds),
-            "persisted_to": "supabase:nba_odds",
+            "persisted_to": "supabase:mlb_odds",
             "date": target.isoformat(),
         }
     except Exception as e:
@@ -517,7 +517,7 @@ async def get_todays_games():
             tasks.append(get_stats_map())
             keys.append("stats")
         if not cached_odds:
-            tasks.append(asyncio.get_event_loop().run_in_executor(None, load_persisted_odds))
+            tasks.append(asyncio.get_event_loop().run_in_executor(None, lambda: load_persisted_odds(table_name="mlb_odds")))
             keys.append("odds")
 
         if tasks:
