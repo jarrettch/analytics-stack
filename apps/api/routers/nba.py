@@ -623,6 +623,12 @@ async def get_todays_games():
             projected_away = round((total_points - blended_margin) / 2)
             projected_home = round((total_points + blended_margin) / 2)
 
+            # Playoff series context — both fields are empty strings during the
+            # regular season. seriesText reads like "Pacers lead series 1-0",
+            # "Series tied 2-2", or "NBA Finals".
+            series_text = (g.get('seriesText') or '').strip()
+            series_game_number = g.get('seriesGameNumber') or ''
+
             refined_games.append({
                 "sport": "nba",
                 "gameId": g['gameId'],
@@ -635,6 +641,8 @@ async def get_todays_games():
                 "venue": venue,
                 "broadcast": "Local",
                 "model": "EV-MODEL-V1",
+                "series": series_text or None,
+                "seriesGameNumber": series_game_number or None,
                 "spreadLine": spread_line,
                 "spreadResult": spread_result,  # True = favorite covered, False = didn't cover, None = not final
                 "pregameSpread": odds.get("homeSpread"),  # home perspective, negative = home favored
