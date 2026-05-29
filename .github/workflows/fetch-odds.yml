@@ -78,3 +78,22 @@ jobs:
             echo "Full response: $response"
             exit 1
           fi
+
+      - name: Fetch WNBA odds
+        run: |
+          echo "Fetching WNBA odds..."
+          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/wnba/cron/fetch-odds")
+          echo "Response: $response"
+
+          if echo "$response" | grep -q 'success.*true'; then
+            fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
+            persisted=$(echo "$response" | grep -o '"persisted_loaded":[0-9]*' | grep -o '[0-9]*' || echo "0")
+            echo "WNBA odds fetched: fresh=${fresh} persisted=${persisted}"
+            if [ "$fresh" = "0" ]; then
+              echo "WARNING: No fresh WNBA odds from API — dark day or lines not yet posted"
+            fi
+          else
+            echo "Failed to fetch WNBA odds"
+            echo "Full response: $response"
+            exit 1
+          fi

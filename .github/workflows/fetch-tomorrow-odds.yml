@@ -71,3 +71,19 @@ jobs:
             echo "Full response: $response"
             exit 1
           fi
+
+      - name: Fetch tomorrow's WNBA odds
+        run: |
+          echo "Fetching tomorrow's WNBA odds..."
+          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/wnba/cron/fetch-odds?offset=1")
+          echo "Response: $response"
+
+          if echo "$response" | grep -q 'success.*true'; then
+            fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
+            echo "Tomorrow WNBA odds fetched: fresh=${fresh}"
+            # fresh=0 is acceptable — off-day or lines not yet posted.
+          else
+            echo "Failed to fetch tomorrow's WNBA odds"
+            echo "Full response: $response"
+            exit 1
+          fi
