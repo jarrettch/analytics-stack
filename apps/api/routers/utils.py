@@ -360,3 +360,163 @@ async def fetch_sgo_odds(
     except Exception as e:
         logger.error(f"SportsGameOdds {league_id} fetch error: {e}")
         return odds_map, 0
+
+
+ODDS_API_BASE = "https://api.the-odds-api.com/v4"
+
+# Book preference for The Odds API, first available per event wins. BetOnline and
+# Pinnacle aren't carried on the free tier for every league (notably WNBA), so the
+# chain leads with the sharp, always-present US books and degrades from there.
+ODDS_API_BOOKS = ["pinnacle", "draftkings", "fanduel", "betmgm", "betrivers", "bovada", "mybookieag"]
+
+
+def _odds_api_pick_book(event: dict, books: list[str]) -> dict | None:
+    """First preferred book present on an event; falls back to whatever's listed first."""
+    available = {b["key"]: b for b in event.get("bookmakers", [])}
+    for key in books:
+        if key in available:
+            return available[key]
+    bookmakers = event.get("bookmakers", [])
+    return bookmakers[0] if bookmakers else None
+
+
+async def fetch_odds_api_odds(
+    *,
+    sport_key: str,
+    table_name: str,
+    tricode_for: Callable[[str], str],
+    target_date: date | None = None,
+    books: list[str] | None = None,
+) -> tuple[dict, int]:
+    """Fetch a league's odds from The Odds API, merge with persisted rows, persist fresh.
+
+    Mirrors fetch_sgo_odds's contract and output shape, but reads The Odds API's
+    per-bookmaker market/outcome structure (h2h/spreads/totals) instead of SGO's flat
+    oddID keys. Used for leagues not on our SGO tier (e.g. WNBA). `tricode_for` maps a
+    full team name ("Las Vegas Aces") to a tricode.
+
+    The Odds API returns raw book odds only (no de-vigged fairOdds), so win probability
+    is derived from the book moneyline pair, which calculate_win_probability_from_odds
+    de-vigs. Spreads/totals fall back to the persisted line when the fresh API has null.
+    """
+    odds_map = load_persisted_odds(table_name=table_name)
+
+    api_key = os.getenv("ODDS_API_KEY")
+    if not api_key:
+        logger.warning(f"ODDS_API_KEY not set, returning persisted {sport_key} odds only")
+        return odds_map, 0
+
+    books = books or ODDS_API_BOOKS
+    try:
+        # Scope to a single ET day's window (commenceTime is UTC), matching the SGO path.
+        target = target_date or datetime.now(ET).date()
+        starts_after_utc = datetime.combine(target, datetime.min.time(), ET).astimezone(UTC)
+        starts_before_utc = datetime.combine(target + timedelta(days=1), datetime.min.time(), ET).astimezone(UTC)
+
+        params = {
+            "apiKey": api_key,
+            "regions": "us",
+            "markets": "h2h,spreads,totals",
+            "oddsFormat": "american",
+            "dateFormat": "iso",
+            "commenceTimeFrom": starts_after_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "commenceTimeTo": starts_before_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
+        client = get_http_client()
+        r = await client.get(f"{ODDS_API_BASE}/sports/{sport_key}/odds", params=params)
+        r.raise_for_status()
+        events = r.json()
+        remaining = r.headers.get("x-requests-remaining", "?")
+        logger.info(f"The Odds API: {len(events)} {sport_key} events for {target.isoformat()} (credits left: {remaining})")
+
+        fresh_odds = {}
+        odds_by_date = {}
+
+        for event in events:
+            home_name = event.get("home_team", "")
+            away_name = event.get("away_team", "")
+            home_tri = tricode_for(home_name)
+            away_tri = tricode_for(away_name)
+
+            if not home_tri or not away_tri:
+                logger.warning(
+                    f"Skipping Odds API {sport_key} event {event.get('id', '?')} — "
+                    f"home={home_name!r}, away={away_name!r}"
+                )
+                continue
+
+            matchup_key = f"{away_tri}@{home_tri}"
+            try:
+                game_date = datetime.fromisoformat(event["commence_time"].replace("Z", "+00:00")).astimezone(ET).date()
+            except Exception:
+                game_date = datetime.now(ET).date()
+
+            away_ml = home_ml = None
+            away_spread = home_spread = away_spread_odds = home_spread_odds = None
+            over_under = over_odds = under_odds = None
+
+            book = _odds_api_pick_book(event, books)
+            if book:
+                for market in book.get("markets", []):
+                    key = market.get("key")
+                    if key == "h2h":
+                        for oc in market.get("outcomes", []):
+                            if oc.get("name") == away_name:
+                                away_ml = to_num(oc.get("price"))
+                            elif oc.get("name") == home_name:
+                                home_ml = to_num(oc.get("price"))
+                    elif key == "spreads":
+                        for oc in market.get("outcomes", []):
+                            if oc.get("name") == away_name:
+                                away_spread = to_num(oc.get("point"))
+                                away_spread_odds = to_num(oc.get("price"))
+                            elif oc.get("name") == home_name:
+                                home_spread = to_num(oc.get("point"))
+                                home_spread_odds = to_num(oc.get("price"))
+                    elif key == "totals":
+                        for oc in market.get("outcomes", []):
+                            if oc.get("name") == "Over":
+                                over_under = to_num(oc.get("point"))
+                                over_odds = to_num(oc.get("price"))
+                            elif oc.get("name") == "Under":
+                                under_odds = to_num(oc.get("price"))
+
+            persisted = odds_map.get((game_date.isoformat(), matchup_key), {})
+            eff_away_spread      = away_spread      if away_spread      is not None else persisted.get("awaySpread")
+            eff_home_spread      = home_spread      if home_spread      is not None else persisted.get("homeSpread")
+            eff_away_spread_odds = away_spread_odds if away_spread_odds is not None else persisted.get("awaySpreadOdds")
+            eff_home_spread_odds = home_spread_odds if home_spread_odds is not None else persisted.get("homeSpreadOdds")
+            eff_over_under       = over_under       if over_under       is not None else persisted.get("overUnder")
+            eff_over_odds        = over_odds        if over_odds        is not None else persisted.get("overOdds")
+            eff_under_odds       = under_odds       if under_odds       is not None else persisted.get("underOdds")
+
+            away_prob, home_prob = calculate_win_probability_from_odds(
+                away_ml, home_ml, eff_away_spread, eff_home_spread
+            )
+
+            odds_data = {
+                "awaySpread": eff_away_spread, "homeSpread": eff_home_spread,
+                "awaySpreadOdds": eff_away_spread_odds, "homeSpreadOdds": eff_home_spread_odds,
+                "overUnder": eff_over_under, "overOdds": eff_over_odds, "underOdds": eff_under_odds,
+                "awayMoneyline": away_ml, "homeMoneyline": home_ml,
+                "awayWinProbability": away_prob, "homeWinProbability": home_prob,
+            }
+            fresh_odds[(game_date.isoformat(), matchup_key)] = odds_data
+            odds_by_date.setdefault(game_date, {})[matchup_key] = odds_data
+
+        odds_map.update(fresh_odds)
+        for gd, gd_odds in odds_by_date.items():
+            save_persisted_odds(gd_odds, game_date=gd, table_name=table_name)
+
+        logger.info(
+            f"{sport_key} odds map: {len(fresh_odds)} fresh + "
+            f"{len(odds_map) - len(fresh_odds)} persisted = {len(odds_map)} total"
+        )
+        return odds_map, len(fresh_odds)
+    except httpx.HTTPStatusError as e:
+        logger.error(f"The Odds API {sport_key} HTTP error: {e.response.status_code} - {e.response.text}")
+        return odds_map, 0
+    except Exception as e:
+        logger.error(f"The Odds API {sport_key} fetch error: {e}")
+        return odds_map, 0
