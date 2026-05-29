@@ -4,7 +4,10 @@ import { useEffect, useState, useRef } from "react";
 import { SportsDashboard, type Sport, type MatchupData, SPORT_LABELS, SPORT_MODELS } from "@repo/ui";
 import { Activity } from "lucide-react";
 
-const SPORTS: Sport[] = ["nba", "mlb", "nhl"];
+const SPORTS: Sport[] = ["nba", "wnba", "mlb", "nhl"];
+
+// Sports with a live backend endpoint (others fall through to "coming soon").
+const LIVE_SPORTS: Sport[] = ["nba", "wnba", "mlb", "nhl"];
 
 export default function Home() {
   const [activeSport, setActiveSport] = useState<Sport>("nba");
@@ -19,7 +22,7 @@ export default function Home() {
 
   useEffect(() => {
     const fetchData = async (isInitial = false) => {
-      if (activeSport === "nba" || activeSport === "mlb" || activeSport === "nhl") {
+      if (LIVE_SPORTS.includes(activeSport)) {
         if (isInitial) setLoading(true);
 
         const endpoint = `${activeSport}/today`;
@@ -54,7 +57,7 @@ export default function Home() {
     // Set up polling for live games
     let pollInterval: NodeJS.Timeout | null = null;
 
-    if (activeSport === "nba" || activeSport === "mlb" || activeSport === "nhl") {
+    if (LIVE_SPORTS.includes(activeSport)) {
       pollInterval = setInterval(() => fetchData(false), 15000);
     }
 
@@ -134,7 +137,7 @@ export default function Home() {
             ) : (
               <div className="flex flex-col items-center justify-center py-20 font-mono text-xs text-muted-foreground">
                 <span className="uppercase">No {SPORT_LABELS[activeSport]} games scheduled today</span>
-                {activeSport !== "nba" && activeSport !== "mlb" && activeSport !== "nhl" && (
+                {!LIVE_SPORTS.includes(activeSport) && (
                   <span className="mt-2 text-[10px] text-muted-foreground/60">
                     ({SPORT_LABELS[activeSport]} data coming soon)
                   </span>

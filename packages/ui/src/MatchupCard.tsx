@@ -30,6 +30,7 @@ import type {
   NFLMatchupData,
   MLBMatchupData,
   NHLMatchupData,
+  WNBAMatchupData,
   NBATeamData,
   NFLTeamData,
   MLBTeamData,
@@ -407,6 +408,7 @@ function NHLRatings({ away, home }: { away: NHLTeamData; home: NHLTeamData }) {
 function TeamStats({ team, sport }: { team: NBATeamData | NFLTeamData | MLBTeamData | NHLTeamData; sport: string }) {
   switch (sport) {
     case "nba":
+    case "wnba":
       return <NBATeamStats team={team as NBATeamData} />
     case "nfl":
       return <NFLTeamStats team={team as NFLTeamData} />
@@ -927,17 +929,17 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
 
       {/* Score Section - Dynamic based on game status */}
       <div className="px-3 py-2">
-        {(matchup.sport === "nba" || matchup.sport === "mlb" || matchup.sport === "nhl") && (matchup as NBAMatchupData | MLBMatchupData | NHLMatchupData).gameStatus >= 2 ? (
+        {(matchup.sport === "nba" || matchup.sport === "wnba" || matchup.sport === "mlb" || matchup.sport === "nhl") && (matchup as NBAMatchupData | WNBAMatchupData | MLBMatchupData | NHLMatchupData).gameStatus >= 2 ? (
           // Live or Final game - show actual score
           <>
             <div className="mb-1 flex items-center justify-between">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                {(matchup as NBAMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 3 ? "Final" : "Live"}
+                {(matchup as NBAMatchupData | WNBAMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 3 ? "Final" : "Live"}
               </span>
-              {(matchup as NBAMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 2 && (
+              {(matchup as NBAMatchupData | WNBAMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 2 && (
                 <span className="font-mono text-[10px] text-emerald-400 animate-pulse rounded-sm bg-emerald-500/10 px-0.5 py-0.5 [filter:drop-shadow(0_0_6px_#34d399)]">
-                  {matchup.sport === "nba"
-                    ? `Q${(matchup as NBAMatchupData).period} ${parseGameClock((matchup as NBAMatchupData).gameClock)}`
+                  {matchup.sport === "nba" || matchup.sport === "wnba"
+                    ? `Q${(matchup as NBAMatchupData | WNBAMatchupData).period} ${parseGameClock((matchup as NBAMatchupData | WNBAMatchupData).gameClock)}`
                     : matchup.status}
                 </span>
               )}
@@ -1045,6 +1047,7 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
 
       {/* Advanced ratings comparison - sport specific */}
       {matchup.sport === "nba" && <NBARatings away={(matchup as NBAMatchupData).away} home={(matchup as NBAMatchupData).home} />}
+      {matchup.sport === "wnba" && <NBARatings away={(matchup as WNBAMatchupData).away} home={(matchup as WNBAMatchupData).home} />}
       {matchup.sport === "nfl" && <NFLRatings away={(matchup as NFLMatchupData).away} home={(matchup as NFLMatchupData).home} />}
       {matchup.sport === "mlb" && <MLBRatings away={(matchup as MLBMatchupData).away} home={(matchup as MLBMatchupData).home} />}
       {matchup.sport === "nhl" && <NHLRatings away={(matchup as NHLMatchupData).away} home={(matchup as NHLMatchupData).home} />}

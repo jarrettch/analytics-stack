@@ -1,4 +1,4 @@
-export type Sport = "nba" | "nfl" | "mlb" | "nhl"
+export type Sport = "nba" | "nfl" | "mlb" | "nhl" | "wnba"
 
 export interface BaseTeamData {
   name: string
@@ -22,6 +22,9 @@ export interface NBATeamData extends BaseTeamData {
   defRating: number
   pace: number
 }
+
+// WNBA reuses the NBA team shape (off/def rating, pace, last10, score).
+export type WNBATeamData = NBATeamData
 
 // NFL-specific team data
 export interface NFLTeamData extends BaseTeamData {
@@ -87,6 +90,24 @@ export interface NBAMatchupData extends BaseMatchupData {
   home: NBATeamData
 }
 
+// WNBA mirrors the NBA matchup shape (quarter-based clock, same odds fields).
+export interface WNBAMatchupData extends BaseMatchupData {
+  sport: "wnba"
+  gameStatus: number   // 1=scheduled, 2=live, 3=final
+  period: number
+  gameClock: string
+  seriesGameNumber?: string | number | null  // playoff context, null in the regular season
+  pregameSpread?: number | null   // home perspective, negative = home favored
+  spreadOddsHome?: number | null
+  spreadOddsAway?: number | null
+  overOdds?: number | null
+  underOdds?: number | null
+  homeMoneyline?: number | null
+  awayMoneyline?: number | null
+  away: WNBATeamData
+  home: WNBATeamData
+}
+
 export interface NFLMatchupData extends BaseMatchupData {
   sport: "nfl"
   away: NFLTeamData
@@ -128,13 +149,14 @@ export interface NHLMatchupData extends BaseMatchupData {
   home: NHLTeamData
 }
 
-export type MatchupData = NBAMatchupData | NFLMatchupData | MLBMatchupData | NHLMatchupData
+export type MatchupData = NBAMatchupData | NFLMatchupData | MLBMatchupData | NHLMatchupData | WNBAMatchupData
 
 export const SPORT_LABELS: Record<Sport, string> = {
   nba: "NBA",
   nfl: "NFL",
   mlb: "MLB",
   nhl: "NHL",
+  wnba: "WNBA",
 }
 
 export const SPORT_MODELS: Record<Sport, string> = {
@@ -142,4 +164,5 @@ export const SPORT_MODELS: Record<Sport, string> = {
   nfl: "DVOA v3.1",
   mlb: "PECOTA v2.8",
   nhl: "xG v5.0",
+  wnba: "EV-MODEL-V1",
 }

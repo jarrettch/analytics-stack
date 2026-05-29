@@ -57,27 +57,30 @@ cache = Cache({
 # Authoritative WNBA team identity, harvested from the WNBA schedule CDN — the live
 # scoreboard uses these tricodes. nba_api's static get_wnba_teams() is stale for 2026
 # (missing Toronto/Portland, and lists Phoenix as PHO not PHX), so we hardcode here.
-#   tricode: (team_id, full_name, nickname, arena)
-WNBA_TEAMS: dict[str, tuple[str, str, str, str]] = {
-    "ATL": ("1611661330", "Atlanta Dream",          "Dream",     "Gateway Center Arena @ College Park"),
-    "CHI": ("1611661329", "Chicago Sky",            "Sky",       "Wintrust Arena"),
-    "CON": ("1611661323", "Connecticut Sun",        "Sun",       "Mohegan Sun Arena"),
-    "DAL": ("1611661321", "Dallas Wings",           "Wings",     "College Park Center"),
-    "GSV": ("1611661331", "Golden State Valkyries", "Valkyries", "Chase Center"),
-    "IND": ("1611661325", "Indiana Fever",          "Fever",     "Gainbridge Fieldhouse"),
-    "LAS": ("1611661320", "Los Angeles Sparks",     "Sparks",    "Crypto.com Arena"),
-    "LVA": ("1611661319", "Las Vegas Aces",         "Aces",      "Michelob ULTRA Arena"),
-    "MIN": ("1611661324", "Minnesota Lynx",         "Lynx",      "Target Center"),
-    "NYL": ("1611661313", "New York Liberty",       "Liberty",   "Barclays Center"),
-    "PDX": ("1611661327", "Portland Fire",          "Fire",      "Moda Center"),
-    "PHX": ("1611661317", "Phoenix Mercury",        "Mercury",   "Mortgage Matchup Center"),
-    "SEA": ("1611661328", "Seattle Storm",          "Storm",     "Climate Pledge Arena"),
-    "TOR": ("1611661332", "Toronto Tempo",          "Tempo",     "Coca-Cola Coliseum"),
-    "WAS": ("1611661322", "Washington Mystics",     "Mystics",   "CareFirst Arena"),
+# ESPN's logo CDN uses its own abbreviations (lv not lva, gs not gsv, etc.), so each
+# team carries the ESPN slug for the frontend's espnSlug override.
+#   tricode: (team_id, full_name, nickname, arena, espn_slug)
+WNBA_TEAMS: dict[str, tuple[str, str, str, str, str]] = {
+    "ATL": ("1611661330", "Atlanta Dream",          "Dream",     "Gateway Center Arena @ College Park", "atl"),
+    "CHI": ("1611661329", "Chicago Sky",            "Sky",       "Wintrust Arena",                      "chi"),
+    "CON": ("1611661323", "Connecticut Sun",        "Sun",       "Mohegan Sun Arena",                   "con"),
+    "DAL": ("1611661321", "Dallas Wings",           "Wings",     "College Park Center",                 "dal"),
+    "GSV": ("1611661331", "Golden State Valkyries", "Valkyries", "Chase Center",                        "gs"),
+    "IND": ("1611661325", "Indiana Fever",          "Fever",     "Gainbridge Fieldhouse",               "ind"),
+    "LAS": ("1611661320", "Los Angeles Sparks",     "Sparks",    "Crypto.com Arena",                    "la"),
+    "LVA": ("1611661319", "Las Vegas Aces",         "Aces",      "Michelob ULTRA Arena",                "lv"),
+    "MIN": ("1611661324", "Minnesota Lynx",         "Lynx",      "Target Center",                       "min"),
+    "NYL": ("1611661313", "New York Liberty",       "Liberty",   "Barclays Center",                     "ny"),
+    "PDX": ("1611661327", "Portland Fire",          "Fire",      "Moda Center",                         "por"),
+    "PHX": ("1611661317", "Phoenix Mercury",        "Mercury",   "Mortgage Matchup Center",             "phx"),
+    "SEA": ("1611661328", "Seattle Storm",          "Storm",     "Climate Pledge Arena",                "sea"),
+    "TOR": ("1611661332", "Toronto Tempo",          "Tempo",     "Coca-Cola Coliseum",                  "tor"),
+    "WAS": ("1611661322", "Washington Mystics",     "Mystics",   "CareFirst Arena",                     "wsh"),
 }
 
 _FULLNAME_TO_TRICODE = {v[1].lower(): tri for tri, v in WNBA_TEAMS.items()}
 _NICKNAME_TO_TRICODE = {v[2].lower(): tri for tri, v in WNBA_TEAMS.items()}
+_ESPN_SLUG = {tri: v[4] for tri, v in WNBA_TEAMS.items()}
 
 # WNBA league averages (per-game ORtg/DRtg, pace) used only as fallbacks when the
 # advanced-stats endpoint is missing a team.
@@ -453,6 +456,7 @@ async def get_todays_games():
                 "away": {
                     "name": g['awayTeam']['teamName'],
                     "abbreviation": away_tri,
+                    "espnSlug": _ESPN_SLUG.get(away_tri),
                     "record": f"{g['awayTeam']['wins']}-{g['awayTeam']['losses']}",
                     "winPct": away_win_pct,
                     "seed": away_stats.get("seed", 0),
@@ -469,6 +473,7 @@ async def get_todays_games():
                 "home": {
                     "name": g['homeTeam']['teamName'],
                     "abbreviation": home_tri,
+                    "espnSlug": _ESPN_SLUG.get(home_tri),
                     "record": f"{g['homeTeam']['wins']}-{g['homeTeam']['losses']}",
                     "winPct": home_win_pct,
                     "seed": home_stats.get("seed", 0),
