@@ -5,7 +5,6 @@ import logging
 import os
 from datetime import date, datetime, timedelta
 
-import httpx
 from fastapi import APIRouter
 
 from .utils import (
@@ -13,14 +12,11 @@ from .utils import (
     CACHE_TTL_LIVE,
     CACHE_TTL_ODDS,
     ET,
-    UTC,
     Cache,
-    calculate_win_probability_from_odds,
+    fetch_sgo_odds,
     format_et_time,
     get_http_client,
     load_persisted_odds,
-    save_persisted_odds,
-    sgo_book_val,
     to_num,
 )
 
@@ -254,115 +250,13 @@ async def get_scoreboard_data() -> dict:
 # --- Odds (SGO) -------------------------------------------------------------
 
 async def get_odds_map(target_date: date | None = None):
-    """Fetch NHL odds from SGO and merge with persisted rows. Mirrors nba.get_odds_map."""
-    odds_map = load_persisted_odds(table_name="nhl_odds")
-
-    api_key = os.getenv("SPORTS_GAME_ODDS_KEY")
-    if not api_key:
-        logger.warning("SPORTS_GAME_ODDS_KEY not set, returning persisted NHL odds only")
-        return odds_map, 0
-
-    try:
-        target = target_date or datetime.now(ET).date()
-        starts_after_utc = datetime.combine(target, datetime.min.time(), ET).astimezone(UTC)
-        starts_before_utc = datetime.combine(target + timedelta(days=1), datetime.min.time(), ET).astimezone(UTC)
-
-        url = "https://api.sportsgameodds.com/v2/events"
-        params = {
-            "leagueID": "NHL",
-            "oddsAvailable": "true",
-            "startsAfter": starts_after_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "startsBefore": starts_before_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "oddID": ",".join([
-                "points-home-game-ml-home", "points-away-game-ml-away",
-                "points-home-game-sp-home", "points-away-game-sp-away",
-                "points-all-game-ou-over",  "points-all-game-ou-under",
-            ]),
-            "limit": 20,
-        }
-        headers = {"x-api-key": api_key}
-
-        client = get_http_client()
-        r = await client.get(url, params=params, headers=headers)
-        r.raise_for_status()
-        games = r.json().get("data", [])
-        logger.info(f"SportsGameOdds: {len(games)} NHL events for {target.isoformat()}")
-
-        fresh_odds = {}
-        odds_by_date = {}
-
-        for game in games:
-            teams = game.get("teams", {})
-            home_id = teams.get("home", {}).get("teamID", "")
-            away_id = teams.get("away", {}).get("teamID", "")
-            home_tri = get_tricode_from_sgo_team_id(home_id)
-            away_tri = get_tricode_from_sgo_team_id(away_id)
-
-            if not home_tri or not away_tri:
-                logger.warning(
-                    f"Skipping SGO NHL event {game.get('eventID', '?')} — "
-                    f"home_team_id={home_id!r}, away_team_id={away_id!r}"
-                )
-                continue
-
-            matchup_key = f"{away_tri}@{home_tri}"
-            starts_at = game.get("status", {}).get("startsAt", "")
-            try:
-                game_date = datetime.fromisoformat(starts_at.replace("Z", "+00:00")).astimezone(ET).date()
-            except Exception:
-                game_date = datetime.now(ET).date()
-
-            odds = game.get("odds", {})
-
-            away_spread      = to_num(sgo_book_val(odds, "points-away-game-sp-away", "spread"))
-            home_spread      = to_num(sgo_book_val(odds, "points-home-game-sp-home", "spread"))
-            away_spread_odds = to_num(sgo_book_val(odds, "points-away-game-sp-away", "odds"))
-            home_spread_odds = to_num(sgo_book_val(odds, "points-home-game-sp-home", "odds"))
-            away_ml          = to_num(sgo_book_val(odds, "points-away-game-ml-away", "odds"))
-            home_ml          = to_num(sgo_book_val(odds, "points-home-game-ml-home", "odds"))
-            over_under       = to_num(sgo_book_val(odds, "points-all-game-ou-over",  "overUnder"))
-            over_odds        = to_num(sgo_book_val(odds, "points-all-game-ou-over",  "odds"))
-            under_odds       = to_num(sgo_book_val(odds, "points-all-game-ou-under", "odds"))
-
-            away_fair_ml = to_num(odds.get("points-away-game-ml-away", {}).get("fairOdds"))
-            home_fair_ml = to_num(odds.get("points-home-game-ml-home", {}).get("fairOdds"))
-
-            persisted = odds_map.get((game_date.isoformat(), matchup_key), {})
-            eff_away_spread      = away_spread      if away_spread      is not None else persisted.get("awaySpread")
-            eff_home_spread      = home_spread      if home_spread      is not None else persisted.get("homeSpread")
-            eff_away_spread_odds = away_spread_odds if away_spread_odds is not None else persisted.get("awaySpreadOdds")
-            eff_home_spread_odds = home_spread_odds if home_spread_odds is not None else persisted.get("homeSpreadOdds")
-            eff_over_under       = over_under       if over_under       is not None else persisted.get("overUnder")
-            eff_over_odds        = over_odds        if over_odds        is not None else persisted.get("overOdds")
-            eff_under_odds       = under_odds       if under_odds       is not None else persisted.get("underOdds")
-
-            away_prob, home_prob = calculate_win_probability_from_odds(
-                away_fair_ml or away_ml, home_fair_ml or home_ml, eff_away_spread, eff_home_spread
-            )
-
-            odds_data = {
-                "awaySpread": eff_away_spread, "homeSpread": eff_home_spread,
-                "awaySpreadOdds": eff_away_spread_odds, "homeSpreadOdds": eff_home_spread_odds,
-                "overUnder": eff_over_under, "overOdds": eff_over_odds, "underOdds": eff_under_odds,
-                "awayMoneyline": away_ml, "homeMoneyline": home_ml,
-                "awayWinProbability": away_prob, "homeWinProbability": home_prob,
-            }
-            fresh_odds[(game_date.isoformat(), matchup_key)] = odds_data
-            odds_by_date.setdefault(game_date, {})[matchup_key] = odds_data
-
-        odds_map.update(fresh_odds)
-        for gd, gd_odds in odds_by_date.items():
-            save_persisted_odds(gd_odds, game_date=gd, table_name="nhl_odds")
-
-        logger.info(f"NHL odds map: {len(fresh_odds)} fresh + {len(odds_map) - len(fresh_odds)} persisted = {len(odds_map)} total")
-        return odds_map, len(fresh_odds)
-    except httpx.HTTPStatusError as e:
-        logger.error(f"SportsGameOdds NHL HTTP error: {e.response.status_code} - {e.response.text}")
-        return odds_map, 0
-    except Exception as e:
-        logger.error(f"SportsGameOdds NHL fetch error: {e}", exc_info=True)
-        return odds_map, 0
-
+    """Fetch NHL odds from SportsGameOdds, merged with persisted rows."""
+    return await fetch_sgo_odds(
+        league_id="NHL",
+        table_name="nhl_odds",
+        tricode_for=get_tricode_from_sgo_team_id,
+        target_date=target_date,
+    )
 
 # --- Endpoints --------------------------------------------------------------
 

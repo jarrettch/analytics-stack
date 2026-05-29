@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -217,3 +218,145 @@ def save_persisted_odds(odds_map: dict, game_date: date | None = None, *, table_
         logger.info(f"Persisted {len(rows)} matchup odds to {table_name} for {target_date}")
     except Exception as e:
         logger.warning(f"Failed to persist odds: {e}")
+
+
+SGO_EVENTS_URL = "https://api.sportsgameodds.com/v2/events"
+
+# The six markets every SGO-backed sport pulls: home/away moneyline, home/away
+# spread, and the game over/under.
+SGO_ODD_IDS = [
+    "points-home-game-ml-home", "points-away-game-ml-away",
+    "points-home-game-sp-home", "points-away-game-sp-away",
+    "points-all-game-ou-over",  "points-all-game-ou-under",
+]
+
+
+async def fetch_sgo_odds(
+    *,
+    league_id: str,
+    table_name: str,
+    tricode_for: Callable[[str], str],
+    target_date: date | None = None,
+) -> tuple[dict, int]:
+    """Fetch a league's odds from SportsGameOdds, merge with persisted rows, persist fresh.
+
+    Identical for every SGO-backed sport (NBA/MLB/NHL); the only per-sport inputs are
+    the league ID, the Supabase table, and `tricode_for`, which maps an SGO teamID to
+    that sport's tricode. Returns (merged_odds_map, fresh_count).
+
+    Prefers PREFERRED_BOOK lines, falling back to consensus bookOdds. Spreads and totals
+    often go null early in the day or temporarily off-board, so for those we fall back to
+    the persisted value rather than wiping the prior line.
+    """
+    odds_map = load_persisted_odds(table_name=table_name)
+
+    api_key = os.getenv("SPORTS_GAME_ODDS_KEY")
+    if not api_key:
+        logger.warning(f"SPORTS_GAME_ODDS_KEY not set, returning persisted {league_id} odds only")
+        return odds_map, 0
+
+    try:
+        # Scope to a single ET day's window so SGO only returns that day's slate.
+        # Without these filters, SGO returns up to `limit` upcoming events spanning
+        # multiple days, billing entities for games we don't need.
+        target = target_date or datetime.now(ET).date()
+        starts_after_utc = datetime.combine(target, datetime.min.time(), ET).astimezone(UTC)
+        starts_before_utc = datetime.combine(target + timedelta(days=1), datetime.min.time(), ET).astimezone(UTC)
+
+        params = {
+            "leagueID": league_id,
+            "oddsAvailable": "true",
+            "startsAfter": starts_after_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "startsBefore": starts_before_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "oddID": ",".join(SGO_ODD_IDS),
+            "limit": 20,
+        }
+        headers = {"x-api-key": api_key}
+
+        client = get_http_client()
+        r = await client.get(SGO_EVENTS_URL, params=params, headers=headers)
+        r.raise_for_status()
+        games = r.json().get("data", [])
+        logger.info(f"SportsGameOdds: {len(games)} {league_id} events for {target.isoformat()}")
+
+        fresh_odds = {}
+        odds_by_date = {}
+
+        for game in games:
+            teams = game.get("teams", {})
+            home_id = teams.get("home", {}).get("teamID", "")
+            away_id = teams.get("away", {}).get("teamID", "")
+            home_tri = tricode_for(home_id)
+            away_tri = tricode_for(away_id)
+
+            if not home_tri or not away_tri:
+                logger.warning(
+                    f"Skipping SGO {league_id} event {game.get('eventID', '?')} — "
+                    f"home_team_id={home_id!r}, away_team_id={away_id!r}"
+                )
+                continue
+
+            matchup_key = f"{away_tri}@{home_tri}"
+
+            starts_at = game.get("status", {}).get("startsAt", "")
+            try:
+                game_date = datetime.fromisoformat(starts_at.replace("Z", "+00:00")).astimezone(ET).date()
+            except Exception:
+                game_date = datetime.now(ET).date()
+
+            odds = game.get("odds", {})
+
+            away_spread      = to_num(sgo_book_val(odds, "points-away-game-sp-away", "spread"))
+            home_spread      = to_num(sgo_book_val(odds, "points-home-game-sp-home", "spread"))
+            away_spread_odds = to_num(sgo_book_val(odds, "points-away-game-sp-away", "odds"))
+            home_spread_odds = to_num(sgo_book_val(odds, "points-home-game-sp-home", "odds"))
+            away_ml          = to_num(sgo_book_val(odds, "points-away-game-ml-away", "odds"))
+            home_ml          = to_num(sgo_book_val(odds, "points-home-game-ml-home", "odds"))
+            over_under       = to_num(sgo_book_val(odds, "points-all-game-ou-over",  "overUnder"))
+            over_odds        = to_num(sgo_book_val(odds, "points-all-game-ou-over",  "odds"))
+            under_odds       = to_num(sgo_book_val(odds, "points-all-game-ou-under", "odds"))
+
+            # fairOdds has the vig already removed by SGO; fall back to bookOdds.
+            away_fair_ml = to_num(odds.get("points-away-game-ml-away", {}).get("fairOdds"))
+            home_fair_ml = to_num(odds.get("points-home-game-ml-home", {}).get("fairOdds"))
+
+            # Preserve non-null spread/O-U from persisted when the fresh API has null,
+            # so an early-day or off-board gap doesn't wipe the prior line.
+            persisted = odds_map.get((game_date.isoformat(), matchup_key), {})
+            eff_away_spread      = away_spread      if away_spread      is not None else persisted.get("awaySpread")
+            eff_home_spread      = home_spread      if home_spread      is not None else persisted.get("homeSpread")
+            eff_away_spread_odds = away_spread_odds if away_spread_odds is not None else persisted.get("awaySpreadOdds")
+            eff_home_spread_odds = home_spread_odds if home_spread_odds is not None else persisted.get("homeSpreadOdds")
+            eff_over_under       = over_under       if over_under       is not None else persisted.get("overUnder")
+            eff_over_odds        = over_odds        if over_odds        is not None else persisted.get("overOdds")
+            eff_under_odds       = under_odds       if under_odds       is not None else persisted.get("underOdds")
+
+            away_prob, home_prob = calculate_win_probability_from_odds(
+                away_fair_ml or away_ml, home_fair_ml or home_ml, eff_away_spread, eff_home_spread
+            )
+
+            odds_data = {
+                "awaySpread": eff_away_spread, "homeSpread": eff_home_spread,
+                "awaySpreadOdds": eff_away_spread_odds, "homeSpreadOdds": eff_home_spread_odds,
+                "overUnder": eff_over_under, "overOdds": eff_over_odds, "underOdds": eff_under_odds,
+                "awayMoneyline": away_ml, "homeMoneyline": home_ml,
+                "awayWinProbability": away_prob, "homeWinProbability": home_prob,
+            }
+            fresh_odds[(game_date.isoformat(), matchup_key)] = odds_data
+            odds_by_date.setdefault(game_date, {})[matchup_key] = odds_data
+
+        odds_map.update(fresh_odds)
+        for gd, gd_odds in odds_by_date.items():
+            save_persisted_odds(gd_odds, game_date=gd, table_name=table_name)
+
+        logger.info(
+            f"{league_id} odds map: {len(fresh_odds)} fresh + "
+            f"{len(odds_map) - len(fresh_odds)} persisted = {len(odds_map)} total"
+        )
+        return odds_map, len(fresh_odds)
+    except httpx.HTTPStatusError as e:
+        logger.error(f"SportsGameOdds {league_id} HTTP error: {e.response.status_code} - {e.response.text}")
+        return odds_map, 0
+    except Exception as e:
+        logger.error(f"SportsGameOdds {league_id} fetch error: {e}")
+        return odds_map, 0
