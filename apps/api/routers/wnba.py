@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter
 from nba_api.live.nba.endpoints.scoreboard import ScoreBoard
+from nba_api.live.nba.library.http import NBALiveHTTP
 from nba_api.stats.endpoints import leaguestandingsv3, leaguedashteamstats
 
 from .utils import (
@@ -21,14 +22,14 @@ from .utils import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Same Akamai CDN as the NBA live feed — it 403s without a www.nba.com Referer.
+# Akamai CDN, mirrors the NBA live feed — it 403s without a www.wnba.com Referer.
 WNBA_LIVE_HEADERS = {
     "Accept": "*/*",
     "Accept-Encoding": "gzip, deflate, br",
     "Accept-Language": "en-US,en;q=0.9",
-    "Host": "cdn.nba.com",
-    "Origin": "https://www.nba.com",
-    "Referer": "https://www.nba.com/",
+    "Host": "cdn.wnba.com",
+    "Origin": "https://www.wnba.com",
+    "Referer": "https://www.wnba.com/",
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -36,12 +37,32 @@ WNBA_LIVE_HEADERS = {
 }
 
 
+class WNBALiveHTTP(NBALiveHTTP):
+    """The WNBA live feed lives on its own CDN (cdn.wnba.com), not cdn.nba.com. The
+    nba.com host does serve a `…_10.json` file, but it's a frozen 2020 Finals snapshot
+    (LVA @ SEA), which is why the dashboard showed a stale "live" game. Only the host
+    differs — the path under /static/json/liveData/ is identical."""
+
+    base_url = "https://cdn.wnba.com/static/json/liveData/{endpoint}"
+
+
 class WNBAScoreBoard(ScoreBoard):
-    """nba_api's live ScoreBoard hardcodes the NBA feed (…_00.json). The WNBA slate
-    lives at the same CDN under …_10.json with an identical payload shape, so we just
-    swap the endpoint URL and inherit get_request/get_dict unchanged."""
+    """nba_api's live ScoreBoard hardcodes the NBA feed (cdn.nba.com, …_00.json). The
+    WNBA slate uses an identical payload shape under …_10.json on the WNBA CDN, so we
+    swap both the endpoint path and the HTTP host (via WNBALiveHTTP) and otherwise
+    inherit load_response/get_dict unchanged."""
 
     endpoint_url = "scoreboard/todaysScoreboard_10.json"
+
+    def get_request(self):
+        self.nba_response = WNBALiveHTTP().send_api_request(
+            endpoint=self.endpoint_url,
+            parameters={},
+            proxy=self.proxy,
+            headers=self.headers,
+            timeout=self.timeout,
+        )
+        self.load_response()
 
 
 router = APIRouter(prefix="/api/wnba", tags=["WNBA"])
