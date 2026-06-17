@@ -20,7 +20,6 @@ Requires ODDS_API_KEY in apps/api/.env (or the environment).
 from __future__ import annotations
 
 import argparse
-import csv
 import os
 import sys
 from datetime import date, datetime, timedelta
@@ -114,6 +113,7 @@ def extract_row(event: dict, sport_key: str, books: list[str]) -> dict:
         "ml_1": american(moneyline.get(home)),
         "player_2": away,
         "ml_2": american(moneyline.get(away)),
+        "draw": american(moneyline.get("Draw")),  # soccer 1X2 only; empty otherwise
         "total_games": total_line if total_line is not None else "",
         "over": american(over),
         "under": american(under),
@@ -182,11 +182,16 @@ def main() -> None:
     for r in rows:
         r.pop("_sort", None)
 
+    # Only surface the draw column when a book actually priced one (soccer 1X2).
+    columns = list(COLUMNS)
+    if any(r.get("draw") for r in rows):
+        columns.insert(columns.index("ml_2") + 1, "draw")
+
     out = open(args.output, "w", newline="") if args.output else sys.stdout
     try:
-        writer = csv.DictWriter(out, fieldnames=COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
+        out.write(", ".join(columns) + "\n")
+        for r in rows:
+            out.write(", ".join(str(r.get(c, "")) for c in columns) + "\n")
     finally:
         if args.output:
             out.close()
