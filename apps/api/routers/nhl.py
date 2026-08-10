@@ -5,7 +5,7 @@ import logging
 import os
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from .utils import (
     CACHE_TTL_DEFAULT,
@@ -31,6 +31,299 @@ cache = Cache({
     "odds":         CACHE_TTL_ODDS,
     "assembled":    CACHE_TTL_DEFAULT,
 })
+
+NHL_LOOKAHEAD_DAYS = 14
+
+
+def _detail_status(game_status: int) -> str:
+    if game_status == 2:
+        return "live"
+    if game_status == 3:
+        return "final"
+    return "preview"
+
+
+def _safe_int(value, default=0) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clock(play: dict) -> str:
+    return play.get("timeInPeriod") or play.get("clock") or ""
+
+
+def _nhl_linescore(team: dict) -> dict:
+    by_period = team.get("periods") or []
+    scores = [_safe_int(p.get("goals")) for p in by_period]
+    while len(scores) < 3:
+        scores.append(0)
+    out = {
+        "p1": scores[0],
+        "p2": scores[1],
+        "p3": scores[2],
+        "total": _safe_int(team.get("score") or team.get("goals") or sum(scores)),
+    }
+    if len(scores) > 3:
+        out["ot"] = scores[3]
+    if len(scores) > 4:
+        out["so"] = scores[4]
+    return out
+
+
+def _nhl_linescore_from_plays(data: dict, side: str) -> dict:
+    team_id = (data.get(f"{side}Team") or {}).get("id")
+    scores = [0, 0, 0]
+    ot = None
+    so = None
+    total = _safe_int((data.get(f"{side}Team") or {}).get("score"))
+    for play in data.get("plays") or []:
+        if play.get("typeDescKey") != "goal":
+            continue
+        details = play.get("details") or {}
+        if details.get("eventOwnerTeamId") != team_id:
+            continue
+        period = _safe_int((play.get("periodDescriptor") or {}).get("number"), 0)
+        period_type = (play.get("periodDescriptor") or {}).get("periodType", "REG")
+        if period_type == "SO":
+            so = (so or 0) + 1
+        elif period_type == "OT" or period > 3:
+            ot = (ot or 0) + 1
+        elif 1 <= period <= 3:
+            scores[period - 1] += 1
+
+    out = {"p1": scores[0], "p2": scores[1], "p3": scores[2], "total": total}
+    if ot is not None:
+        out["ot"] = ot
+    if so is not None:
+        out["so"] = so
+    return out
+
+
+def _empty_team_stats() -> dict:
+    return {
+        "shots": 0,
+        "pim": 0,
+        "powerPlayGoals": 0,
+        "powerPlayOpportunities": 0,
+        "faceoffWins": 0,
+        "faceoffTotal": 0,
+        "hits": 0,
+        "blocks": 0,
+        "giveaways": 0,
+        "takeaways": 0,
+    }
+
+
+def _stat_pair(stats: dict, key: str) -> tuple[int, int]:
+    item = stats.get(key) or {}
+    if isinstance(item, dict):
+        return _safe_int(item.get("awayValue")), _safe_int(item.get("homeValue"))
+    return 0, 0
+
+
+def _team_stats(raw: dict, side: str) -> dict:
+    if not raw:
+        return _empty_team_stats()
+    first_value = next(iter(raw.values()), {}) if raw else {}
+    if isinstance(first_value, dict) and "awayValue" in first_value:
+        idx = 0 if side == "away" else 1
+        shots = _stat_pair(raw, "shotsOnGoal")[idx]
+        pim = _stat_pair(raw, "pim")[idx]
+        hits = _stat_pair(raw, "hits")[idx]
+        blocks = _stat_pair(raw, "blockedShots")[idx]
+        giveaways = _stat_pair(raw, "giveaways")[idx]
+        takeaways = _stat_pair(raw, "takeaways")[idx]
+        faceoff_wins = _stat_pair(raw, "faceoffWinningPctg")[idx]
+        pp_goals = _stat_pair(raw, "powerPlayGoals")[idx]
+        pp_opps = _stat_pair(raw, "powerPlayOpportunities")[idx]
+        return {
+            "shots": shots,
+            "pim": pim,
+            "powerPlayGoals": pp_goals,
+            "powerPlayOpportunities": pp_opps,
+            "faceoffWins": faceoff_wins,
+            "faceoffTotal": faceoff_wins * 2 if faceoff_wins else 0,
+            "hits": hits,
+            "blocks": blocks,
+            "giveaways": giveaways,
+            "takeaways": takeaways,
+        }
+
+    side_stats = raw.get(f"{side}Team") or raw.get(side) or {}
+    return {
+        "shots": _safe_int(side_stats.get("shotsOnGoal") or side_stats.get("shots")),
+        "pim": _safe_int(side_stats.get("pim") or side_stats.get("penaltyMinutes")),
+        "powerPlayGoals": _safe_int(side_stats.get("powerPlayGoals")),
+        "powerPlayOpportunities": _safe_int(side_stats.get("powerPlayOpportunities")),
+        "faceoffWins": _safe_int(side_stats.get("faceoffWins")),
+        "faceoffTotal": _safe_int(side_stats.get("faceoffTotal")),
+        "hits": _safe_int(side_stats.get("hits")),
+        "blocks": _safe_int(side_stats.get("blockedShots") or side_stats.get("blocks")),
+        "giveaways": _safe_int(side_stats.get("giveaways")),
+        "takeaways": _safe_int(side_stats.get("takeaways")),
+    }
+
+
+def _live_team_stats_from_plays(data: dict, side: str) -> dict:
+    team = data.get(f"{side}Team") or {}
+    team_id = team.get("id")
+    stats = _empty_team_stats()
+    stats["shots"] = _safe_int(team.get("sog"))
+    faceoff_total = 0
+
+    for play in data.get("plays") or []:
+        key = play.get("typeDescKey")
+        details = play.get("details") or {}
+        owner = details.get("eventOwnerTeamId")
+
+        if key == "faceoff":
+            faceoff_total += 1
+            if details.get("winningPlayerId") and owner == team_id:
+                stats["faceoffWins"] += 1
+            continue
+
+        if owner != team_id:
+            continue
+
+        if key == "hit":
+            stats["hits"] += 1
+        elif key == "blocked-shot":
+            stats["blocks"] += 1
+        elif key == "giveaway":
+            stats["giveaways"] += 1
+        elif key == "takeaway":
+            stats["takeaways"] += 1
+        elif key == "penalty":
+            minutes = details.get("duration") or details.get("penaltyMinutes") or details.get("minutes")
+            stats["pim"] += _safe_int(minutes, 2)
+        elif key == "goal" and play.get("situationCode"):
+            # situationCode is coarse but available live; count obvious PP goals
+            situation = str(play.get("situationCode"))
+            if situation and situation[0] != situation[-1]:
+                stats["powerPlayGoals"] += 1
+
+    stats["faceoffTotal"] = faceoff_total
+    return stats
+
+
+def _player_name(row: dict) -> str:
+    name = row.get("name") or row.get("firstName") or {}
+    if isinstance(name, dict):
+        default = name.get("default")
+        if default:
+            return default
+    first = row.get("firstName")
+    last = row.get("lastName")
+    if isinstance(first, dict):
+        first = first.get("default")
+    if isinstance(last, dict):
+        last = last.get("default")
+    return f"{first or ''} {last or ''}".strip() or "Unknown"
+
+
+def _nhl_skaters(rows: list[dict]) -> list[dict]:
+    out = []
+    for row in rows:
+        out.append({
+            "name": _player_name(row),
+            "position": row.get("positionCode") or row.get("position") or "",
+            "goals": _safe_int(row.get("goals")),
+            "assists": _safe_int(row.get("assists")),
+            "points": _safe_int(row.get("points") or (_safe_int(row.get("goals")) + _safe_int(row.get("assists")))),
+            "plusMinus": _safe_int(row.get("plusMinus")),
+            "pim": _safe_int(row.get("pim") or row.get("penaltyMinutes")),
+            "shots": _safe_int(row.get("sog") or row.get("shots")),
+            "hits": _safe_int(row.get("hits")),
+            "blocks": _safe_int(row.get("blockedShots") or row.get("blocks")),
+            "toi": row.get("toi") or row.get("timeOnIce") or "",
+        })
+    return out
+
+
+def _nhl_goalies(rows: list[dict]) -> list[dict]:
+    out = []
+    for row in rows:
+        shots_against = _safe_int(row.get("shotsAgainst"))
+        saves = _safe_int(row.get("saves"))
+        save_pct = row.get("savePctg")
+        if save_pct is None and shots_against:
+            save_pct = saves / shots_against
+        out.append({
+            "name": _player_name(row),
+            "saves": saves,
+            "shotsAgainst": shots_against,
+            "savePct": f"{float(save_pct):.3f}".lstrip("0") if save_pct is not None else "--",
+            "toi": row.get("toi") or row.get("timeOnIce") or "",
+        })
+    return out
+
+
+def _nhl_team_box(data: dict, side: str, pbp_data: dict | None = None) -> dict:
+    stats = data.get("playerByGameStats") or {}
+    team_rows = stats.get(f"{side}Team") or {}
+    forwards = team_rows.get("forwards") or []
+    defense = team_rows.get("defense") or team_rows.get("defencemen") or []
+    goalies = team_rows.get("goalies") or []
+    return {
+        "skaters": _nhl_skaters(forwards + defense),
+        "goalies": _nhl_goalies(goalies),
+        "teamStats": _team_stats(data.get("summary") or data.get("teamStats") or {}, side)
+        if data.get("summary") or data.get("teamStats")
+        else _live_team_stats_from_plays(pbp_data or data, side),
+    }
+
+
+def _team_id_map(data: dict, matchup: dict) -> dict:
+    mapping = {}
+    for side in ("awayTeam", "homeTeam"):
+        team = data.get(side) or {}
+        matchup_team = matchup.get("away") if side == "awayTeam" else matchup.get("home")
+        tri = (matchup_team or {}).get("abbreviation")
+        if team.get("id") is not None and tri:
+            mapping[team.get("id")] = tri
+    return mapping
+
+
+def _nhl_plays(data: dict, matchup: dict) -> list[dict]:
+    teams = _team_id_map(data, matchup)
+    out = []
+    for index, play in enumerate(data.get("plays") or []):
+        details = play.get("details") or {}
+        period = (play.get("periodDescriptor") or {}).get("number") or play.get("period")
+        team_id = details.get("eventOwnerTeamId") or details.get("scoringPlayerId")
+        event_type = (play.get("typeDescKey") or play.get("typeCode") or "event").replace("-", " ")
+        desc = details.get("descKey") or event_type.title()
+        out.append({
+            "id": str(play.get("eventId") or index),
+            "eventId": str(play.get("eventId") or index),
+            "sequence": index,
+            "clock": _clock(play),
+            "quarter": period or "",
+            "team": teams.get(team_id),
+            "event": str(desc),
+            "awayScore": _safe_int(details.get("awayScore")),
+            "homeScore": _safe_int(details.get("homeScore")),
+        })
+    return out
+
+
+def _three_stars(data: dict) -> list[dict]:
+    stars = data.get("summary", {}).get("threeStars") or data.get("threeStars") or []
+    out = []
+    for row in stars[:3]:
+        team = row.get("teamAbbrev") or row.get("team")
+        if isinstance(team, dict):
+            team = team.get("default")
+        out.append({
+            "name": _player_name(row),
+            "team": team or "",
+            "position": row.get("positionCode") or row.get("position"),
+        })
+    return out
 
 # --- Team identifiers -------------------------------------------------------
 
@@ -235,16 +528,29 @@ async def get_team_summary_map() -> dict:
         return {}
 
 
-async def get_scoreboard_data() -> dict:
-    """Fetches today's NHL slate from api-web.nhle.com/v1/score/now."""
+async def get_scoreboard_data(target_date: date | None = None) -> dict:
+    """Fetches NHL slate from api-web.nhle.com. Defaults to today's slate."""
     try:
         client = get_http_client()
-        r = await client.get("https://api-web.nhle.com/v1/score/now", follow_redirects=True)
+        path = "score/now" if target_date is None else f"score/{target_date.isoformat()}"
+        r = await client.get(f"https://api-web.nhle.com/v1/{path}", follow_redirects=True)
         r.raise_for_status()
         return r.json()
     except Exception as e:
         logger.error(f"NHL scoreboard fetch error: {e}", exc_info=True)
         return {}
+
+
+async def get_next_nhl_scoreboard(start_date: date, lookahead_days: int = NHL_LOOKAHEAD_DAYS) -> tuple[dict, date]:
+    """Return today's NHL scoreboard if populated, otherwise the next slate with games."""
+    for offset in range(0, lookahead_days + 1):
+        target = start_date + timedelta(days=offset)
+        sb = await get_scoreboard_data(None if offset == 0 else target)
+        games = [g for g in sb.get("games", []) if g.get("gameType") in (2, 3)]
+        if games:
+            logger.info(f"NHL lookahead selected {target.isoformat()} with {len(games)} games")
+            return sb, target
+    return {}, start_date
 
 
 # --- Odds (SGO) -------------------------------------------------------------
@@ -324,8 +630,11 @@ async def get_todays_games():
         fetch_keys = []
         coros = []
 
+        today_et = datetime.now(ET).date()
+        slate_date = today_et
+
         if not cached_scoreboard:
-            coros.append(get_scoreboard_data())
+            coros.append(get_next_nhl_scoreboard(today_et))
             fetch_keys.append("scoreboard")
         if not cached_standings:
             coros.append(get_standings_map())
@@ -343,12 +652,19 @@ async def get_todays_games():
                 if isinstance(result, Exception):
                     logger.warning(f"Failed to fetch NHL {key}: {result}, using cached data")
                 else:
-                    cache.set(key, result)
+                    if key == "scoreboard" and isinstance(result, tuple):
+                        scoreboard_data, selected_date = result
+                        slate_date = selected_date
+                        cache.set(key, scoreboard_data)
+                    else:
+                        cache.set(key, result)
 
         sb = cache.get("scoreboard") or cache.get_stale("scoreboard") or {}
         standings_map = cache.get("standings") or cache.get_stale("standings") or {}
         summary_map = cache.get("team_summary") or cache.get_stale("team_summary") or {}
         odds_map = cache.get("odds") or cache.get_stale("odds") or {}
+        if slate_date > today_et + timedelta(days=1):
+            odds_map.update(load_persisted_odds(slate_date, table_name="nhl_odds"))
 
         games = sb.get("games", [])
         # Filter to regular season (2) + playoffs (3). Skip preseason (1) and others.
@@ -487,3 +803,63 @@ async def get_todays_games():
         if cached:
             return cached
         return []
+
+
+@router.get("/game/{game_id}")
+async def get_game_detail(game_id: str):
+    matchups = await get_todays_games()
+    matchup = next((g for g in matchups if str(g.get("gameId")) == str(game_id)), None)
+    if not matchup:
+        raise HTTPException(status_code=404, detail="NHL game not found in today's scoreboard")
+
+    game_status = int(matchup.get("gameStatus", 1) or 1)
+    status = _detail_status(game_status)
+    raw_status = matchup.get("status") or ""
+    client = get_http_client()
+
+    async def fetch_json(path: str):
+        try:
+            response = await client.get(f"https://api-web.nhle.com/v1/gamecenter/{game_id}/{path}", follow_redirects=True)
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:
+            logger.warning(f"NHL detail {path} failed for {game_id}: {exc}")
+            return None
+
+    box_data, pbp_data, landing_data = await asyncio.gather(
+        fetch_json("boxscore"),
+        fetch_json("play-by-play"),
+        fetch_json("landing"),
+    )
+
+    score_source = pbp_data or landing_data or box_data or {}
+    if pbp_data:
+        away_score = _nhl_linescore_from_plays(pbp_data, "away")
+        home_score = _nhl_linescore_from_plays(pbp_data, "home")
+    else:
+        away_score = _nhl_linescore(score_source.get("awayTeam") or {})
+        home_score = _nhl_linescore(score_source.get("homeTeam") or {})
+    if not away_score["total"] and matchup.get("away"):
+        away_score["total"] = _safe_int(matchup["away"].get("score"))
+    if not home_score["total"] and matchup.get("home"):
+        home_score["total"] = _safe_int(matchup["home"].get("score"))
+
+    away_box = _nhl_team_box(box_data, "away", pbp_data) if box_data else None
+    home_box = _nhl_team_box(box_data, "home", pbp_data) if box_data else None
+    plays = _nhl_plays(pbp_data, matchup) if pbp_data else []
+    three_stars = _three_stars(landing_data or {}) if landing_data else []
+
+    return {
+        "sport": "nhl",
+        "gameId": game_id,
+        "matchup": matchup,
+        "status": status,
+        "rawStatus": raw_status,
+        "awayScore": away_score,
+        "homeScore": home_score,
+        "awayBoxScore": away_box,
+        "homeBoxScore": home_box,
+        "playByPlay": plays,
+        "winProbability": [],
+        "threeStars": three_stars,
+    }

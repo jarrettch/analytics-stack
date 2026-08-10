@@ -13,6 +13,7 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  ExternalLink,
 } from "lucide-react"
 import {
   getHistory,
@@ -500,7 +501,7 @@ function LiveWinProbSection({ matchup }: { matchup: NBAMatchupData }) {
     hydrateWinProbHistory(matchup.gameId, pregameSpread, pace).then((history) => {
       setChartData([...history])
     })
-  }, [matchup.gameId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchup.gameId, pace, pregameSpread])
 
   // Append live snapshot whenever score or clock changes (driven by parent poll).
   // Skip post-final: the scoreboard can drop period to 0 or blank the clock, and
@@ -517,7 +518,7 @@ function LiveWinProbSection({ matchup }: { matchup: NBAMatchupData }) {
       pace,
     )
     setChartData([...getHistory(matchup.gameId)])
-  }, [matchup.home.score, matchup.away.score, matchup.period, matchup.gameClock, matchup.gameStatus]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchup.gameId, matchup.home.score, matchup.away.score, matchup.period, matchup.gameClock, matchup.gameStatus, pace, pregameSpread])
 
   const current = chartData[chartData.length - 1]
   if (!current) {
@@ -578,7 +579,7 @@ function LiveMLBWinProbSection({ matchup }: { matchup: MLBMatchupData }) {
     hydrateMLBWinProbHistory(matchup.gameId).then((history) => {
       setChartData([...history])
     })
-  }, [matchup.gameId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [matchup.gameId])
 
   // Skip post-final: liveWinProbability can fall back to pregame ~0.5 once the
   // contextMetrics feed stops, which would bend the sparkline toward midline.
@@ -849,6 +850,15 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
           <span className="font-mono text-[10px] text-muted-foreground">
             {matchup.gameId}
           </span>
+          {(matchup.sport === "nba" || matchup.sport === "nhl") && (
+            <a
+              href={`/game/${matchup.gameId}?sport=${matchup.sport}`}
+              className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-primary transition-colors hover:text-foreground"
+            >
+              Detail
+              <ExternalLink className="size-3" />
+            </a>
+          )}
         </div>
       </div>
 

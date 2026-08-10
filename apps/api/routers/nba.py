@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter
-from nba_api.live.nba.endpoints import scoreboard
-from nba_api.stats.endpoints import leaguestandingsv3, leaguedashteamstats
+from fastapi import APIRouter, HTTPException
+from nba_api.live.nba.endpoints import boxscore, playbyplay, scoreboard
+from nba_api.stats.endpoints import leaguedashteamstats, leaguestandingsv3, scheduleleaguev2
 
 from .utils import (
     CACHE_TTL_DEFAULT,
@@ -45,6 +46,226 @@ cache = Cache({
     "odds":           CACHE_TTL_ODDS,
     "assembled":      CACHE_TTL_DEFAULT,
 })
+
+NBA_LOOKAHEAD_DAYS = 14
+
+
+def _detail_status(game_status: int) -> str:
+    if game_status == 2:
+        return "live"
+    if game_status == 3:
+        return "final"
+    return "preview"
+
+
+def _nba_season_for_date(d: date) -> str:
+    start_year = d.year if d.month >= 9 else d.year - 1
+    return f"{start_year}-{str(start_year + 1)[-2:]}"
+
+
+def _nba_game_datetime(g: dict) -> str:
+    return g.get("gameEt") or g.get("gameDateTimeEst") or g.get("gameDateEst") or ""
+
+
+def _nba_game_date(g: dict) -> str:
+    return (_nba_game_datetime(g).split("T")[0] if "T" in _nba_game_datetime(g) else "") or str(g.get("gameDateEst", ""))[:10]
+
+
+def _nba_game_time(g: dict) -> str:
+    game_et = _nba_game_datetime(g)
+    if game_et and "T" in game_et:
+        return game_et.split("T")[-1][:5]
+    return g.get("gameStatusText", "")
+
+
+def _national_broadcast(g: dict) -> str:
+    broadcasters = (g.get("broadcasters") or {}).get("nationalBroadcasters") or []
+    if broadcasters:
+        return broadcasters[0].get("broadcasterAbbreviation") or broadcasters[0].get("broadcasterDisplay") or "National"
+    return "Local"
+
+
+def _num(value, default=0):
+    try:
+        if value is None or value == "":
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+
+def _parse_clock_seconds(game_clock: str) -> float:
+    if not game_clock:
+        return 0
+    if game_clock.startswith("PT"):
+        minutes = 0.0
+        seconds = 0.0
+        body = game_clock[2:]
+        if "M" in body:
+            minute_part, body = body.split("M", 1)
+            minutes = float(minute_part or 0)
+        if "S" in body:
+            seconds = float(body.replace("S", "") or 0)
+        return minutes * 60 + seconds
+    if ":" in game_clock:
+        minutes, seconds = game_clock.split(":", 1)
+        return float(minutes or 0) * 60 + float(seconds or 0)
+    return 0
+
+
+def _total_time_remaining(period: int, game_clock: str) -> float:
+    clock_seconds = _parse_clock_seconds(game_clock)
+    if period <= 0:
+        return 2880
+    if period <= 4:
+        return (4 - period) * 720 + clock_seconds
+    return 0 if clock_seconds == 0 else clock_seconds
+
+
+def _nba_win_prob(home_score: int, away_score: int, period: int, game_clock: str, pregame_spread=0, pace=100) -> float:
+    score_diff = home_score - away_score
+    time_remaining = _total_time_remaining(period, game_clock)
+    if time_remaining == 0:
+        return 1 if score_diff > 0 else 0 if score_diff < 0 else 0.5
+    spread_fade = 0 if period > 4 else time_remaining / 2880
+    k = 3.0 if pace > 102 else 4.0 if pace < 98 else 3.5
+    adjusted_diff = score_diff + (-(pregame_spread or 0) * spread_fade)
+    return 1 / (1 + math.exp(-(adjusted_diff * k) / math.sqrt(time_remaining + 1)))
+
+
+def _nba_linescore(team: dict) -> dict:
+    periods = team.get("periods") or []
+    scores = [int(p.get("score", 0) or 0) for p in periods]
+    while len(scores) < 4:
+        scores.append(0)
+    out = {
+        "q1": scores[0],
+        "q2": scores[1],
+        "q3": scores[2],
+        "q4": scores[3],
+        "total": int(team.get("score", sum(scores)) or 0),
+    }
+    if len(scores) > 4:
+        out["ot"] = scores[4:]
+    return out
+
+
+def _nba_player(row: dict) -> dict:
+    stats = row.get("statistics") or row
+    name = row.get("name") or row.get("nameI") or f"{row.get('firstName', '')} {row.get('familyName', '')}".strip() or "Unknown"
+    return {
+        "name": name,
+        "position": row.get("position") or "",
+        "minutes": str(stats.get("minutes") or stats.get("minutesCalculated") or "0:00"),
+        "points": int(_num(stats.get("points"))),
+        "rebounds": int(_num(stats.get("reboundsTotal") or stats.get("rebounds"))),
+        "assists": int(_num(stats.get("assists"))),
+        "steals": int(_num(stats.get("steals"))),
+        "blocks": int(_num(stats.get("blocks"))),
+        "turnovers": int(_num(stats.get("turnovers"))),
+        "fouls": int(_num(stats.get("foulsPersonal") or stats.get("personalFouls"))),
+        "fgm": int(_num(stats.get("fieldGoalsMade"))),
+        "fga": int(_num(stats.get("fieldGoalsAttempted"))),
+        "threePm": int(_num(stats.get("threePointersMade"))),
+        "threePa": int(_num(stats.get("threePointersAttempted"))),
+        "ftm": int(_num(stats.get("freeThrowsMade"))),
+        "fta": int(_num(stats.get("freeThrowsAttempted"))),
+        "plusMinus": int(_num(stats.get("plusMinusPoints") or stats.get("plusMinus"))),
+    }
+
+
+def _pct(made: int, attempts: int) -> float | None:
+    return round((made / attempts) * 100, 1) if attempts else None
+
+
+def _nba_team_box(team: dict) -> dict:
+    players = [_nba_player(p) for p in team.get("players", [])]
+    totals = {
+        "points": sum(p["points"] for p in players),
+        "rebounds": sum(p["rebounds"] for p in players),
+        "assists": sum(p["assists"] for p in players),
+        "steals": sum(p["steals"] for p in players),
+        "blocks": sum(p["blocks"] for p in players),
+        "turnovers": sum(p["turnovers"] for p in players),
+        "fgPct": _pct(sum(p["fgm"] for p in players), sum(p["fga"] for p in players)),
+        "threePct": _pct(sum(p["threePm"] for p in players), sum(p["threePa"] for p in players)),
+        "ftPct": _pct(sum(p["ftm"] for p in players), sum(p["fta"] for p in players)),
+    }
+    return {"players": players, "totals": totals}
+
+
+def _nba_efficiency(box: dict | None) -> dict:
+    if not box:
+        return {"ppp": None, "tsPct": None, "possessions": None}
+    players = box.get("players", [])
+    pts = sum(p["points"] for p in players)
+    fga = sum(p["fga"] for p in players)
+    fta = sum(p["fta"] for p in players)
+    orb = 0
+    tov = sum(p["turnovers"] for p in players)
+    possessions = fga + 0.44 * fta - orb + tov
+    ts = (pts / (2 * (fga + 0.44 * fta)) * 100) if (fga + 0.44 * fta) else None
+    return {
+        "ppp": round(pts / possessions, 3) if possessions else None,
+        "tsPct": round(ts, 1) if ts is not None else None,
+        "possessions": round(possessions, 1) if possessions else None,
+    }
+
+
+def _nba_play_description(action: dict) -> str:
+    for key in ("description", "actionType", "subType"):
+        if action.get(key):
+            return str(action[key])
+    return "Game event"
+
+
+def _nba_pbp(actions: list[dict], matchup: dict) -> tuple[list[dict], list[dict]]:
+    pregame_spread = matchup.get("pregameSpread") or 0
+    pace = ((matchup.get("away") or {}).get("pace", 100) + (matchup.get("home") or {}).get("pace", 100)) / 2
+    plays = []
+    win_probability = []
+    last_score = None
+
+    for index, action in enumerate(actions):
+        period = int(_num(action.get("period"), 0))
+        clock = str(action.get("clock") or "")
+        away_score = int(_num(action.get("scoreAway")))
+        home_score = int(_num(action.get("scoreHome")))
+        home_prob = _nba_win_prob(home_score, away_score, period, clock, pregame_spread, pace)
+        away_prob = 1 - home_prob
+        elapsed = 2880 - _total_time_remaining(period, clock) if period <= 4 else 2880
+        x = min(100, max(0, elapsed / 2880 * 100))
+
+        play = {
+            "id": str(action.get("actionNumber") or index),
+            "eventId": str(action.get("actionNumber") or index),
+            "sequence": index,
+            "clock": clock,
+            "quarter": period,
+            "team": action.get("teamTricode"),
+            "event": _nba_play_description(action),
+            "awayScore": away_score,
+            "homeScore": home_score,
+            "winProbAway": round(away_prob * 100, 1),
+            "winProbHome": round(home_prob * 100, 1),
+            "sourceTimestamp": action.get("timeActual"),
+        }
+        plays.append(play)
+
+        score_key = (away_score, home_score, period, clock)
+        if score_key != last_score or action.get("actionType") == "period":
+            win_probability.append({
+                "x": round(x, 1),
+                "awayProb": round(away_prob * 100, 1),
+                "homeProb": round(home_prob * 100, 1),
+                "label": f"Q{period} {clock}" if period else None,
+            })
+            last_score = score_key
+
+    return plays, win_probability
 
 # Get the standings map
 # def get_standings_map():
@@ -188,6 +409,31 @@ def get_arena_map():
         "UTA": "Delta Center",
         "WAS": "Capital One Arena",
     }
+
+
+def get_next_nba_schedule_games(start_date: date, lookahead_days: int = NBA_LOOKAHEAD_DAYS) -> tuple[list[dict], date | None]:
+    """Find the next NBA schedule date with games using the full-season schedule feed."""
+    try:
+        season = _nba_season_for_date(start_date)
+        schedule = scheduleleaguev2.ScheduleLeagueV2(season=season, timeout=15).get_dict()
+        game_dates = schedule.get("leagueSchedule", {}).get("gameDates", [])
+        games_by_date: dict[str, list[dict]] = {}
+        for date_entry in game_dates:
+            for game in date_entry.get("games", []):
+                game_date = str(game.get("gameDateEst", ""))[:10]
+                if game_date:
+                    games_by_date.setdefault(game_date, []).append(game)
+
+        for offset in range(0, lookahead_days + 1):
+            target = start_date + timedelta(days=offset)
+            games = games_by_date.get(target.isoformat(), [])
+            games = [g for g in games if str(g.get("postponedStatus", "N")) != "Y"]
+            if games:
+                logger.info(f"NBA lookahead selected {target.isoformat()} with {len(games)} games")
+                return games, target
+    except Exception as e:
+        logger.warning(f"NBA schedule lookahead failed: {e}", exc_info=True)
+    return [], None
 
 def get_tricode_from_sgo_team_id(team_id: str) -> str:
     """Map SportsGameOdds teamID to NBA tricode.
@@ -376,8 +622,16 @@ async def get_todays_games():
             logger.error("No scoreboard data available")
             return cache.get_stale("assembled") or []
 
+        today_et = datetime.now(ET).date()
         data = sb.get_dict()
         games = data.get('scoreboard', {}).get('games', [])
+        slate_date = today_et
+        if not games:
+            games, next_game_date = get_next_nba_schedule_games(today_et)
+            if next_game_date:
+                slate_date = next_game_date
+                if next_game_date > today_et + timedelta(days=1):
+                    odds_map.update(load_persisted_odds(next_game_date, table_name="nba_odds"))
 
         logger.info(f"Processing {len(games)} games (standings: {len(standings_map)}, advanced: {len(advanced_stats_map)}, odds: {len(odds_map)})")
 
@@ -392,7 +646,7 @@ async def get_todays_games():
 
             matchup_key = f"{away_tri}@{home_tri}"
             game_status = g.get('gameStatus', 1)
-            game_date_str = g.get('gameEt', '').split('T')[0]
+            game_date_str = _nba_game_date(g) or slate_date.isoformat()
             odds = odds_map.get((game_date_str, matchup_key), {})
 
             # Format spread line with team abbreviation
@@ -504,10 +758,10 @@ async def get_todays_games():
                 "gameStatus": g.get('gameStatus', 1),  # 1=scheduled, 2=live, 3=final
                 "period": g.get('period', 0),
                 "gameClock": g.get('gameClock', ''),
-                "time": g.get('gameEt', '').split('T')[-1][:5],  # Extract HH:MM
-                "date": g.get('gameEt', '').split('T')[0],
+                "time": _nba_game_time(g),
+                "date": game_date_str,
                 "venue": venue,
-                "broadcast": "Local",
+                "broadcast": _national_broadcast(g),
                 "model": "EV-MODEL-V1",
                 "series": series_text or None,
                 "seriesGameNumber": series_game_number or None,
@@ -580,3 +834,61 @@ async def get_todays_games():
 
         # Only return empty list if we have absolutely zero history
         return []
+
+
+@router.get("/game/{game_id}")
+async def get_game_detail(game_id: str):
+    matchups = await get_todays_games()
+    matchup = next((g for g in matchups if str(g.get("gameId")) == str(game_id)), None)
+    if not matchup:
+        raise HTTPException(status_code=404, detail="NBA game not found in today's scoreboard")
+
+    game_status = int(matchup.get("gameStatus", 1) or 1)
+    status = _detail_status(game_status)
+    raw_status = matchup.get("status") or ""
+    away_score = {"q1": 0, "q2": 0, "q3": 0, "q4": 0, "total": (matchup.get("away") or {}).get("score", 0)}
+    home_score = {"q1": 0, "q2": 0, "q3": 0, "q4": 0, "total": (matchup.get("home") or {}).get("score", 0)}
+    away_box = None
+    home_box = None
+    plays = []
+    win_probability = []
+
+    loop = asyncio.get_event_loop()
+    box_task = loop.run_in_executor(None, lambda: boxscore.BoxScore(game_id, headers=NBA_LIVE_HEADERS, timeout=10).get_dict())
+    pbp_task = loop.run_in_executor(None, lambda: playbyplay.PlayByPlay(game_id, headers=NBA_LIVE_HEADERS, timeout=10).get_dict())
+    box_result, pbp_result = await asyncio.gather(box_task, pbp_task, return_exceptions=True)
+
+    if not isinstance(box_result, Exception):
+        game = box_result.get("game", {})
+        away_team = game.get("awayTeam") or {}
+        home_team = game.get("homeTeam") or {}
+        away_score = _nba_linescore(away_team)
+        home_score = _nba_linescore(home_team)
+        away_box = _nba_team_box(away_team)
+        home_box = _nba_team_box(home_team)
+    else:
+        logger.warning(f"NBA detail boxscore failed for {game_id}: {box_result}")
+
+    if not isinstance(pbp_result, Exception):
+        actions = (pbp_result.get("game") or {}).get("actions") or []
+        plays, win_probability = _nba_pbp(actions, matchup)
+    else:
+        logger.warning(f"NBA detail PBP failed for {game_id}: {pbp_result}")
+
+    return {
+        "sport": "nba",
+        "gameId": game_id,
+        "matchup": matchup,
+        "status": status,
+        "rawStatus": raw_status,
+        "awayScore": away_score,
+        "homeScore": home_score,
+        "awayBoxScore": away_box,
+        "homeBoxScore": home_box,
+        "playByPlay": plays,
+        "winProbability": win_probability,
+        "scoringEfficiency": {
+            "away": _nba_efficiency(away_box),
+            "home": _nba_efficiency(home_box),
+        } if away_box or home_box else None,
+    }

@@ -4,20 +4,68 @@ import { useEffect, useState, useRef } from "react";
 import { SportsDashboard, type Sport, type MatchupData, SPORT_LABELS, SPORT_MODELS } from "@repo/ui";
 import { Activity } from "lucide-react";
 
-const SPORTS: Sport[] = ["nba", "wnba", "mlb", "nhl"];
+const FALLBACK_VISIBLE_SPORTS: Sport[] = ["mlb", "wnba"];
 
 // Sports with a live backend endpoint (others fall through to "coming soon").
 const LIVE_SPORTS: Sport[] = ["nba", "wnba", "mlb", "nhl"];
 
+function hasGameStatus(matchup: MatchupData): matchup is MatchupData & { gameStatus: number } {
+  return "gameStatus" in matchup && typeof matchup.gameStatus === "number";
+}
+
 export default function Home() {
-  const [activeSport, setActiveSport] = useState<Sport>("nba");
+  const [activeSport, setActiveSport] = useState<Sport>("mlb");
+  const [visibleSports, setVisibleSports] = useState<Sport[]>(FALLBACK_VISIBLE_SPORTS);
   const [matchups, setMatchups] = useState<MatchupData[]>([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState<Date | null>(null);
   const lastDataRef = useRef<string>("");
+  const userSelectedSportRef = useRef(false);
 
   useEffect(() => {
     setNow(new Date());
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function selectInitialSport() {
+      try {
+        const results = await Promise.all(
+          LIVE_SPORTS.map(async (sport) => {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/${sport}/today`);
+            const data = (await res.json()) as MatchupData[];
+            return { sport, data };
+          }),
+        );
+
+        if (cancelled || userSelectedSportRef.current) return;
+
+        const live = results.find(({ data }) => data.some(m => hasGameStatus(m) && m.gameStatus === 2));
+        const populated = results.find(({ data }) => data.length > 0);
+        const selected = live ?? populated;
+        const sportsWithSlates = results
+          .filter(({ data }) => data.length > 0)
+          .map(({ sport }) => sport);
+
+        setVisibleSports(sportsWithSlates.length > 0 ? sportsWithSlates : FALLBACK_VISIBLE_SPORTS);
+
+        if (selected) {
+          setActiveSport(selected.sport);
+          setMatchups(selected.data);
+          lastDataRef.current = JSON.stringify(selected.data);
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to auto-select sport:", err);
+      }
+    }
+
+    selectInitialSport();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -68,7 +116,7 @@ export default function Home() {
   }, [activeSport]);
 
   const gameCount = matchups.length;
-  const hasLiveGames = matchups.some(m => 'gameStatus' in m && (m as any).gameStatus === 2);
+  const hasLiveGames = matchups.some(m => hasGameStatus(m) && m.gameStatus === 2);
 
   return (
     <main className="min-h-screen bg-background px-4 py-6">
@@ -99,10 +147,13 @@ export default function Home() {
           <div className="flex items-center justify-between">
             {/* Tabs */}
             <div className="flex h-8 bg-secondary rounded-md">
-              {SPORTS.map((sport) => (
+              {visibleSports.map((sport) => (
                 <button
                   key={sport}
-                  onClick={() => setActiveSport(sport)}
+                  onClick={() => {
+                    userSelectedSportRef.current = true;
+                    setActiveSport(sport);
+                  }}
                   className={`px-4 font-mono text-xs uppercase tracking-wider transition-colors ${
                     activeSport === sport
                       ? "bg-primary text-primary-foreground rounded-md"
