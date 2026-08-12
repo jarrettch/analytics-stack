@@ -13,6 +13,20 @@ function hasGameStatus(matchup: MatchupData): matchup is MatchupData & { gameSta
   return "gameStatus" in matchup && typeof matchup.gameStatus === "number";
 }
 
+async function fetchSportSlate(sport: Sport): Promise<MatchupData[]> {
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/${sport}/today`);
+  if (!res.ok) {
+    throw new Error(`${sport.toUpperCase()} feed returned ${res.status}`);
+  }
+
+  const data: unknown = await res.json();
+  if (!Array.isArray(data)) {
+    throw new Error(`${sport.toUpperCase()} feed returned a non-array payload`);
+  }
+
+  return data as MatchupData[];
+}
+
 export default function Home() {
   const [activeSport, setActiveSport] = useState<Sport>("mlb");
   const [visibleSports, setVisibleSports] = useState<Sport[]>(FALLBACK_VISIBLE_SPORTS);
@@ -31,13 +45,13 @@ export default function Home() {
 
     async function selectInitialSport() {
       try {
-        const results = await Promise.all(
+        const settled = await Promise.allSettled(
           LIVE_SPORTS.map(async (sport) => {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/${sport}/today`);
-            const data = (await res.json()) as MatchupData[];
+            const data = await fetchSportSlate(sport);
             return { sport, data };
           }),
         );
+        const results = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
 
         if (cancelled || userSelectedSportRef.current) return;
 
@@ -75,8 +89,7 @@ export default function Home() {
 
         const endpoint = `${activeSport}/today`;
         try {
-          const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/${endpoint}`);
-          const data = await res.json();
+          const data = await fetchSportSlate(activeSport);
 
           // Only update if data actually changed (prevents unnecessary re-renders)
           const dataStr = JSON.stringify(data);
@@ -89,7 +102,7 @@ export default function Home() {
 
           setLoading(false);
         } catch (err) {
-          console.error(`Failed to fetch ${activeSport.toUpperCase()} data:`, err);
+          console.error(`Failed to fetch ${endpoint}:`, err);
           setLoading(false);
         }
       } else {

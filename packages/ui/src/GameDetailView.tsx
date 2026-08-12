@@ -6,6 +6,8 @@ import { Badge } from "./components/ui/badge"
 import { Separator } from "./components/ui/separator"
 import type {
   GameDetail,
+  MLBGameDetail,
+  MLBTeamBoxScore,
   NBAGameDetail,
   NBATeamBoxScore,
   NHLGameDetail,
@@ -46,8 +48,8 @@ function TeamLogo({
 
 function Header({ detail }: { detail: GameDetail }) {
   const { matchup } = detail
-  const awayTotal = detail.sport === "nba" ? detail.awayScore.total : detail.awayScore.total
-  const homeTotal = detail.sport === "nba" ? detail.homeScore.total : detail.homeScore.total
+  const awayTotal = detail.sport === "mlb" ? detail.awayScore.runs : detail.awayScore.total
+  const homeTotal = detail.sport === "mlb" ? detail.homeScore.runs : detail.homeScore.total
   const showScore = detail.status !== "preview"
 
   return (
@@ -118,6 +120,45 @@ function Header({ detail }: { detail: GameDetail }) {
 function Linescore({ detail }: { detail: GameDetail }) {
   const away = detail.matchup.away.abbreviation
   const home = detail.matchup.home.abbreviation
+  if (detail.sport === "mlb") {
+    const inningCount = Math.max(detail.awayScore.innings.length, detail.homeScore.innings.length, 9)
+    const columns = [
+      ...Array.from({ length: inningCount }, (_, i) => String(i + 1)),
+      "R",
+      "H",
+      "E",
+    ]
+    const awayVals = [...detail.awayScore.innings, detail.awayScore.runs, detail.awayScore.hits, detail.awayScore.errors]
+    const homeVals = [...detail.homeScore.innings, detail.homeScore.runs, detail.homeScore.hits, detail.homeScore.errors]
+
+    return (
+      <div className="overflow-x-auto rounded-md border border-border bg-card">
+        <table className="w-full min-w-[640px] text-left font-mono text-xs">
+          <thead className="bg-secondary text-[10px] uppercase tracking-wider text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2">Team</th>
+              {columns.map((c) => (
+                <th key={c} className="px-3 py-2 text-right">{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[{ team: away, vals: awayVals }, { team: home, vals: homeVals }].map((row) => (
+              <tr key={row.team} className="border-t border-border">
+                <td className="px-3 py-2 font-semibold text-foreground">{row.team}</td>
+                {row.vals.map((v, i) => (
+                  <td key={i} className={`px-3 py-2 text-right tabular-nums ${i >= row.vals.length - 3 ? "font-bold text-primary" : "text-foreground"}`}>
+                    {v ?? "-"}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
   const columns =
     detail.sport === "nba"
       ? ["Q1", "Q2", "Q3", "Q4", ...((detail.awayScore.ot ?? []).map((_, i) => `OT${i + 1}`)), "T"]
@@ -313,6 +354,73 @@ function NHLBoxScoreTable({ box, team }: { box: NHLTeamBoxScore | null; team: st
   )
 }
 
+function MLBBoxScoreTable({ box, team }: { box: MLBTeamBoxScore | null; team: string }) {
+  if (!box || (box.hitting.length === 0 && box.pitching.length === 0)) {
+    return <EmptyPanel label={`${team} box score is not available yet.`} />
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="overflow-x-auto rounded-md border border-border bg-card">
+        <table className="w-full min-w-[760px] text-left font-mono text-xs">
+          <thead className="bg-secondary text-[10px] uppercase tracking-wider text-muted-foreground">
+            <tr>
+              {["Hitter", "AB", "R", "H", "RBI", "HR", "BB", "SO", "AVG", "OBP", "SLG"].map((h) => (
+                <th key={h} className={`px-3 py-2 ${h !== "Hitter" ? "text-right" : ""}`}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {box.hitting.map((p) => (
+              <tr key={`${team}-${p.name}-hit`} className="border-t border-border">
+                <td className="px-3 py-2 text-foreground">{p.name} <span className="text-muted-foreground">{p.position}</span></td>
+                <td className="px-3 py-2 text-right">{p.ab}</td>
+                <td className="px-3 py-2 text-right">{p.runs}</td>
+                <td className="px-3 py-2 text-right font-semibold text-primary">{p.hits}</td>
+                <td className="px-3 py-2 text-right">{p.rbi}</td>
+                <td className="px-3 py-2 text-right">{p.hr}</td>
+                <td className="px-3 py-2 text-right">{p.bb}</td>
+                <td className="px-3 py-2 text-right">{p.so}</td>
+                <td className="px-3 py-2 text-right">{p.avg}</td>
+                <td className="px-3 py-2 text-right">{p.obp}</td>
+                <td className="px-3 py-2 text-right">{p.slg}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="overflow-x-auto rounded-md border border-border bg-card">
+        <table className="w-full min-w-[620px] text-left font-mono text-xs">
+          <thead className="bg-secondary text-[10px] uppercase tracking-wider text-muted-foreground">
+            <tr>
+              {["Pitcher", "IP", "H", "R", "ER", "BB", "SO", "HR", "Pit", "Str", "ERA"].map((h) => (
+                <th key={h} className={`px-3 py-2 ${h !== "Pitcher" ? "text-right" : ""}`}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {box.pitching.map((p) => (
+              <tr key={`${team}-${p.name}-pitch`} className="border-t border-border">
+                <td className="px-3 py-2 text-foreground">{p.name}</td>
+                <td className="px-3 py-2 text-right font-semibold text-primary">{p.ip}</td>
+                <td className="px-3 py-2 text-right">{p.hits}</td>
+                <td className="px-3 py-2 text-right">{p.runs}</td>
+                <td className="px-3 py-2 text-right">{p.earnedRuns}</td>
+                <td className="px-3 py-2 text-right">{p.bb}</td>
+                <td className="px-3 py-2 text-right">{p.so}</td>
+                <td className="px-3 py-2 text-right">{p.hr}</td>
+                <td className="px-3 py-2 text-right">{p.pitchCount}</td>
+                <td className="px-3 py-2 text-right">{p.strikes}</td>
+                <td className="px-3 py-2 text-right">{p.era}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function NBAContent({ detail }: { detail: NBAGameDetail }) {
   const [tab, setTab] = useState("winprob")
   const tabs = [
@@ -413,6 +521,43 @@ function NHLContent({ detail }: { detail: NHLGameDetail }) {
   )
 }
 
+function MLBContent({ detail }: { detail: MLBGameDetail }) {
+  const [tab, setTab] = useState("gamefeed")
+  const tabs = [
+    ["gamefeed", "Gamefeed", BarChart3],
+    ["boxscore", "Boxscore", Table2],
+    ["plays", "Plays", ListOrdered],
+    ["matchup", "Matchup", Activity],
+  ] as const
+
+  return (
+    <TabbedShell tabs={tabs} active={tab} setActive={setTab}>
+      {tab === "gamefeed" && (
+        <div className="space-y-3">
+          <WinProbabilityChart data={detail.winProbability} awayAbbr={detail.matchup.away.abbreviation} homeAbbr={detail.matchup.home.abbreviation} />
+          <PlaysTable plays={detail.playByPlay} />
+        </div>
+      )}
+      {tab === "boxscore" && (
+        <div className="space-y-4">
+          <MLBBoxScoreTable box={detail.awayBoxScore} team={detail.matchup.away.abbreviation} />
+          <MLBBoxScoreTable box={detail.homeBoxScore} team={detail.matchup.home.abbreviation} />
+        </div>
+      )}
+      {tab === "plays" && <PlaysTable plays={detail.playByPlay} />}
+      {tab === "matchup" && (
+        <div className="rounded-md border border-border bg-card p-3">
+          <Comparison label="RS/G" away={detail.matchup.away.runsScored} home={detail.matchup.home.runsScored} />
+          <Comparison label="RA/G" away={detail.matchup.away.runsAllowed} home={detail.matchup.home.runsAllowed} lower />
+          <Comparison label="ERA" away={detail.matchup.away.era} home={detail.matchup.home.era} lower />
+          <Comparison label="OPS" away={detail.matchup.away.ops} home={detail.matchup.home.ops} />
+          <Comparison label="Win%" away={detail.matchup.away.winPct * 100} home={detail.matchup.home.winPct * 100} />
+        </div>
+      )}
+    </TabbedShell>
+  )
+}
+
 function faceoffPct(stats: { faceoffWins: number; faceoffTotal: number }) {
   return stats.faceoffTotal > 0 ? (stats.faceoffWins / stats.faceoffTotal) * 100 : 0
 }
@@ -490,7 +635,9 @@ export function GameDetailView({ detail }: { detail: GameDetail }) {
           <Linescore detail={detail} />
         </div>
         <Separator className="mb-4 bg-border" />
-        {detail.sport === "nba" ? <NBAContent detail={detail} /> : <NHLContent detail={detail} />}
+        {detail.sport === "nba" && <NBAContent detail={detail} />}
+        {detail.sport === "nhl" && <NHLContent detail={detail} />}
+        {detail.sport === "mlb" && <MLBContent detail={detail} />}
       </div>
     </main>
   )

@@ -5,7 +5,7 @@ import logging
 from datetime import date, datetime, timedelta
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from .utils import (
     CACHE_TTL_DEFAULT,
@@ -136,6 +136,170 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
         "MILWAUKEE_BREWERS_MLB": "MIL",
     }
     return sgo_map.get(team_id.upper(), "")
+
+
+def _detail_status(game_status: int) -> str:
+    if game_status == 2:
+        return "live"
+    if game_status == 3:
+        return "final"
+    return "preview"
+
+
+def _safe_int(value, default=0) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value, default=0.0) -> float:
+    try:
+        if value is None or value in ("", ".---", "-.--", "-"):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _mlb_inning_score(linescore: dict, side: str) -> dict:
+    scheduled = _safe_int(linescore.get("scheduledInnings"), 9)
+    innings = []
+    for inning in linescore.get("innings", []):
+        value = (inning.get(side) or {}).get("runs")
+        innings.append(None if value is None else _safe_int(value))
+    while len(innings) < scheduled:
+        innings.append(None)
+    team_totals = (linescore.get("teams") or {}).get(side) or {}
+    return {
+        "innings": innings,
+        "runs": _safe_int(team_totals.get("runs")),
+        "hits": _safe_int(team_totals.get("hits")),
+        "errors": _safe_int(team_totals.get("errors")),
+    }
+
+
+def _mlb_player(team: dict, player_id: int | str) -> dict:
+    return (team.get("players") or {}).get(f"ID{player_id}", {})
+
+
+def _mlb_hitter(row: dict) -> dict:
+    game = ((row.get("stats") or {}).get("batting") or {})
+    season = ((row.get("seasonStats") or {}).get("batting") or {})
+    position = row.get("position") or {}
+    return {
+        "name": (row.get("person") or {}).get("fullName", "Unknown"),
+        "position": position.get("abbreviation", ""),
+        "ab": _safe_int(game.get("atBats")),
+        "runs": _safe_int(game.get("runs")),
+        "hits": _safe_int(game.get("hits")),
+        "rbi": _safe_int(game.get("rbi")),
+        "hr": _safe_int(game.get("homeRuns")),
+        "bb": _safe_int(game.get("baseOnBalls")),
+        "so": _safe_int(game.get("strikeOuts")),
+        "avg": season.get("avg") or ".000",
+        "obp": season.get("obp") or ".000",
+        "slg": season.get("slg") or ".000",
+    }
+
+
+def _mlb_pitcher(row: dict) -> dict:
+    game = ((row.get("stats") or {}).get("pitching") or {})
+    season = ((row.get("seasonStats") or {}).get("pitching") or {})
+    return {
+        "name": (row.get("person") or {}).get("fullName", "Unknown"),
+        "ip": str(game.get("inningsPitched") or "0.0"),
+        "hits": _safe_int(game.get("hits")),
+        "runs": _safe_int(game.get("runs")),
+        "earnedRuns": _safe_int(game.get("earnedRuns")),
+        "bb": _safe_int(game.get("baseOnBalls")),
+        "so": _safe_int(game.get("strikeOuts")),
+        "hr": _safe_int(game.get("homeRuns")),
+        "pitchCount": _safe_int(game.get("numberOfPitches") or game.get("pitchesThrown")),
+        "strikes": _safe_int(game.get("strikes")),
+        "era": season.get("era") or "-.--",
+    }
+
+
+def _mlb_team_box(boxscore: dict, side: str) -> dict:
+    team = (boxscore.get("teams") or {}).get(side) or {}
+    hitters = [_mlb_hitter(_mlb_player(team, pid)) for pid in team.get("batters", [])]
+    pitchers = [_mlb_pitcher(_mlb_player(team, pid)) for pid in team.get("pitchers", [])]
+    team_batting = {
+        "ab": sum(p["ab"] for p in hitters),
+        "runs": sum(p["runs"] for p in hitters),
+        "hits": sum(p["hits"] for p in hitters),
+        "rbi": sum(p["rbi"] for p in hitters),
+        "hr": sum(p["hr"] for p in hitters),
+        "bb": sum(p["bb"] for p in hitters),
+        "so": sum(p["so"] for p in hitters),
+        "lob": sum(_safe_int((((_mlb_player(team, pid).get("stats") or {}).get("batting") or {}).get("leftOnBase"))) for pid in team.get("batters", [])),
+        "risp": "--",
+    }
+    return {"hitting": hitters, "pitching": pitchers, "teamBatting": team_batting}
+
+
+def _mlb_half_label(half: str | None) -> str:
+    if half == "top":
+        return "Top"
+    if half == "bottom":
+        return "Bot"
+    return ""
+
+
+def _mlb_play_team(play: dict, matchup: dict) -> str | None:
+    half = ((play.get("about") or {}).get("halfInning") or "").lower()
+    if half == "top":
+        return (matchup.get("away") or {}).get("abbreviation")
+    if half == "bottom":
+        return (matchup.get("home") or {}).get("abbreviation")
+    return None
+
+
+def _mlb_plays(all_plays: list[dict], matchup: dict) -> list[dict]:
+    out = []
+    for index, play in enumerate(all_plays):
+        about = play.get("about") or {}
+        result = play.get("result") or {}
+        inning = about.get("inning")
+        half = _mlb_half_label((about.get("halfInning") or "").lower())
+        out.append({
+            "id": str(play.get("atBatIndex", index)),
+            "eventId": str(play.get("atBatIndex", index)),
+            "sequence": index,
+            "clock": f"{half} {inning}".strip() if inning else "",
+            "quarter": f"{inning}{'st' if inning == 1 else 'nd' if inning == 2 else 'rd' if inning == 3 else 'th'}" if inning else "",
+            "team": _mlb_play_team(play, matchup),
+            "event": result.get("description") or result.get("event") or "Game event",
+            "awayScore": _safe_int(result.get("awayScore")),
+            "homeScore": _safe_int(result.get("homeScore")),
+        })
+    return out
+
+
+def _mlb_win_probability(points: list[dict]) -> list[dict]:
+    if not points:
+        return []
+    max_index = max(_safe_int(p.get("atBatIndex")) for p in points) or 1
+    out = []
+    for point in points:
+        home = point.get("homeTeamWinProbability")
+        away = point.get("awayTeamWinProbability")
+        if home is None or away is None:
+            continue
+        idx = _safe_int(point.get("atBatIndex"))
+        about = point.get("about") or {}
+        inning = about.get("inning")
+        half = _mlb_half_label((about.get("halfInning") or "").lower())
+        out.append({
+            "x": round((idx / max_index) * 100, 1),
+            "awayProb": round(_safe_float(away), 1),
+            "homeProb": round(_safe_float(home), 1),
+            "label": f"{half} {inning}".strip() if inning else None,
+        })
+    return out
 
 async def get_schedule(date_str: str) -> list:
     """Fetch today's MLB schedule from the MLB Stats API."""
@@ -625,3 +789,58 @@ async def get_todays_games():
         if cached:
             return cached
         return []
+
+
+@router.get("/game/{game_pk}")
+async def get_game_detail(game_pk: str):
+    matchups = await get_todays_games()
+    matchup = next((g for g in matchups if str(g.get("gameId")) == str(game_pk)), None)
+    if not matchup:
+        raise HTTPException(status_code=404, detail="MLB game not found in today's schedule")
+
+    game_status = int(matchup.get("gameStatus", 1) or 1)
+    status = _detail_status(game_status)
+    raw_status = matchup.get("status") or ""
+    client = get_http_client()
+
+    async def fetch_json(url: str):
+        try:
+            response = await client.get(url, timeout=15.0)
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:
+            logger.warning(f"MLB detail fetch failed for {game_pk}: {url} {exc}")
+            return None
+
+    feed_data, wp_data = await asyncio.gather(
+        fetch_json(f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"),
+        fetch_json(f"https://statsapi.mlb.com/api/v1/game/{game_pk}/winProbability"),
+    )
+
+    live = (feed_data or {}).get("liveData") or {}
+    linescore = live.get("linescore") or {}
+    boxscore = live.get("boxscore") or {}
+    all_plays = (live.get("plays") or {}).get("allPlays") or []
+
+    away_score = _mlb_inning_score(linescore, "away")
+    home_score = _mlb_inning_score(linescore, "home")
+    if not away_score["runs"]:
+        away_score["runs"] = _safe_int((matchup.get("away") or {}).get("score"))
+    if not home_score["runs"]:
+        home_score["runs"] = _safe_int((matchup.get("home") or {}).get("score"))
+
+    win_probability = _mlb_win_probability(wp_data if isinstance(wp_data, list) else [])
+
+    return {
+        "sport": "mlb",
+        "gameId": game_pk,
+        "matchup": matchup,
+        "status": status,
+        "rawStatus": raw_status,
+        "awayScore": away_score,
+        "homeScore": home_score,
+        "awayBoxScore": _mlb_team_box(boxscore, "away") if boxscore else None,
+        "homeBoxScore": _mlb_team_box(boxscore, "home") if boxscore else None,
+        "playByPlay": _mlb_plays(all_plays, matchup),
+        "winProbability": win_probability,
+    }

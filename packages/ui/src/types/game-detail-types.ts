@@ -1,4 +1,4 @@
-import type { NBAMatchupData, NHLMatchupData } from "./sports-types"
+import type { MLBMatchupData, NBAMatchupData, NHLMatchupData } from "./sports-types"
 
 export type GameDetailStatus = "preview" | "live" | "final"
 
@@ -148,6 +148,58 @@ export interface NHLThreeStar {
   position?: string
 }
 
+export interface MLBPlayerHittingStats {
+  name: string
+  position: string
+  ab: number
+  runs: number
+  hits: number
+  rbi: number
+  hr: number
+  bb: number
+  so: number
+  avg: string
+  obp: string
+  slg: string
+}
+
+export interface MLBPlayerPitchingStats {
+  name: string
+  ip: string
+  hits: number
+  runs: number
+  earnedRuns: number
+  bb: number
+  so: number
+  hr: number
+  pitchCount: number
+  strikes: number
+  era: string
+}
+
+export interface MLBTeamBoxScore {
+  hitting: MLBPlayerHittingStats[]
+  pitching: MLBPlayerPitchingStats[]
+  teamBatting: {
+    ab: number
+    runs: number
+    hits: number
+    rbi: number
+    hr: number
+    bb: number
+    so: number
+    lob: number
+    risp: string
+  }
+}
+
+export interface MLBInningScore {
+  innings: (number | null)[]
+  runs: number
+  hits: number
+  errors: number
+}
+
 export interface NHLGameDetail {
   sport: "nhl"
   gameId: string
@@ -163,4 +215,18 @@ export interface NHLGameDetail {
   threeStars?: NHLThreeStar[]
 }
 
-export type GameDetail = NBAGameDetail | NHLGameDetail
+export interface MLBGameDetail {
+  sport: "mlb"
+  gameId: string
+  matchup: MLBMatchupData
+  status: GameDetailStatus
+  rawStatus: string
+  awayScore: MLBInningScore
+  homeScore: MLBInningScore
+  awayBoxScore: MLBTeamBoxScore | null
+  homeBoxScore: MLBTeamBoxScore | null
+  playByPlay: PlayByPlayEvent[]
+  winProbability: WinProbPoint[]
+}
+
+export type GameDetail = NBAGameDetail | NHLGameDetail | MLBGameDetail

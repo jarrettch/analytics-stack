@@ -827,6 +827,10 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
   const homeProbPct = hasWinProb ? (home.winProbability as number) * 100 : 0
   const isLiveNBA = matchup.sport === "nba" && (matchup as NBAMatchupData).gameStatus >= 2
   const isLiveMLB = matchup.sport === "mlb" && (matchup as MLBMatchupData).gameStatus >= 2
+  const isLiveDetailGame =
+    (matchup.sport === "nba" && (matchup as NBAMatchupData).gameStatus === 2) ||
+    (matchup.sport === "nhl" && (matchup as NHLMatchupData).gameStatus === 2) ||
+    (matchup.sport === "mlb" && (matchup as MLBMatchupData).gameStatus === 2)
 
   return (
     <div className="w-full max-w-md overflow-hidden rounded-md border border-border bg-card">
@@ -850,10 +854,14 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
           <span className="font-mono text-[10px] text-muted-foreground">
             {matchup.gameId}
           </span>
-          {(matchup.sport === "nba" || matchup.sport === "nhl") && (
+          {(matchup.sport === "nba" || matchup.sport === "nhl" || matchup.sport === "mlb") && (
             <a
               href={`/game/${matchup.gameId}?sport=${matchup.sport}`}
-              className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-primary transition-colors hover:text-foreground"
+              className={`flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-colors ${
+                isLiveDetailGame
+                  ? "bg-emerald-500/10 text-emerald-400 [filter:drop-shadow(0_0_5px_#34d399)] hover:bg-emerald-500/20 hover:text-emerald-300"
+                  : "border border-border bg-transparent text-muted-foreground hover:bg-secondary/70 hover:text-foreground"
+              }`}
             >
               Detail
               <ExternalLink className="size-3" />
