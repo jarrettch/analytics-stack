@@ -1,0 +1,66 @@
+{
+  "_meta": {
+    "source": "Sanitized from a live SGO MLB response on 2026-08-12",
+    "requestFilters": {"oddsPresent": true, "oddsAvailable": false},
+    "requestOptions": ["includeAltLines", "includeOpenCloseOdds"]
+  },
+  "eventID": "SANITIZED_MLB_EVENT",
+  "status": {
+    "startsAt": "2026-08-11T23:10:00Z",
+    "started": true,
+    "ended": true,
+    "finalized": true,
+    "cancelled": false,
+    "completed": true,
+    "live": false,
+    "delayed": false,
+    "oddsAvailable": false,
+    "oddsPresent": true
+  },
+  "teams": {
+    "away": {"teamID": "SANITIZED_AWAY_MLB"},
+    "home": {"teamID": "SANITIZED_HOME_MLB"}
+  },
+  "players": {
+    "SANITIZED_PITCHER_1_MLB": {
+      "playerID": "SANITIZED_PITCHER_1_MLB",
+      "teamID": "SANITIZED_HOME_MLB",
+      "name": "Sanitized Pitcher"
+    }
+  },
+  "odds": {
+    "pitching_strikeouts-SANITIZED_PITCHER_1_MLB-game-ou-over": {
+      "oddID": "pitching_strikeouts-SANITIZED_PITCHER_1_MLB-game-ou-over",
+      "marketName": "Sanitized Pitcher Strikeouts Over/Under (Full Event)",
+      "statID": "pitching_strikeouts",
+      "statEntityID": "SANITIZED_PITCHER_1_MLB",
+      "playerID": "SANITIZED_PITCHER_1_MLB",
+      "periodID": "game",
+      "betTypeID": "ou",
+      "sideID": "over",
+      "started": true,
+      "ended": true,
+      "cancelled": false,
+      "byBookmaker": {
+        "draftkings": {
+          "available": false,
+          "odds": "-115",
+          "overUnder": "5.5",
+          "openOdds": "+105",
+          "openOverUnder": "4.5",
+          "closeOdds": "-110",
+          "closeOverUnder": "5.5",
+          "lastUpdatedAt": "2026-08-11T23:09:00.000Z",
+          "altLines": [
+            {
+              "available": false,
+              "odds": "+130",
+              "overUnder": "6.5",
+              "lastUpdatedAt": "2026-08-11T23:08:00.000Z"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

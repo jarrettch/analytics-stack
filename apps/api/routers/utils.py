@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -237,12 +237,23 @@ async def fetch_sgo_odds(
     table_name: str,
     tricode_for: Callable[[str], str],
     target_date: date | None = None,
+    extra_odd_ids: Iterable[str] = (),
+    include_alt_lines: bool = False,
+    include_open_close_odds: bool = False,
+    response_consumer: Callable[
+        [list[dict], datetime], Awaitable[None] | None
+    ] | None = None,
+    optional_market_fallback_consumer: Callable[[], None] | None = None,
 ) -> tuple[dict, int]:
     """Fetch a league's odds from SportsGameOdds, merge with persisted rows, persist fresh.
 
     Identical for every SGO-backed sport (NBA/MLB/NHL); the only per-sport inputs are
     the league ID, the Supabase table, and `tricode_for`, which maps an SGO teamID to
     that sport's tricode. Returns (merged_odds_map, fresh_count).
+
+    A sport may add markets with `extra_odd_ids` and consume the already-paid-for
+    event response with `response_consumer`. Consumer failures are logged and isolated
+    from the primary matchup-odds persistence path.
 
     Prefers PREFERRED_BOOK lines, falling back to consensus bookOdds. Spreads and totals
     often go null early in the day or temporarily off-board, so for those we fall back to
@@ -263,21 +274,80 @@ async def fetch_sgo_odds(
         starts_after_utc = datetime.combine(target, datetime.min.time(), ET).astimezone(UTC)
         starts_before_utc = datetime.combine(target + timedelta(days=1), datetime.min.time(), ET).astimezone(UTC)
 
+        optional_odd_ids = list(extra_odd_ids)
+        requested_odd_ids = list(dict.fromkeys([*SGO_ODD_IDS, *optional_odd_ids]))
         params = {
             "leagueID": league_id,
             "oddsAvailable": "true",
             "startsAfter": starts_after_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "startsBefore": starts_before_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "oddID": ",".join(SGO_ODD_IDS),
+            "oddID": ",".join(requested_odd_ids),
             "limit": 20,
         }
+        if include_alt_lines:
+            params["includeAltLines"] = "true"
+        if include_open_close_odds:
+            params["includeOpenCloseOdds"] = "true"
         headers = {"x-api-key": api_key}
 
         client = get_http_client()
-        r = await client.get(SGO_EVENTS_URL, params=params, headers=headers)
-        r.raise_for_status()
+        consumer_response_available = True
+        try:
+            r = await client.get(SGO_EVENTS_URL, params=params, headers=headers)
+            r.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            # Optional player-prop filters must never take down the primary game-line
+            # refresh. Retry only request-shape errors; auth and rate-limit failures
+            # cannot be repaired by removing markets.
+            if optional_odd_ids and e.response.status_code in {400, 422}:
+                logger.warning(
+                    "SportsGameOdds %s rejected optional markets (%s); "
+                    "retrying game odds only",
+                    league_id,
+                    e.response.status_code,
+                )
+                fallback_params = {
+                    key: value
+                    for key, value in params.items()
+                    if key not in {"includeAltLines", "includeOpenCloseOdds"}
+                }
+                fallback_params["oddID"] = ",".join(SGO_ODD_IDS)
+                r = await client.get(
+                    SGO_EVENTS_URL, params=fallback_params, headers=headers
+                )
+                r.raise_for_status()
+                consumer_response_available = False
+                if optional_market_fallback_consumer:
+                    try:
+                        optional_market_fallback_consumer()
+                    except Exception:
+                        logger.exception(
+                            "SportsGameOdds %s fallback consumer failed", league_id
+                        )
+            else:
+                raise
+
         games = r.json().get("data", [])
-        logger.info(f"SportsGameOdds: {len(games)} {league_id} events for {target.isoformat()}")
+        usage_headers = {
+            key: value
+            for key, value in r.headers.items()
+            if any(token in key.lower() for token in ("rate", "limit", "usage", "remaining"))
+        }
+        logger.info(
+            "SportsGameOdds: %d %s events for %s (usage headers: %s)",
+            len(games),
+            league_id,
+            target.isoformat(),
+            usage_headers or "unavailable",
+        )
+
+        if response_consumer and consumer_response_available:
+            try:
+                consumer_result = response_consumer(games, datetime.now(UTC))
+                if consumer_result is not None:
+                    await consumer_result
+            except Exception:
+                logger.exception(f"SportsGameOdds {league_id} response consumer failed")
 
         fresh_odds = {}
         odds_by_date = {}

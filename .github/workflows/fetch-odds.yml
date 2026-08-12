@@ -44,15 +44,25 @@ jobs:
       - name: Fetch MLB odds
         run: |
           echo "Fetching MLB odds..."
-          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/mlb/cron/fetch-odds")
+          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/mlb/cron/fetch-odds?collection_key=${{ github.run_id }}-today")
           echo "Response: $response"
 
           if echo "$response" | grep -q 'success.*true'; then
             fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
             persisted=$(echo "$response" | grep -o '"persisted_loaded":[0-9]*' | grep -o '[0-9]*' || echo "0")
+            pitcher_k_outcomes=$(echo "$response" | grep -o '"pitcher_k_outcomes_found":[0-9]*' | grep -o '[0-9]*' || echo "0")
             echo "MLB odds fetched: fresh=${fresh} persisted=${persisted}"
             if [ "$fresh" = "0" ]; then
               echo "WARNING: No fresh MLB odds from API — dark day or lines not yet posted"
+            fi
+            if echo "$response" | grep -q '"pitcher_k_skipped":true'; then
+              echo "WARNING: MLB pitcher-K markets were rejected; game odds fallback succeeded"
+            elif ! echo "$response" | grep -q '"pitcher_k_success":true'; then
+              echo "Failed to collect MLB pitcher-K odds"
+              echo "Full response: $response"
+              exit 1
+            elif [ "$fresh" != "0" ] && [ "$pitcher_k_outcomes" = "0" ]; then
+              echo "WARNING: MLB slate returned games but no pitcher-K outcomes"
             fi
           else
             echo "Failed to fetch MLB odds"

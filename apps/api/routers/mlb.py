@@ -20,6 +20,12 @@ from .utils import (
     load_persisted_odds,
     local_time_hhmm,
 )
+from .mlb_pitcher_k_odds import (
+    PITCHER_K_ODD_IDS,
+    PitcherKCollectionStats,
+    collection_id_for,
+    collect_pitcher_k_snapshots,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -502,17 +508,39 @@ async def get_stats_map() -> dict:
         logger.error(f"MLB stats fetch error: {e}", exc_info=True)
         return {}
 
-async def get_odds_map(target_date: date | None = None):
-    """Fetch MLB odds from SportsGameOdds, merged with persisted rows."""
+async def get_odds_map(
+    target_date: date | None = None,
+    *,
+    pitcher_k_stats: PitcherKCollectionStats | None = None,
+    pitcher_k_collection_id: str | None = None,
+):
+    """Fetch MLB odds and append pitcher-K prices from the same SGO response."""
+    async def collect_pitcher_ks(events: list[dict], captured_at: datetime) -> None:
+        collected = await asyncio.to_thread(
+            collect_pitcher_k_snapshots,
+            events,
+            captured_at,
+            pitcher_k_collection_id,
+        )
+        if pitcher_k_stats is not None:
+            pitcher_k_stats.copy_from(collected)
+
     return await fetch_sgo_odds(
         league_id="MLB",
         table_name="mlb_odds",
         tricode_for=get_tricode_from_sgo_team_id,
         target_date=target_date,
+        extra_odd_ids=PITCHER_K_ODD_IDS,
+        include_alt_lines=True,
+        include_open_close_odds=True,
+        response_consumer=collect_pitcher_ks,
+        optional_market_fallback_consumer=(
+            pitcher_k_stats.mark_skipped if pitcher_k_stats is not None else None
+        ),
     )
 
 @router.get("/cron/fetch-odds")
-async def cron_fetch_odds(offset: int = 0):
+async def cron_fetch_odds(offset: int = 0, collection_key: str | None = None):
     """GitHub Actions cron: fetch and persist a single ET day's MLB odds.
 
     `offset` selects which ET day to fetch: 0 = today (default), 1 = tomorrow.
@@ -521,7 +549,12 @@ async def cron_fetch_odds(offset: int = 0):
     """
     try:
         target = datetime.now(ET).date() + timedelta(days=offset)
-        odds, fresh_count = await get_odds_map(target_date=target)
+        pitcher_k_stats = PitcherKCollectionStats()
+        odds, fresh_count = await get_odds_map(
+            target_date=target,
+            pitcher_k_stats=pitcher_k_stats,
+            pitcher_k_collection_id=collection_id_for(collection_key),
+        )
         cache.set("odds", odds)
         return {
             "success": True,
@@ -529,6 +562,15 @@ async def cron_fetch_odds(offset: int = 0):
             "persisted_loaded": len(odds) - fresh_count,
             "total_matchups": len(odds),
             "persisted_to": "supabase:mlb_odds",
+            "pitcher_k_success": pitcher_k_stats.succeeded,
+            "pitcher_k_outcomes_found": pitcher_k_stats.outcomes_found,
+            "pitcher_k_rows_found": pitcher_k_stats.rows_found,
+            "pitcher_k_rows_inserted": pitcher_k_stats.rows_inserted,
+            "pitcher_k_rows_deduplicated": pitcher_k_stats.rows_deduplicated,
+            "pitcher_k_malformed_prices": pitcher_k_stats.malformed_prices,
+            "pitcher_k_events_skipped": pitcher_k_stats.events_skipped,
+            "pitcher_k_skipped": pitcher_k_stats.skipped,
+            "pitcher_k_persisted_to": "supabase:mlb_pitcher_k_odds",
             "date": target.isoformat(),
         }
     except Exception as e:
