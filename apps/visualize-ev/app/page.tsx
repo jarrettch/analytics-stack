@@ -7,7 +7,7 @@ import { Activity } from "lucide-react";
 const FALLBACK_VISIBLE_SPORTS: Sport[] = ["mlb", "wnba"];
 
 // Sports with a live backend endpoint (others fall through to "coming soon").
-const LIVE_SPORTS: Sport[] = ["nba", "wnba", "mlb", "nhl"];
+const LIVE_SPORTS: Sport[] = ["nba", "wnba", "nfl", "mlb", "nhl"];
 
 function hasGameStatus(matchup: MatchupData): matchup is MatchupData & { gameStatus: number } {
   return "gameStatus" in matchup && typeof matchup.gameStatus === "number";
@@ -106,7 +106,6 @@ export default function Home() {
           setLoading(false);
         }
       } else {
-        // NFL coming soon
         setMatchups([]);
         setLoading(false);
       }
@@ -217,7 +216,7 @@ export default function Home() {
         <div className="h-px w-full bg-border" />
         <div className="flex items-center justify-between pt-2">
           <span className="font-mono text-[10px] text-muted-foreground">
-            Models: EV-MODEL-V1 (NBA) &bull; DVOA v3.1 (NFL) &bull; PECOTA v2.8 (MLB) &bull; xG v5.0 (NHL)
+            Models: EV-MODEL-V1 (NBA/WNBA) &bull; Market + team stats (NFL) &bull; PECOTA v2.8 (MLB) &bull; xG v5.0 (NHL)
           </span>
           <span className="font-mono text-[10px] text-muted-foreground">
             Updated {now?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ET &bull; For entertainment only

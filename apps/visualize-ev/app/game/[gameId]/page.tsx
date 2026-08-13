@@ -7,8 +7,8 @@ type PageProps = {
   searchParams: Promise<{ sport?: string }>
 }
 
-function isDetailSport(value: string | undefined): value is Extract<Sport, "nba" | "nhl" | "mlb"> {
-  return value === "nba" || value === "nhl" || value === "mlb"
+function isDetailSport(value: string | undefined): value is Extract<Sport, "nba" | "nfl" | "nhl" | "mlb"> {
+  return value === "nba" || value === "nfl" || value === "nhl" || value === "mlb"
 }
 
 export default async function GamePage({ params, searchParams }: PageProps) {
@@ -16,7 +16,7 @@ export default async function GamePage({ params, searchParams }: PageProps) {
   const { sport } = await searchParams
 
   if (!isDetailSport(sport)) {
-    return <ErrorState message="Game detail currently supports NBA, NHL, and MLB. Open a game from one of those dashboards." />
+    return <ErrorState message="Game detail currently supports NBA, NFL, NHL, and MLB. Open a game from one of those dashboards." />
   }
 
   try {

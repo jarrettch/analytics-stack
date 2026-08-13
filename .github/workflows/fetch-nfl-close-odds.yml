@@ -1,0 +1,60 @@
+name: Fetch NFL Early-Window Odds
+
+on:
+  schedule:
+    # Native timezone scheduling follows EDT/EST and remains valid if the
+    # GitHub-hosted runner starts after the nominal trigger time.
+    - cron: '30 12 * * 0'
+      timezone: 'America/New_York'
+  workflow_dispatch:
+
+jobs:
+  fetch-nfl-close-odds:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Fetch NFL early-window odds
+        env:
+          API_URL: ${{ secrets.API_URL }}
+        run: |
+          echo "Waking up server..."
+          curl -s --max-time 120 "$API_URL/api/nfl/today" || true
+          sleep 30
+
+          echo "Fetching NFL early-window odds..."
+          response=$(curl -s --max-time 120 "$API_URL/api/nfl/cron/fetch-odds?verify_early_window=true")
+          echo "Response: $response"
+
+          if ! echo "$response" | jq -e '.success == true' >/dev/null; then
+            echo "Failed to fetch NFL early-window odds"
+            exit 1
+          fi
+
+          fresh=$(echo "$response" | jq -r '.fresh_from_api // 0')
+          scoreboard_ok=$(echo "$response" | jq -r '.early_window_scoreboard_ok // false')
+          expected=$(echo "$response" | jq -r '.early_window_games // 0')
+          candidates=$(echo "$response" | jq -r '.early_window_snapshot_candidates // 0')
+          inserted=$(echo "$response" | jq -r '.snapshots_inserted // 0')
+          deduplicated=$(echo "$response" | jq -r '.snapshots_deduplicated // 0')
+          persistence_ok=$(echo "$response" | jq -r '.snapshot_persistence_ok // false')
+
+          echo "NFL early-window odds: fresh=${fresh} expected=${expected} candidates=${candidates} inserted=${inserted} deduplicated=${deduplicated}"
+
+          if [ "$scoreboard_ok" != "true" ]; then
+            echo "Could not verify the NFL early window because the ESPN scoreboard was unavailable"
+            exit 1
+          fi
+
+          if [ "$expected" -eq 0 ]; then
+            echo "No 1pm-window NFL games are scheduled today"
+          fi
+
+          if [ "$expected" -gt 0 ] && [ "$persistence_ok" != "true" ]; then
+            echo "NFL odds history persistence failed for a scheduled early window"
+            exit 1
+          fi
+
+          if [ "$candidates" -lt "$expected" ]; then
+            echo "Only ${candidates} of ${expected} scheduled early-window games produced pregame snapshot candidates"
+            exit 1
+          fi

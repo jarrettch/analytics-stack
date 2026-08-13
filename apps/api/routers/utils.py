@@ -5,6 +5,8 @@ Supabase odds persistence, time formatting, and a module-level httpx client.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import time
@@ -220,6 +222,122 @@ def save_persisted_odds(odds_map: dict, game_date: date | None = None, *, table_
         logger.warning(f"Failed to persist odds: {e}")
 
 
+def odds_snapshot_hash(odds_data: dict) -> str:
+    """Stable digest for consecutive snapshot deduplication."""
+    canonical = json.dumps(
+        odds_data,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def save_odds_snapshots(
+    snapshots: list[dict], *, stats: dict | None = None
+) -> int:
+    """Append changed normalized odds bundles to the shared history table.
+
+    Deduplication is deliberately consecutive rather than globally unique: if
+    a line moves away and later returns to an earlier value, the return is part
+    of the movement path and must be retained.
+    """
+    result = {
+        "candidates": len(snapshots),
+        "prepared": 0,
+        "inserted": 0,
+        "deduplicated": 0,
+        "persistence_ok": False,
+    }
+
+    def finish(**updates) -> int:
+        result.update(updates)
+        if stats is not None:
+            stats.clear()
+            stats.update(result)
+        return result["inserted"]
+
+    if not snapshots:
+        return finish(persistence_ok=True)
+    if not supabase:
+        return finish()
+
+    prepared = []
+    for snapshot in snapshots:
+        odds_data = snapshot.get("odds_data") or {}
+        if not odds_data:
+            continue
+        prepared.append({
+            **snapshot,
+            "snapshot_hash": odds_snapshot_hash(odds_data),
+        })
+
+    result["prepared"] = len(prepared)
+    if not prepared:
+        return finish(persistence_ok=True)
+
+    latest_hashes: dict[tuple[str, str, str, str, str], str] = {}
+    groups = {
+        (row["sport"], row["provider"], row["game_date"])
+        for row in prepared
+    }
+
+    try:
+        for sport, provider, game_date_value in groups:
+            response = (
+                supabase.table("odds_snapshots")
+                .select("sport,provider,bookmaker,game_date,matchup_key,snapshot_hash,captured_at")
+                .eq("sport", sport)
+                .eq("provider", provider)
+                .eq("game_date", game_date_value)
+                .order("captured_at", desc=True)
+                .limit(1000)
+                .execute()
+            )
+            for row in response.data:
+                key = (
+                    row["sport"],
+                    row["provider"],
+                    row["bookmaker"],
+                    str(row["game_date"]),
+                    row["matchup_key"],
+                )
+                latest_hashes.setdefault(key, row["snapshot_hash"])
+
+        inserts = []
+        for row in prepared:
+            key = (
+                row["sport"],
+                row["provider"],
+                row["bookmaker"],
+                str(row["game_date"]),
+                row["matchup_key"],
+            )
+            if latest_hashes.get(key) == row["snapshot_hash"]:
+                continue
+            inserts.append(row)
+            latest_hashes[key] = row["snapshot_hash"]
+
+        if inserts:
+            supabase.table("odds_snapshots").insert(inserts).execute()
+        logger.info(
+            "Odds history: inserted %d changed snapshots, deduplicated %d",
+            len(inserts),
+            len(prepared) - len(inserts),
+        )
+        return finish(
+            inserted=len(inserts),
+            deduplicated=len(prepared) - len(inserts),
+            persistence_ok=True,
+        )
+    except Exception as exc:
+        # History collection must never take down the latest-odds cache or the
+        # dashboard if the migration has not been applied yet.
+        logger.warning("Failed to persist odds snapshots: %s", exc)
+        return finish()
+
+
 SGO_EVENTS_URL = "https://api.sportsgameodds.com/v2/events"
 
 # The six markets every SGO-backed sport pulls: home/away moneyline, home/away
@@ -233,6 +351,7 @@ SGO_ODD_IDS = [
 
 async def fetch_sgo_odds(
     *,
+    sport: str,
     league_id: str,
     table_name: str,
     tricode_for: Callable[[str], str],
@@ -244,10 +363,11 @@ async def fetch_sgo_odds(
         [list[dict], datetime], Awaitable[None] | None
     ] | None = None,
     optional_market_fallback_consumer: Callable[[], None] | None = None,
+    collection_stats: dict | None = None,
 ) -> tuple[dict, int]:
     """Fetch a league's odds from SportsGameOdds, merge with persisted rows, persist fresh.
 
-    Identical for every SGO-backed sport (NBA/MLB/NHL); the only per-sport inputs are
+    Identical for every SGO-backed sport (NBA/WNBA/NFL/MLB/NHL); the only per-sport inputs are
     the league ID, the Supabase table, and `tricode_for`, which maps an SGO teamID to
     that sport's tricode. Returns (merged_odds_map, fresh_count).
 
@@ -255,11 +375,24 @@ async def fetch_sgo_odds(
     event response with `response_consumer`. Consumer failures are logged and isolated
     from the primary matchup-odds persistence path.
 
+    Callers that need collection observability may pass `collection_stats`; it is
+    populated with eligible pregame candidates, changed inserts, deduplications,
+    candidate matchup keys, and snapshot-persistence health.
+
     Prefers PREFERRED_BOOK lines, falling back to consensus bookOdds. Spreads and totals
     often go null early in the day or temporarily off-board, so for those we fall back to
     the persisted value rather than wiping the prior line.
     """
     odds_map = load_persisted_odds(table_name=table_name)
+    if collection_stats is not None:
+        collection_stats.clear()
+        collection_stats.update({
+            "pregame_snapshot_candidates": 0,
+            "pregame_snapshot_matchups": [],
+            "snapshots_inserted": 0,
+            "snapshots_deduplicated": 0,
+            "snapshot_persistence_ok": False,
+        })
 
     api_key = os.getenv("SPORTS_GAME_ODDS_KEY")
     if not api_key:
@@ -328,6 +461,7 @@ async def fetch_sgo_odds(
                 raise
 
         games = r.json().get("data", [])
+        captured_at = datetime.now(UTC)
         usage_headers = {
             key: value
             for key, value in r.headers.items()
@@ -343,7 +477,7 @@ async def fetch_sgo_odds(
 
         if response_consumer and consumer_response_available:
             try:
-                consumer_result = response_consumer(games, datetime.now(UTC))
+                consumer_result = response_consumer(games, captured_at)
                 if consumer_result is not None:
                     await consumer_result
             except Exception:
@@ -351,6 +485,7 @@ async def fetch_sgo_odds(
 
         fresh_odds = {}
         odds_by_date = {}
+        snapshots = []
 
         for game in games:
             teams = game.get("teams", {})
@@ -370,8 +505,10 @@ async def fetch_sgo_odds(
 
             starts_at = game.get("status", {}).get("startsAt", "")
             try:
-                game_date = datetime.fromisoformat(starts_at.replace("Z", "+00:00")).astimezone(ET).date()
+                starts_at_dt = datetime.fromisoformat(starts_at.replace("Z", "+00:00"))
+                game_date = starts_at_dt.astimezone(ET).date()
             except Exception:
+                starts_at_dt = None
                 game_date = datetime.now(ET).date()
 
             odds = game.get("odds", {})
@@ -415,9 +552,53 @@ async def fetch_sgo_odds(
             fresh_odds[(game_date.isoformat(), matchup_key)] = odds_data
             odds_by_date.setdefault(game_date, {})[matchup_key] = odds_data
 
+            status = game.get("status", {})
+            event_started = bool(
+                status.get("started")
+                or status.get("live")
+                or (starts_at_dt is not None and starts_at_dt <= captured_at)
+            )
+            if not event_started and any(value is not None for value in odds_data.values()):
+                preferred_count = sum(
+                    bool(odds.get(odd_id, {}).get("byBookmaker", {}).get(PREFERRED_BOOK, {}).get("available"))
+                    for odd_id in SGO_ODD_IDS
+                )
+                populated_count = sum(bool(odds.get(odd_id)) for odd_id in SGO_ODD_IDS)
+                if preferred_count and preferred_count == populated_count:
+                    bookmaker = PREFERRED_BOOK
+                elif preferred_count:
+                    bookmaker = f"mixed:{PREFERRED_BOOK}+consensus"
+                else:
+                    bookmaker = "consensus"
+                snapshots.append({
+                    "sport": sport,
+                    "provider": "sportsgameodds",
+                    "bookmaker": bookmaker,
+                    "provider_event_id": str(game.get("eventID") or "") or None,
+                    "game_date": game_date.isoformat(),
+                    "matchup_key": matchup_key,
+                    "starts_at": starts_at or None,
+                    "captured_at": captured_at.isoformat(),
+                    "odds_data": odds_data,
+                })
+
         odds_map.update(fresh_odds)
         for gd, gd_odds in odds_by_date.items():
             save_persisted_odds(gd_odds, game_date=gd, table_name=table_name)
+        snapshot_stats: dict = {}
+        save_odds_snapshots(snapshots, stats=snapshot_stats)
+        if collection_stats is not None:
+            collection_stats.update({
+                "pregame_snapshot_candidates": len(snapshots),
+                "pregame_snapshot_matchups": [
+                    snapshot["matchup_key"]
+                    for snapshot in snapshots
+                    if snapshot.get("matchup_key")
+                ],
+                "snapshots_inserted": snapshot_stats.get("inserted", 0),
+                "snapshots_deduplicated": snapshot_stats.get("deduplicated", 0),
+                "snapshot_persistence_ok": snapshot_stats.get("persistence_ok", False),
+            })
 
         logger.info(
             f"{league_id} odds map: {len(fresh_odds)} fresh + "
@@ -452,6 +633,7 @@ def _odds_api_pick_book(event: dict, books: list[str]) -> dict | None:
 
 async def fetch_odds_api_odds(
     *,
+    sport: str,
     sport_key: str,
     table_name: str,
     tricode_for: Callable[[str], str],
@@ -500,8 +682,10 @@ async def fetch_odds_api_odds(
         remaining = r.headers.get("x-requests-remaining", "?")
         logger.info(f"The Odds API: {len(events)} {sport_key} events for {target.isoformat()} (credits left: {remaining})")
 
+        captured_at = datetime.now(UTC)
         fresh_odds = {}
         odds_by_date = {}
+        snapshots = []
 
         for event in events:
             home_name = event.get("home_team", "")
@@ -518,8 +702,10 @@ async def fetch_odds_api_odds(
 
             matchup_key = f"{away_tri}@{home_tri}"
             try:
-                game_date = datetime.fromisoformat(event["commence_time"].replace("Z", "+00:00")).astimezone(ET).date()
+                starts_at_dt = datetime.fromisoformat(event["commence_time"].replace("Z", "+00:00"))
+                game_date = starts_at_dt.astimezone(ET).date()
             except Exception:
+                starts_at_dt = None
                 game_date = datetime.now(ET).date()
 
             away_ml = home_ml = None
@@ -575,9 +761,24 @@ async def fetch_odds_api_odds(
             fresh_odds[(game_date.isoformat(), matchup_key)] = odds_data
             odds_by_date.setdefault(game_date, {})[matchup_key] = odds_data
 
+            event_started = starts_at_dt is not None and starts_at_dt <= captured_at
+            if not event_started and any(value is not None for value in odds_data.values()):
+                snapshots.append({
+                    "sport": sport,
+                    "provider": "the_odds_api",
+                    "bookmaker": (book or {}).get("key", "unknown"),
+                    "provider_event_id": str(event.get("id") or "") or None,
+                    "game_date": game_date.isoformat(),
+                    "matchup_key": matchup_key,
+                    "starts_at": event.get("commence_time"),
+                    "captured_at": captured_at.isoformat(),
+                    "odds_data": odds_data,
+                })
+
         odds_map.update(fresh_odds)
         for gd, gd_odds in odds_by_date.items():
             save_persisted_odds(gd_odds, game_date=gd, table_name=table_name)
+        save_odds_snapshots(snapshots)
 
         logger.info(
             f"{sport_key} odds map: {len(fresh_odds)} fresh + "
