@@ -490,6 +490,7 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
 async def get_odds_map(target_date: date | None = None):
     """Fetch NBA odds from SportsGameOdds, merged with persisted rows."""
     return await fetch_sgo_odds(
+        sport="nba",
         league_id="NBA",
         table_name="nba_odds",
         tricode_for=get_tricode_from_sgo_team_id,

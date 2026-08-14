@@ -230,6 +230,7 @@ async def get_odds_map(target_date: date | None = None):
     of fetch_sgo_odds. Same normalized output shape as the other sports.
     """
     return await fetch_odds_api_odds(
+        sport="wnba",
         sport_key="basketball_wnba",
         table_name="wnba_odds",
         tricode_for=get_tricode_from_name,

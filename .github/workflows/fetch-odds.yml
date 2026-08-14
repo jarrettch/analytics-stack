@@ -2,9 +2,9 @@ name: Fetch Daily Odds
 
 on:
   schedule:
-    # 11am ET (16:00 UTC) - morning lines
+    # Noon ET during daylight time (16:00 UTC) - morning / early-window close
     - cron: '0 16 * * *'
-    # 5pm ET (22:00 UTC) - closing lines, ~1hr before most evening tips
+    # 6pm ET during daylight time (22:00 UTC) - evening lines
     - cron: '0 22 * * *'
   workflow_dispatch: # Allow manual trigger
 
@@ -104,6 +104,25 @@ jobs:
             fi
           else
             echo "Failed to fetch WNBA odds"
+            echo "Full response: $response"
+            exit 1
+          fi
+
+      - name: Fetch NFL odds
+        run: |
+          echo "Fetching NFL odds..."
+          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/nfl/cron/fetch-odds")
+          echo "Response: $response"
+
+          if echo "$response" | grep -q 'success.*true'; then
+            fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
+            persisted=$(echo "$response" | grep -o '"persisted_loaded":[0-9]*' | grep -o '[0-9]*' || echo "0")
+            echo "NFL odds fetched: fresh=${fresh} persisted=${persisted}"
+            if [ "$fresh" = "0" ]; then
+              echo "WARNING: No fresh NFL odds — dark day or lines not yet posted"
+            fi
+          else
+            echo "Failed to fetch NFL odds"
             echo "Full response: $response"
             exit 1
           fi

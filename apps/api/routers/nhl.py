@@ -558,6 +558,7 @@ async def get_next_nhl_scoreboard(start_date: date, lookahead_days: int = NHL_LO
 async def get_odds_map(target_date: date | None = None):
     """Fetch NHL odds from SportsGameOdds, merged with persisted rows."""
     return await fetch_sgo_odds(
+        sport="nhl",
         league_id="NHL",
         table_name="nhl_odds",
         tricode_for=get_tricode_from_sgo_team_id,

@@ -28,11 +28,12 @@ export type WNBATeamData = NBATeamData
 
 // NFL-specific team data
 export interface NFLTeamData extends BaseTeamData {
-  pointsFor: number
-  pointsAgainst: number
-  yardsPG: number
-  yardsAllowedPG: number
-  turnoverDiff: number
+  score: number
+  pointsFor: number | null
+  pointsAgainst: number | null
+  yardsPG: number | null
+  yardsAllowedPG: number | null
+  turnoverDiff: number | null
 }
 
 // MLB-specific team data
@@ -110,9 +111,22 @@ export interface WNBAMatchupData extends BaseMatchupData {
 
 export interface NFLMatchupData extends BaseMatchupData {
   sport: "nfl"
+  gameStatus: number
+  period: number
+  gameClock: string | null
   away: NFLTeamData
   home: NFLTeamData
   week: number
+  weekLabel: string
+  seasonType: string
+  statsSeason: number
+  pregameSpread?: number | null
+  spreadOddsHome?: number | null
+  spreadOddsAway?: number | null
+  overOdds?: number | null
+  underOdds?: number | null
+  homeMoneyline?: number | null
+  awayMoneyline?: number | null
 }
 
 export interface MLBMatchupData extends BaseMatchupData {
@@ -161,7 +175,7 @@ export const SPORT_LABELS: Record<Sport, string> = {
 
 export const SPORT_MODELS: Record<Sport, string> = {
   nba: "EV-MODEL-V1",
-  nfl: "DVOA v3.1",
+  nfl: "MARKET + TEAM STATS",
   mlb: "PECOTA v2.8",
   nhl: "xG v5.0",
   wnba: "EV-MODEL-V1",

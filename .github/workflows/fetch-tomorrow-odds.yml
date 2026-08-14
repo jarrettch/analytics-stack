@@ -94,3 +94,18 @@ jobs:
             echo "Full response: $response"
             exit 1
           fi
+
+      - name: Fetch tomorrow's NFL odds
+        run: |
+          echo "Fetching tomorrow's NFL odds..."
+          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/nfl/cron/fetch-odds?offset=1")
+          echo "Response: $response"
+
+          if echo "$response" | grep -q 'success.*true'; then
+            fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
+            echo "Tomorrow NFL odds fetched: fresh=${fresh}"
+          else
+            echo "Failed to fetch tomorrow's NFL odds"
+            echo "Full response: $response"
+            exit 1
+          fi

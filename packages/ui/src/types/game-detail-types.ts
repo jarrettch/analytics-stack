@@ -1,4 +1,4 @@
-import type { MLBMatchupData, NBAMatchupData, NHLMatchupData } from "./sports-types"
+import type { MLBMatchupData, NBAMatchupData, NFLMatchupData, NHLMatchupData } from "./sports-types"
 
 export type GameDetailStatus = "preview" | "live" | "final"
 
@@ -90,6 +90,78 @@ export interface NBAGameDetail {
     away: NBAScoringEfficiency
     home: NBAScoringEfficiency
   } | null
+}
+
+export interface NFLPlayerPassingStats {
+  name: string
+  completions: number
+  attempts: number
+  yards: number
+  touchdowns: number
+  interceptions: number
+  rating: number
+  sacks: number
+}
+
+export interface NFLPlayerRushingStats {
+  name: string
+  carries: number
+  yards: number
+  average: number
+  touchdowns: number
+  longest: number
+}
+
+export interface NFLPlayerReceivingStats {
+  name: string
+  receptions: number
+  targets: number
+  yards: number
+  average: number
+  touchdowns: number
+  longest: number
+}
+
+export interface NFLTeamBoxScore {
+  passing: NFLPlayerPassingStats[]
+  rushing: NFLPlayerRushingStats[]
+  receiving: NFLPlayerReceivingStats[]
+  teamStats: {
+    firstDowns: number
+    totalYards: number
+    passingYards: number
+    rushingYards: number
+    penalties: number
+    penaltyYards: number
+    turnovers: number
+    possession: string
+    thirdDownEff: string
+    fourthDownEff: string
+    redZoneEff: string
+  }
+}
+
+export interface NFLQuarterScore {
+  q1: number
+  q2: number
+  q3: number
+  q4: number
+  ot?: number[]
+  total: number
+}
+
+export interface NFLGameDetail {
+  sport: "nfl"
+  gameId: string
+  matchup: NFLMatchupData
+  status: GameDetailStatus
+  rawStatus: string
+  awayScore: NFLQuarterScore
+  homeScore: NFLQuarterScore
+  awayBoxScore: NFLTeamBoxScore | null
+  homeBoxScore: NFLTeamBoxScore | null
+  playByPlay: PlayByPlayEvent[]
+  winProbability: WinProbPoint[]
 }
 
 export interface NHLPlayerSkaterStats {
@@ -229,4 +301,4 @@ export interface MLBGameDetail {
   winProbability: WinProbPoint[]
 }
 
-export type GameDetail = NBAGameDetail | NHLGameDetail | MLBGameDetail
+export type GameDetail = NBAGameDetail | NFLGameDetail | NHLGameDetail | MLBGameDetail

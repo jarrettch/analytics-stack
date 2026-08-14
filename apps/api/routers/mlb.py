@@ -526,6 +526,7 @@ async def get_odds_map(
             pitcher_k_stats.copy_from(collected)
 
     return await fetch_sgo_odds(
+        sport="mlb",
         league_id="MLB",
         table_name="mlb_odds",
         tricode_for=get_tricode_from_sgo_team_id,

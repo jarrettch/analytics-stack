@@ -176,6 +176,7 @@ function NBATeamStats({ team }: { team: NBATeamData }) {
 // NFL Stats Row
 function NFLTeamStats({ team }: { team: NFLTeamData }) {
   const streak = team.streak || "N/A"
+  const fmt = (value: number | null, digits = 1) => value == null ? "--" : value.toFixed(digits)
 
   return (
     <div className="grid grid-cols-5 gap-x-3 gap-y-0.5">
@@ -185,11 +186,11 @@ function NFLTeamStats({ team }: { team: NFLTeamData }) {
       </div>
       <div className="flex flex-col">
         <StatLabel>PF/G</StatLabel>
-        <StatValue>{team.pointsFor.toFixed(1)}</StatValue>
+        <StatValue>{fmt(team.pointsFor)}</StatValue>
       </div>
       <div className="flex flex-col">
         <StatLabel>PA/G</StatLabel>
-        <StatValue>{team.pointsAgainst.toFixed(1)}</StatValue>
+        <StatValue>{fmt(team.pointsAgainst)}</StatValue>
       </div>
       <div className="flex flex-col">
         <StatLabel>Streak</StatLabel>
@@ -207,8 +208,8 @@ function NFLTeamStats({ team }: { team: NFLTeamData }) {
       <div className="flex flex-col">
         <StatLabel>TO+/-</StatLabel>
         <StatValue>
-          <span className={team.turnoverDiff > 0 ? "text-emerald-400" : team.turnoverDiff < 0 ? "text-red-400" : ""}>
-            {team.turnoverDiff > 0 ? "+" : ""}{team.turnoverDiff}
+          <span className={team.turnoverDiff != null && team.turnoverDiff > 0 ? "text-emerald-400" : team.turnoverDiff != null && team.turnoverDiff < 0 ? "text-red-400" : ""}>
+            {team.turnoverDiff == null ? "--" : `${team.turnoverDiff > 0 ? "+" : ""}${team.turnoverDiff}`}
           </span>
         </StatValue>
       </div>
@@ -354,6 +355,9 @@ function NBARatings({ away, home }: { away: NBATeamData; home: NBATeamData }) {
 
 // NFL Advanced Ratings
 function NFLRatings({ away, home }: { away: NFLTeamData; home: NFLTeamData }) {
+  const hasYards = away.yardsPG != null && home.yardsPG != null
+  const hasYardsAllowed = away.yardsAllowedPG != null && home.yardsAllowedPG != null
+  const hasPointDiff = away.pointsFor != null && away.pointsAgainst != null && home.pointsFor != null && home.pointsAgainst != null
   return (
     <div className="flex flex-col gap-0.5 px-3 py-2">
       <div className="mb-0.5">
@@ -361,9 +365,9 @@ function NFLRatings({ away, home }: { away: NFLTeamData; home: NFLTeamData }) {
           Efficiency Comparison
         </span>
       </div>
-      <RatingBar label="YPG" awayVal={away.yardsPG} homeVal={home.yardsPG} format="fixed1" />
-      <RatingBar label="YA/G" awayVal={away.yardsAllowedPG} homeVal={home.yardsAllowedPG} format="fixed1" higherIsBetter={false} />
-      <RatingBar label="Diff" awayVal={away.pointsFor - away.pointsAgainst} homeVal={home.pointsFor - home.pointsAgainst} format="fixed1" />
+      {hasYards && <RatingBar label="YPG" awayVal={away.yardsPG as number} homeVal={home.yardsPG as number} format="fixed1" />}
+      {hasYardsAllowed && <RatingBar label="YA/G" awayVal={away.yardsAllowedPG as number} homeVal={home.yardsAllowedPG as number} format="fixed1" higherIsBetter={false} />}
+      {hasPointDiff && <RatingBar label="Diff" awayVal={(away.pointsFor as number) - (away.pointsAgainst as number)} homeVal={(home.pointsFor as number) - (home.pointsAgainst as number)} format="fixed1" />}
     </div>
   )
 }
@@ -829,6 +833,7 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
   const isLiveMLB = matchup.sport === "mlb" && (matchup as MLBMatchupData).gameStatus >= 2
   const isLiveDetailGame =
     (matchup.sport === "nba" && (matchup as NBAMatchupData).gameStatus === 2) ||
+    (matchup.sport === "nfl" && (matchup as NFLMatchupData).gameStatus === 2) ||
     (matchup.sport === "nhl" && (matchup as NHLMatchupData).gameStatus === 2) ||
     (matchup.sport === "mlb" && (matchup as MLBMatchupData).gameStatus === 2)
 
@@ -848,13 +853,13 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
           </span>
           {matchup.sport === "nfl" && (
             <span className="font-mono text-[10px] text-primary">
-              WK{(matchup as NFLMatchupData).week}
+              {(matchup as NFLMatchupData).weekLabel}
             </span>
           )}
           <span className="font-mono text-[10px] text-muted-foreground">
             {matchup.gameId}
           </span>
-          {(matchup.sport === "nba" || matchup.sport === "nhl" || matchup.sport === "mlb") && (
+          {(matchup.sport === "nba" || matchup.sport === "nfl" || matchup.sport === "nhl" || matchup.sport === "mlb") && (
             <a
               href={`/game/${matchup.gameId}?sport=${matchup.sport}`}
               className={`flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-colors ${
@@ -947,14 +952,14 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
 
       {/* Score Section - Dynamic based on game status */}
       <div className="px-3 py-2">
-        {(matchup.sport === "nba" || matchup.sport === "wnba" || matchup.sport === "mlb" || matchup.sport === "nhl") && (matchup as NBAMatchupData | WNBAMatchupData | MLBMatchupData | NHLMatchupData).gameStatus >= 2 ? (
+        {(matchup.sport === "nba" || matchup.sport === "wnba" || matchup.sport === "nfl" || matchup.sport === "mlb" || matchup.sport === "nhl") && (matchup as NBAMatchupData | WNBAMatchupData | NFLMatchupData | MLBMatchupData | NHLMatchupData).gameStatus >= 2 ? (
           // Live or Final game - show actual score
           <>
             <div className="mb-1 flex items-center justify-between">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                {(matchup as NBAMatchupData | WNBAMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 3 ? "Final" : "Live"}
+                {(matchup as NBAMatchupData | WNBAMatchupData | NFLMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 3 ? "Final" : "Live"}
               </span>
-              {(matchup as NBAMatchupData | WNBAMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 2 && (
+              {(matchup as NBAMatchupData | WNBAMatchupData | NFLMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 2 && (
                 <span className="font-mono text-[10px] text-emerald-400 animate-pulse rounded-sm bg-emerald-500/10 px-0.5 py-0.5 [filter:drop-shadow(0_0_6px_#34d399)]">
                   {matchup.sport === "nba" || matchup.sport === "wnba"
                     ? `Q${(matchup as NBAMatchupData | WNBAMatchupData).period} ${parseGameClock((matchup as NBAMatchupData | WNBAMatchupData).gameClock)}`
@@ -968,9 +973,9 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
                   {away.abbreviation}
                 </span>
                 <span
-                  className={`font-mono text-2xl font-bold tabular-nums ${(away as NBATeamData | MLBTeamData | NHLTeamData).score > (home as NBATeamData | MLBTeamData | NHLTeamData).score ? "text-emerald-400" : "text-foreground"}`}
+                  className={`font-mono text-2xl font-bold tabular-nums ${(away as NBATeamData | NFLTeamData | MLBTeamData | NHLTeamData).score > (home as NBATeamData | NFLTeamData | MLBTeamData | NHLTeamData).score ? "text-emerald-400" : "text-foreground"}`}
                 >
-                  {(away as NBATeamData | MLBTeamData | NHLTeamData).score}
+                  {(away as NBATeamData | NFLTeamData | MLBTeamData | NHLTeamData).score}
                 </span>
               </div>
               <span className="px-3 font-mono text-xs text-muted-foreground">
@@ -981,9 +986,9 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
                   {home.abbreviation}
                 </span>
                 <span
-                  className={`font-mono text-2xl font-bold tabular-nums ${(home as NBATeamData | MLBTeamData | NHLTeamData).score > (away as NBATeamData | MLBTeamData | NHLTeamData).score ? "text-emerald-400" : "text-foreground"}`}
+                  className={`font-mono text-2xl font-bold tabular-nums ${(home as NBATeamData | NFLTeamData | MLBTeamData | NHLTeamData).score > (away as NBATeamData | NFLTeamData | MLBTeamData | NHLTeamData).score ? "text-emerald-400" : "text-foreground"}`}
                 >
-                  {(home as NBATeamData | MLBTeamData | NHLTeamData).score}
+                  {(home as NBATeamData | NFLTeamData | MLBTeamData | NHLTeamData).score}
                 </span>
               </div>
             </div>

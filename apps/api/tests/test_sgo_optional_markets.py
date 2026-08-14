@@ -50,6 +50,7 @@ class OptionalMarketsFallbackTest(unittest.IsolatedAsyncioTestCase):
             patch.dict("routers.utils.os.environ", {"SPORTS_GAME_ODDS_KEY": "test"}),
         ):
             odds, fresh = await fetch_sgo_odds(
+                sport="mlb",
                 league_id="MLB",
                 table_name="mlb_odds",
                 tricode_for=lambda team_id: team_id,

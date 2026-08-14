@@ -10,6 +10,8 @@ import type {
   MLBTeamBoxScore,
   NBAGameDetail,
   NBATeamBoxScore,
+  NFLGameDetail,
+  NFLTeamBoxScore,
   NHLGameDetail,
   NHLTeamBoxScore,
   PlayByPlayEvent,
@@ -159,18 +161,18 @@ function Linescore({ detail }: { detail: GameDetail }) {
     )
   }
 
-  const columns =
-    detail.sport === "nba"
-      ? ["Q1", "Q2", "Q3", "Q4", ...((detail.awayScore.ot ?? []).map((_, i) => `OT${i + 1}`)), "T"]
-      : ["1st", "2nd", "3rd", ...(detail.awayScore.ot !== undefined ? ["OT"] : []), ...(detail.awayScore.so !== undefined ? ["SO"] : []), "T"]
-  const awayVals =
-    detail.sport === "nba"
-      ? [detail.awayScore.q1, detail.awayScore.q2, detail.awayScore.q3, detail.awayScore.q4, ...(detail.awayScore.ot ?? []), detail.awayScore.total]
-      : [detail.awayScore.p1, detail.awayScore.p2, detail.awayScore.p3, ...(detail.awayScore.ot !== undefined ? [detail.awayScore.ot] : []), ...(detail.awayScore.so !== undefined ? [detail.awayScore.so] : []), detail.awayScore.total]
-  const homeVals =
-    detail.sport === "nba"
-      ? [detail.homeScore.q1, detail.homeScore.q2, detail.homeScore.q3, detail.homeScore.q4, ...(detail.homeScore.ot ?? []), detail.homeScore.total]
-      : [detail.homeScore.p1, detail.homeScore.p2, detail.homeScore.p3, ...(detail.homeScore.ot !== undefined ? [detail.homeScore.ot] : []), ...(detail.homeScore.so !== undefined ? [detail.homeScore.so] : []), detail.homeScore.total]
+  let columns: string[]
+  let awayVals: number[]
+  let homeVals: number[]
+  if (detail.sport === "nba" || detail.sport === "nfl") {
+    columns = ["Q1", "Q2", "Q3", "Q4", ...((detail.awayScore.ot ?? []).map((_, i) => `OT${i + 1}`)), "T"]
+    awayVals = [detail.awayScore.q1, detail.awayScore.q2, detail.awayScore.q3, detail.awayScore.q4, ...(detail.awayScore.ot ?? []), detail.awayScore.total]
+    homeVals = [detail.homeScore.q1, detail.homeScore.q2, detail.homeScore.q3, detail.homeScore.q4, ...(detail.homeScore.ot ?? []), detail.homeScore.total]
+  } else {
+    columns = ["1st", "2nd", "3rd", ...(detail.awayScore.ot !== undefined ? ["OT"] : []), ...(detail.awayScore.so !== undefined ? ["SO"] : []), "T"]
+    awayVals = [detail.awayScore.p1, detail.awayScore.p2, detail.awayScore.p3, ...(detail.awayScore.ot !== undefined ? [detail.awayScore.ot] : []), ...(detail.awayScore.so !== undefined ? [detail.awayScore.so] : []), detail.awayScore.total]
+    homeVals = [detail.homeScore.p1, detail.homeScore.p2, detail.homeScore.p3, ...(detail.homeScore.ot !== undefined ? [detail.homeScore.ot] : []), ...(detail.homeScore.so !== undefined ? [detail.homeScore.so] : []), detail.homeScore.total]
+  }
 
   return (
     <div className="overflow-x-auto rounded-md border border-border bg-card">
@@ -298,6 +300,87 @@ function NBABoxScoreTable({ box, team }: { box: NBATeamBoxScore | null; team: st
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+function NFLPlayerTables({ box, team }: { box: NFLTeamBoxScore | null; team: string }) {
+  if (!box) return <EmptyPanel label={`${team} box score is not available yet.`} />
+  return (
+    <div className="space-y-3">
+      <div className="rounded-md border border-border bg-card p-3">
+        <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{team} team stats</div>
+        <div className="grid grid-cols-2 gap-x-6 md:grid-cols-3">
+          <Metric label="Total Yards" value={String(box.teamStats.totalYards)} />
+          <Metric label="First Downs" value={String(box.teamStats.firstDowns)} />
+          <Metric label="Turnovers" value={String(box.teamStats.turnovers)} />
+          <Metric label="3rd Down" value={box.teamStats.thirdDownEff} />
+          <Metric label="Red Zone" value={box.teamStats.redZoneEff} />
+          <Metric label="Possession" value={box.teamStats.possession} />
+        </div>
+      </div>
+
+      {box.passing.length > 0 && (
+        <div className="overflow-x-auto rounded-md border border-border bg-card">
+          <table className="w-full min-w-[620px] text-left font-mono text-xs">
+            <thead className="bg-secondary text-[10px] uppercase tracking-wider text-muted-foreground">
+              <tr>{["Passer", "C/ATT", "Yds", "TD", "INT", "Rating", "Sacks"].map((h) => <th key={h} className={`px-3 py-2 ${h !== "Passer" ? "text-right" : ""}`}>{h}</th>)}</tr>
+            </thead>
+            <tbody>{box.passing.map((p) => (
+              <tr key={`${team}-pass-${p.name}`} className="border-t border-border">
+                <td className="px-3 py-2 text-foreground">{p.name}</td>
+                <td className="px-3 py-2 text-right">{p.completions}/{p.attempts}</td>
+                <td className="px-3 py-2 text-right font-semibold text-primary">{p.yards}</td>
+                <td className="px-3 py-2 text-right">{p.touchdowns}</td>
+                <td className="px-3 py-2 text-right">{p.interceptions}</td>
+                <td className="px-3 py-2 text-right">{p.rating.toFixed(1)}</td>
+                <td className="px-3 py-2 text-right">{p.sacks}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+
+      {box.rushing.length > 0 && (
+        <div className="overflow-x-auto rounded-md border border-border bg-card">
+          <table className="w-full min-w-[520px] text-left font-mono text-xs">
+            <thead className="bg-secondary text-[10px] uppercase tracking-wider text-muted-foreground">
+              <tr>{["Rusher", "Car", "Yds", "Avg", "TD", "Long"].map((h) => <th key={h} className={`px-3 py-2 ${h !== "Rusher" ? "text-right" : ""}`}>{h}</th>)}</tr>
+            </thead>
+            <tbody>{box.rushing.map((p) => (
+              <tr key={`${team}-rush-${p.name}`} className="border-t border-border">
+                <td className="px-3 py-2 text-foreground">{p.name}</td>
+                <td className="px-3 py-2 text-right">{p.carries}</td>
+                <td className="px-3 py-2 text-right font-semibold text-primary">{p.yards}</td>
+                <td className="px-3 py-2 text-right">{p.average.toFixed(1)}</td>
+                <td className="px-3 py-2 text-right">{p.touchdowns}</td>
+                <td className="px-3 py-2 text-right">{p.longest}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+
+      {box.receiving.length > 0 && (
+        <div className="overflow-x-auto rounded-md border border-border bg-card">
+          <table className="w-full min-w-[600px] text-left font-mono text-xs">
+            <thead className="bg-secondary text-[10px] uppercase tracking-wider text-muted-foreground">
+              <tr>{["Receiver", "Rec", "Tgt", "Yds", "Avg", "TD", "Long"].map((h) => <th key={h} className={`px-3 py-2 ${h !== "Receiver" ? "text-right" : ""}`}>{h}</th>)}</tr>
+            </thead>
+            <tbody>{box.receiving.map((p) => (
+              <tr key={`${team}-rec-${p.name}`} className="border-t border-border">
+                <td className="px-3 py-2 text-foreground">{p.name}</td>
+                <td className="px-3 py-2 text-right">{p.receptions}</td>
+                <td className="px-3 py-2 text-right">{p.targets}</td>
+                <td className="px-3 py-2 text-right font-semibold text-primary">{p.yards}</td>
+                <td className="px-3 py-2 text-right">{p.average.toFixed(1)}</td>
+                <td className="px-3 py-2 text-right">{p.touchdowns}</td>
+                <td className="px-3 py-2 text-right">{p.longest}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
@@ -476,6 +559,54 @@ function NBAContent({ detail }: { detail: NBAGameDetail }) {
   )
 }
 
+function NFLContent({ detail }: { detail: NFLGameDetail }) {
+  const [tab, setTab] = useState("matchup")
+  const tabs = [
+    ["winprob", "Win Prob", BarChart3],
+    ["matchup", "Matchup", Activity],
+    ["boxscore", "Boxscore", Table2],
+    ["plays", "Plays", ListOrdered],
+  ] as const
+  return (
+    <TabbedShell tabs={tabs} active={tab} setActive={setTab}>
+      {tab === "winprob" && (
+        <div className="space-y-3">
+          <WinProbabilityChart data={detail.winProbability} awayAbbr={detail.matchup.away.abbreviation} homeAbbr={detail.matchup.home.abbreviation} />
+          <PlaysTable plays={detail.playByPlay} />
+        </div>
+      )}
+      {tab === "matchup" && (
+        <div className="space-y-3">
+          <div className="rounded-md border border-border bg-card p-3">
+            {detail.matchup.away.pointsFor != null && detail.matchup.home.pointsFor != null && (
+              <Comparison label="PF/G" away={detail.matchup.away.pointsFor} home={detail.matchup.home.pointsFor} />
+            )}
+            {detail.matchup.away.pointsAgainst != null && detail.matchup.home.pointsAgainst != null && (
+              <Comparison label="PA/G" away={detail.matchup.away.pointsAgainst} home={detail.matchup.home.pointsAgainst} lower />
+            )}
+            <Comparison label="Win%" away={detail.matchup.away.winPct * 100} home={detail.matchup.home.winPct * 100} />
+          </div>
+          {detail.awayBoxScore && detail.homeBoxScore && (
+            <div className="rounded-md border border-border bg-card p-3">
+              <Comparison label="Total Yards" away={detail.awayBoxScore.teamStats.totalYards} home={detail.homeBoxScore.teamStats.totalYards} />
+              <Comparison label="Passing" away={detail.awayBoxScore.teamStats.passingYards} home={detail.homeBoxScore.teamStats.passingYards} />
+              <Comparison label="Rushing" away={detail.awayBoxScore.teamStats.rushingYards} home={detail.homeBoxScore.teamStats.rushingYards} />
+              <Comparison label="Turnovers" away={detail.awayBoxScore.teamStats.turnovers} home={detail.homeBoxScore.teamStats.turnovers} lower />
+            </div>
+          )}
+        </div>
+      )}
+      {tab === "boxscore" && (
+        <div className="space-y-4">
+          <NFLPlayerTables box={detail.awayBoxScore} team={detail.matchup.away.abbreviation} />
+          <NFLPlayerTables box={detail.homeBoxScore} team={detail.matchup.home.abbreviation} />
+        </div>
+      )}
+      {tab === "plays" && <PlaysTable plays={detail.playByPlay} />}
+    </TabbedShell>
+  )
+}
+
 function NHLContent({ detail }: { detail: NHLGameDetail }) {
   const [tab, setTab] = useState("matchup")
   const tabs = [
@@ -636,6 +767,7 @@ export function GameDetailView({ detail }: { detail: GameDetail }) {
         </div>
         <Separator className="mb-4 bg-border" />
         {detail.sport === "nba" && <NBAContent detail={detail} />}
+        {detail.sport === "nfl" && <NFLContent detail={detail} />}
         {detail.sport === "nhl" && <NHLContent detail={detail} />}
         {detail.sport === "mlb" && <MLBContent detail={detail} />}
       </div>
