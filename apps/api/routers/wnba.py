@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from nba_api.stats.endpoints import leaguestandingsv3, leaguedashteamstats
 
 from .utils import (
@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 ESPN_WNBA_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard"
+)
+ESPN_WNBA_SUMMARY_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/summary"
 )
 
 
@@ -171,6 +174,38 @@ def adapt_espn_scoreboard(payload: dict) -> dict:
         )
 
     return {"scoreboard": {"games": games}}
+
+
+def adapt_espn_win_probability(payload: dict) -> list[dict]:
+    """Join ESPN's probability points to their play clock and score context."""
+    plays_by_id = {
+        str(play.get("id")): play
+        for play in payload.get("plays") or []
+        if play.get("id") is not None
+    }
+    history = []
+    for point in payload.get("winprobability") or []:
+        play_id = str(point.get("playId") or "")
+        play = plays_by_id.get(play_id)
+        if not play:
+            continue
+        try:
+            home_probability = float(point["homeWinPercentage"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not 0 <= home_probability <= 1:
+            continue
+
+        history.append({
+            "playId": play_id,
+            "homeWinPercentage": home_probability,
+            "period": _safe_int((play.get("period") or {}).get("number")),
+            "clock": (play.get("clock") or {}).get("displayValue", ""),
+            "homeScore": _safe_int(play.get("homeScore")),
+            "awayScore": _safe_int(play.get("awayScore")),
+            "timestamp": play.get("wallclock"),
+        })
+    return history
 
 
 async def fetch_wnba_scoreboard(target_date: date | None = None) -> dict:
@@ -352,6 +387,24 @@ async def debug_scoreboard():
         return {"success": True, "message": "No WNBA games today"}
     except Exception as e:
         return {"success": False, "error": str(e), "error_type": type(e).__name__}
+
+
+@router.get("/game/{game_id}/win-probability")
+async def get_game_win_probability(game_id: str):
+    """Return ESPN's source-provided WNBA win-probability timeline."""
+    try:
+        response = await get_http_client().get(
+            ESPN_WNBA_SUMMARY_URL,
+            params={"event": game_id},
+        )
+        response.raise_for_status()
+    except Exception as exc:
+        logger.warning("WNBA win-probability fetch failed for %s: %s", game_id, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="WNBA win-probability feed unavailable",
+        ) from exc
+    return adapt_espn_win_probability(response.json())
 
 
 @router.get("/cron/fetch-odds")

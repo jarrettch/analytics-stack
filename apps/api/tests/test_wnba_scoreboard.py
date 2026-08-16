@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from routers.wnba import adapt_espn_scoreboard
+from routers.wnba import adapt_espn_scoreboard, adapt_espn_win_probability
 
 
 class ESPNScoreboardAdapterTest(unittest.TestCase):
@@ -69,6 +69,45 @@ class ESPNScoreboardAdapterTest(unittest.TestCase):
         payload = {"events": [{"competitions": [{"competitors": []}]}]}
 
         self.assertEqual(adapt_espn_scoreboard(payload), {"scoreboard": {"games": []}})
+
+    def test_joins_espn_win_probability_to_play_context(self):
+        payload = {
+            "plays": [
+                {
+                    "id": "play-1",
+                    "homeScore": 17,
+                    "awayScore": 28,
+                    "period": {"number": 2},
+                    "clock": {"displayValue": "7:18"},
+                    "wallclock": "2026-08-16T21:30:00Z",
+                },
+            ],
+            "winprobability": [
+                {"playId": "play-1", "homeWinPercentage": 0.192},
+                {"playId": "missing-play", "homeWinPercentage": 0.5},
+            ],
+        }
+
+        self.assertEqual(
+            adapt_espn_win_probability(payload),
+            [{
+                "playId": "play-1",
+                "homeWinPercentage": 0.192,
+                "period": 2,
+                "clock": "7:18",
+                "homeScore": 17,
+                "awayScore": 28,
+                "timestamp": "2026-08-16T21:30:00Z",
+            }],
+        )
+
+    def test_does_not_fabricate_missing_win_probability(self):
+        payload = {
+            "plays": [{"id": "play-1"}],
+            "winprobability": [{"playId": "play-1"}],
+        }
+
+        self.assertEqual(adapt_espn_win_probability(payload), [])
 
 
 if __name__ == "__main__":

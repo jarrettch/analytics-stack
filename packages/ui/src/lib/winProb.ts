@@ -229,6 +229,66 @@ export function recordMLBSnapshot(
   })
 }
 
+// ─── WNBA Win Probability (ESPN-sourced) ────────────────────────────────────
+
+interface WNBAWinProbPlay {
+  playId: string
+  homeWinPercentage: number
+  period: number
+  clock: string
+  homeScore: number
+  awayScore: number
+  timestamp: string | null
+}
+
+function wnbaClockSeconds(clock: string): number {
+  if (!clock) return 0
+  if (!clock.includes(':')) {
+    const seconds = Number.parseFloat(clock)
+    return Number.isFinite(seconds) ? seconds : 0
+  }
+  const [minutes = '0', seconds = '0'] = clock.split(':')
+  const total = Number.parseInt(minutes, 10) * 60 + Number.parseFloat(seconds)
+  return Number.isFinite(total) ? total : 0
+}
+
+function wnbaTimeRemainingSeconds(period: number, clock: string): number {
+  const clockSeconds = wnbaClockSeconds(clock)
+  if (period <= 0) return 2400
+  if (period <= 4) return (4 - period) * 600 + clockSeconds
+  return clockSeconds
+}
+
+/** Fetch ESPN's source-provided WNBA probability timeline. */
+export async function hydrateWNBAWinProbHistory(
+  gameId: string,
+  apiBaseUrl = '',
+): Promise<WinProbSnapshot[]> {
+  const key = String(gameId)
+  try {
+    const res = await fetch(`${apiBaseUrl}/api/wnba/game/${gameId}/win-probability`)
+    if (!res.ok) return []
+    const plays: WNBAWinProbPlay[] = await res.json()
+    if (!plays.length) return []
+
+    const history = plays.map((play) => {
+      const parsedTimestamp = play.timestamp ? new Date(play.timestamp).getTime() : NaN
+      return {
+        timestamp: Number.isFinite(parsedTimestamp) ? parsedTimestamp : Date.now(),
+        winProb: play.homeWinPercentage,
+        scoreDiff: play.homeScore - play.awayScore,
+        timeRemaining: wnbaTimeRemainingSeconds(play.period, play.clock),
+        period: play.period,
+      }
+    })
+
+    winProbHistory.set(key, history)
+    return history
+  } catch {
+    return []
+  }
+}
+
 // ─── CLV / ML Edge Calculator ─────────────────────────────────────────────────
 
 /**

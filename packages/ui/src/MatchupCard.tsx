@@ -19,6 +19,7 @@ import {
   getHistory,
   hydrateWinProbHistory,
   hydrateMLBWinProbHistory,
+  hydrateWNBAWinProbHistory,
   recordSnapshot,
   recordMLBSnapshot,
   calcCLV,
@@ -429,9 +430,13 @@ function TeamStats({ team, sport }: { team: NBATeamData | NFLTeamData | MLBTeamD
 // ─── Win Prob Sparkline ──────────────────────────────────────────────────────
 
 // Monotonically increasing elapsed seconds — OT periods continue past 2880
-function snapshotElapsed(period: number, timeRemaining: number): number {
-  if (period <= 4) return 2880 - timeRemaining
-  return 2880 + (period - 4) * 300 - timeRemaining
+function snapshotElapsed(
+  period: number,
+  timeRemaining: number,
+  regulationSeconds = 2880,
+): number {
+  if (period <= 4) return regulationSeconds - timeRemaining
+  return regulationSeconds + (period - 4) * 300 - timeRemaining
 }
 
 function WinProbSparkline({ snapshots, sport = "nba" }: { snapshots: WinProbSnapshot[], sport?: string }) {
@@ -452,11 +457,16 @@ function WinProbSparkline({ snapshots, sport = "nba" }: { snapshots: WinProbSnap
       })
       .join(" ")
   } else {
+    const regulationSeconds = sport === "wnba" ? 2400 : 2880
     const maxPeriod = snapshots.reduce((m, s) => Math.max(m, s.period), 4)
-    const totalSeconds = maxPeriod <= 4 ? 2880 : 2880 + (maxPeriod - 4) * 300
+    const totalSeconds = maxPeriod <= 4
+      ? regulationSeconds
+      : regulationSeconds + (maxPeriod - 4) * 300
     points = snapshots
       .map((s) => {
-        const x = (snapshotElapsed(s.period, s.timeRemaining) / totalSeconds) * W
+        const x = (
+          snapshotElapsed(s.period, s.timeRemaining, regulationSeconds) / totalSeconds
+        ) * W
         const y = (1 - clamp(s.winProb)) * H
         return `${x.toFixed(1)},${y.toFixed(1)}`
       })
@@ -644,6 +654,76 @@ function LiveMLBWinProbSection({ matchup }: { matchup: MLBMatchupData }) {
   )
 }
 
+// ─── Live WNBA Win Prob Section ───────────────────────────────────────────────
+
+function LiveWNBAWinProbSection({
+  matchup,
+  apiBaseUrl,
+}: {
+  matchup: WNBAMatchupData
+  apiBaseUrl: string
+}) {
+  const [chartData, setChartData] = useState<WinProbSnapshot[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    hydrateWNBAWinProbHistory(matchup.gameId, apiBaseUrl).then((history) => {
+      if (!cancelled) setChartData([...history])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [
+    matchup.gameId,
+    matchup.home.score,
+    matchup.away.score,
+    matchup.period,
+    matchup.gameClock,
+    apiBaseUrl,
+  ])
+
+  const current = chartData[chartData.length - 1]
+  if (!current) return null
+
+  const isFinal = matchup.gameStatus === 3
+  const homeProb = Math.min(1, Math.max(0, current.winProb))
+  const awayProb = 1 - homeProb
+
+  return (
+    <>
+      <div className="px-3 py-2">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            {isFinal ? "Win Prob" : "Live Win Prob"}
+          </span>
+          <span className="font-mono text-[10px] text-muted-foreground">ESPN</span>
+        </div>
+        <div className="flex items-center gap-2 mb-1.5">
+          <span className="w-12 text-right font-mono text-xs font-semibold tabular-nums text-emerald-400">
+            {(awayProb * 100).toFixed(1)}%
+          </span>
+          <div className="flex h-2.5 flex-1 overflow-hidden rounded-sm">
+            <div className="bg-emerald-500 transition-all" style={{ width: `${awayProb * 100}%` }} />
+            <div className="bg-red-500/80 transition-all" style={{ width: `${homeProb * 100}%` }} />
+          </div>
+          <span className="w-12 font-mono text-xs font-semibold tabular-nums text-red-400">
+            {(homeProb * 100).toFixed(1)}%
+          </span>
+        </div>
+        <div className="mb-2 flex justify-between">
+          <span className="font-mono text-[10px] text-muted-foreground">{matchup.away.abbreviation}</span>
+          <span className="font-mono text-[10px] text-muted-foreground">{matchup.home.abbreviation}</span>
+        </div>
+        <WinProbSparkline snapshots={chartData} sport="wnba" />
+        <p className="mt-1 font-mono text-[9px] text-muted-foreground/50">
+          Live win probability via ESPN
+        </p>
+      </div>
+      <Separator className="bg-border" />
+    </>
+  )
+}
+
 // ─── EV Panel (Spread / Total CLV + ML Edge) ─────────────────────────────────
 
 const BET_SIDES: { side: BetSide; label: string }[] = [
@@ -818,7 +898,13 @@ function EVPanel({ matchup }: { matchup: NBAMatchupData }) {
   )
 }
 
-export function MatchupCard({ matchup }: { matchup: MatchupData }) {
+export function MatchupCard({
+  matchup,
+  apiBaseUrl = "",
+}: {
+  matchup: MatchupData
+  apiBaseUrl?: string
+}) {
   const [clvOpen, setClvOpen] = useState(false)
 
   if (!matchup || !matchup.away || !matchup.home) {
@@ -830,6 +916,7 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
   const awayProbPct = hasWinProb ? (away.winProbability as number) * 100 : 0
   const homeProbPct = hasWinProb ? (home.winProbability as number) * 100 : 0
   const isLiveNBA = matchup.sport === "nba" && (matchup as NBAMatchupData).gameStatus >= 2
+  const isLiveWNBA = matchup.sport === "wnba" && (matchup as WNBAMatchupData).gameStatus >= 2
   const isLiveMLB = matchup.sport === "mlb" && (matchup as MLBMatchupData).gameStatus >= 2
   const isLiveDetailGame =
     (matchup.sport === "nba" && (matchup as NBAMatchupData).gameStatus === 2) ||
@@ -1040,6 +1127,14 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
         </>
       )}
 
+      {/* Live win prob — WNBA (ESPN-sourced) */}
+      {isLiveWNBA && (
+        <LiveWNBAWinProbSection
+          matchup={matchup as WNBAMatchupData}
+          apiBaseUrl={apiBaseUrl}
+        />
+      )}
+
       {/* Live win prob — MLB (API-sourced) */}
       {isLiveMLB && (
         <>
@@ -1132,11 +1227,17 @@ export function MatchupCard({ matchup }: { matchup: MatchupData }) {
   )
 }
 
-export function SportsDashboard({ matchups = [] }: { matchups: MatchupData[] }) {
+export function SportsDashboard({
+  matchups = [],
+  apiBaseUrl = "",
+}: {
+  matchups: MatchupData[]
+  apiBaseUrl?: string
+}) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
       {matchups.map((game) => (
-        <MatchupCard key={game.gameId} matchup={game} />
+        <MatchupCard key={game.gameId} matchup={game} apiBaseUrl={apiBaseUrl} />
       ))}
     </div>
   )

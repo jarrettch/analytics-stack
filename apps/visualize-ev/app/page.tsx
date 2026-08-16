@@ -196,7 +196,10 @@ export default function Home() {
                 INITIALIZING DATA FEED...
               </div>
             ) : matchups.length > 0 ? (
-              <SportsDashboard matchups={matchups} />
+              <SportsDashboard
+                matchups={matchups}
+                apiBaseUrl={process.env.NEXT_PUBLIC_API_URL}
+              />
             ) : (
               <div className="flex flex-col items-center justify-center py-20 font-mono text-xs text-muted-foreground">
                 <span className="uppercase">No {SPORT_LABELS[activeSport]} games scheduled today</span>
