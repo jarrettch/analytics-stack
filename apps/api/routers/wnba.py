@@ -5,8 +5,6 @@ import logging
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter
-from nba_api.live.nba.endpoints.scoreboard import ScoreBoard
-from nba_api.live.nba.library.http import NBALiveHTTP
 from nba_api.stats.endpoints import leaguestandingsv3, leaguedashteamstats
 
 from .utils import (
@@ -16,53 +14,16 @@ from .utils import (
     ET,
     Cache,
     fetch_odds_api_odds,
+    get_http_client,
     load_persisted_odds,
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Akamai CDN, mirrors the NBA live feed — it 403s without a www.wnba.com Referer.
-WNBA_LIVE_HEADERS = {
-    "Accept": "*/*",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Host": "cdn.wnba.com",
-    "Origin": "https://www.wnba.com",
-    "Referer": "https://www.wnba.com/",
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    ),
-}
-
-
-class WNBALiveHTTP(NBALiveHTTP):
-    """The WNBA live feed lives on its own CDN (cdn.wnba.com), not cdn.nba.com. The
-    nba.com host does serve a `…_10.json` file, but it's a frozen 2020 Finals snapshot
-    (LVA @ SEA), which is why the dashboard showed a stale "live" game. Only the host
-    differs — the path under /static/json/liveData/ is identical."""
-
-    base_url = "https://cdn.wnba.com/static/json/liveData/{endpoint}"
-
-
-class WNBAScoreBoard(ScoreBoard):
-    """nba_api's live ScoreBoard hardcodes the NBA feed (cdn.nba.com, …_00.json). The
-    WNBA slate uses an identical payload shape under …_10.json on the WNBA CDN, so we
-    swap both the endpoint path and the HTTP host (via WNBALiveHTTP) and otherwise
-    inherit load_response/get_dict unchanged."""
-
-    endpoint_url = "scoreboard/todaysScoreboard_10.json"
-
-    def get_request(self):
-        self.nba_response = WNBALiveHTTP().send_api_request(
-            endpoint=self.endpoint_url,
-            parameters={},
-            proxy=self.proxy,
-            headers=self.headers,
-            timeout=self.timeout,
-        )
-        self.load_response()
+ESPN_WNBA_SCOREBOARD_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard"
+)
 
 
 router = APIRouter(prefix="/api/wnba", tags=["WNBA"])
@@ -75,8 +36,8 @@ cache = Cache({
     "assembled":      CACHE_TTL_DEFAULT,
 })
 
-# Authoritative WNBA team identity, harvested from the WNBA schedule CDN — the live
-# scoreboard uses these tricodes. nba_api's static get_wnba_teams() is stale for 2026
+# Authoritative WNBA team identity, harvested from the WNBA schedule CDN. ESPN's
+# scoreboard abbreviations are normalized to these tricodes. nba_api's team list is stale for 2026
 # (missing Toronto/Portland, and lists Phoenix as PHO not PHX), so we hardcode here.
 # ESPN's logo CDN uses its own abbreviations (lv not lva, gs not gsv, etc.), so each
 # team carries the ESPN slug for the frontend's espnSlug override.
@@ -102,6 +63,126 @@ WNBA_TEAMS: dict[str, tuple[str, str, str, str, str]] = {
 _FULLNAME_TO_TRICODE = {v[1].lower(): tri for tri, v in WNBA_TEAMS.items()}
 _NICKNAME_TO_TRICODE = {v[2].lower(): tri for tri, v in WNBA_TEAMS.items()}
 _ESPN_SLUG = {tri: v[4] for tri, v in WNBA_TEAMS.items()}
+_ESPN_TO_WNBA_TRICODE = {"POR": "PDX"}
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _espn_game_clock(display_clock: str) -> str:
+    """Convert ESPN's M:SS display clock to the ISO duration used by the UI."""
+    if not display_clock or ":" not in display_clock:
+        return ""
+    minutes, seconds = display_clock.split(":", 1)
+    try:
+        return f"PT{int(minutes):02d}M{float(seconds):05.2f}S"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _espn_record(competitor: dict) -> tuple[int, int]:
+    records = competitor.get("records") or []
+    overall = next((r for r in records if r.get("name") == "overall"), None)
+    summary = (overall or (records[0] if records else {})).get("summary", "0-0")
+    try:
+        wins, losses = summary.split("-", 1)
+        return int(wins), int(losses)
+    except (AttributeError, TypeError, ValueError):
+        return 0, 0
+
+
+def _espn_team(competitor: dict) -> dict:
+    team = competitor.get("team") or {}
+    abbreviation = team.get("abbreviation", "")
+    tricode = _ESPN_TO_WNBA_TRICODE.get(abbreviation, abbreviation)
+    wins, losses = _espn_record(competitor)
+    canonical_id = WNBA_TEAMS.get(tricode, (str(team.get("id", "")),))[0]
+    return {
+        "teamId": canonical_id,
+        "teamCity": team.get("location", ""),
+        "teamName": team.get("name", ""),
+        "teamTricode": tricode,
+        "wins": wins,
+        "losses": losses,
+        "score": _safe_int(competitor.get("score")),
+    }
+
+
+def adapt_espn_scoreboard(payload: dict) -> dict:
+    """Adapt ESPN's WNBA scoreboard into nba_api's live scoreboard shape."""
+    games = []
+    for event in payload.get("events") or []:
+        competitions = event.get("competitions") or []
+        if not competitions:
+            continue
+        competition = competitions[0]
+        competitors = competition.get("competitors") or []
+        home = next((c for c in competitors if c.get("homeAway") == "home"), None)
+        away = next((c for c in competitors if c.get("homeAway") == "away"), None)
+        if not home or not away:
+            continue
+
+        status = competition.get("status") or event.get("status") or {}
+        status_type = status.get("type") or {}
+        state = status_type.get("state")
+        completed = bool(status_type.get("completed"))
+        game_status = 3 if completed or state == "post" else 2 if state == "in" else 1
+
+        game_datetime = event.get("date") or competition.get("date") or ""
+        if game_datetime:
+            try:
+                game_datetime = (
+                    datetime.fromisoformat(game_datetime.replace("Z", "+00:00"))
+                    .astimezone(ET)
+                    .isoformat()
+                )
+            except ValueError:
+                pass
+
+        broadcasts = [
+            name
+            for broadcast in competition.get("broadcasts") or []
+            for name in broadcast.get("names") or []
+        ]
+        games.append(
+            {
+                "gameId": str(event.get("id") or competition.get("id") or ""),
+                "gameEt": game_datetime,
+                "gameStatus": game_status,
+                "gameStatusText": (
+                    status_type.get("description") or status_type.get("detail") or ""
+                ),
+                "period": _safe_int(status.get("period")),
+                "gameClock": (
+                    _espn_game_clock(status.get("displayClock", ""))
+                    if game_status == 2
+                    else ""
+                ),
+                "awayTeam": _espn_team(away),
+                "homeTeam": _espn_team(home),
+                "seriesText": "",
+                "seriesGameNumber": "",
+                "broadcast": ", ".join(broadcasts),
+            }
+        )
+
+    return {"scoreboard": {"games": games}}
+
+
+async def fetch_wnba_scoreboard(target_date: date | None = None) -> dict:
+    """Fetch a WNBA slate from ESPN; the WNBA CDN blocks Render with Akamai WAF."""
+    target = target_date or datetime.now(ET).date()
+    client = get_http_client()
+    response = await client.get(
+        ESPN_WNBA_SCOREBOARD_URL,
+        params={"dates": target.strftime("%Y%m%d")},
+    )
+    response.raise_for_status()
+    return adapt_espn_scoreboard(response.json())
 
 # WNBA league averages (per-game ORtg/DRtg, pace) used only as fallbacks when the
 # advanced-stats endpoint is missing a team.
@@ -253,11 +334,10 @@ def debug_standings():
 
 
 @router.get("/debug/scoreboard")
-def debug_scoreboard():
+async def debug_scoreboard():
     """See what the WNBA live scoreboard actually returns."""
     try:
-        sb = WNBAScoreBoard(headers=WNBA_LIVE_HEADERS)
-        data = sb.get_dict()
+        data = await fetch_wnba_scoreboard()
         games = data.get('scoreboard', {}).get('games', [])
         if games:
             first = games[0]
@@ -313,7 +393,7 @@ async def get_todays_games():
         tasks = []
         fetch_keys = []
         if not cached_scoreboard:
-            tasks.append(loop.run_in_executor(None, lambda: WNBAScoreBoard(headers=WNBA_LIVE_HEADERS)))
+            tasks.append(fetch_wnba_scoreboard())
             fetch_keys.append("scoreboard")
         if not cached_standings:
             tasks.append(loop.run_in_executor(None, get_standings_map))
@@ -342,7 +422,7 @@ async def get_todays_games():
             logger.error("No WNBA scoreboard data available")
             return cache.get_stale("assembled") or []
 
-        data = sb.get_dict()
+        data = sb
         games = data.get('scoreboard', {}).get('games', [])
         logger.info(
             f"Processing {len(games)} WNBA games (standings: {len(standings_map)}, "
@@ -459,7 +539,7 @@ async def get_todays_games():
                 "time": g.get('gameEt', '').split('T')[-1][:5],
                 "date": g.get('gameEt', '').split('T')[0],
                 "venue": venue,
-                "broadcast": "Local",
+                "broadcast": g.get("broadcast") or "Local",
                 "model": "EV-MODEL-V1",
                 "series": series_text or None,
                 "seriesGameNumber": series_game_number or None,
