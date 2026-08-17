@@ -5,10 +5,11 @@ import logging
 import math
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from nba_api.live.nba.endpoints import boxscore, playbyplay, scoreboard
 from nba_api.stats.endpoints import leaguedashteamstats, leaguestandingsv3, scheduleleaguev2
 
+from .auth import CronOffset, require_cron_auth
 from .utils import (
     CACHE_TTL_DEFAULT,
     CACHE_TTL_LIVE,
@@ -515,8 +516,8 @@ def debug_standings():
             "error_type": type(e).__name__
         }
 
-@router.get("/cron/fetch-odds")
-async def cron_fetch_odds(offset: int = 0):
+@router.post("/cron/fetch-odds", dependencies=[Depends(require_cron_auth)])
+async def cron_fetch_odds(offset: CronOffset = 0):
     """Endpoint for GitHub Actions to trigger daily odds fetch.
 
     `offset` selects which ET day to fetch: 0 = today (default), 1 = tomorrow.

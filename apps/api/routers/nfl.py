@@ -6,8 +6,9 @@ import math
 from datetime import date, datetime, timedelta
 from typing import overload
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from .auth import CronOffset, require_cron_auth
 from .utils import (
     CACHE_TTL_DEFAULT,
     CACHE_TTL_LIVE,
@@ -411,8 +412,8 @@ async def _assemble_slate() -> list[dict]:
     return refined
 
 
-@router.get("/cron/fetch-odds")
-async def cron_fetch_odds(offset: int = 0, verify_early_window: bool = False):
+@router.post("/cron/fetch-odds", dependencies=[Depends(require_cron_auth)])
+async def cron_fetch_odds(offset: CronOffset = 0, verify_early_window: bool = False):
     try:
         target = datetime.now(ET).date() + timedelta(days=offset)
         collection_stats: dict = {}

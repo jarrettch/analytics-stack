@@ -83,7 +83,7 @@ Same shape as NBA, just a different table name:
 
 - `apps/api/routers/nhl.py` with:
   - `/api/nhl/today` — assembled game payload (same envelope as `/api/nba/today`)
-  - `/api/nhl/cron/fetch-odds?offset=0|1` — daily odds prefetch, identical to NBA
+  - `POST /api/nhl/cron/fetch-odds?offset=0|1` — daily odds prefetch, identical to NBA. Requires `Authorization: Bearer $CRON_SECRET`.
 - Reuse everything in `routers/utils.py` (cache, SGO helpers, persistence, http client).
 - New Supabase table: `nhl_odds` — see [Persistence contract](#persistence-contract). RLS + service-role policy as per cleanup.md #1.
 - Frontend: add NHL to the sport switcher in `apps/visualize-ev`. Logos via the `ESPN_SLUG_OVERRIDES` map from [Team identifiers](#team-identifiers) — the API payload should hand the frontend a ready-to-use slug, not the raw tricode.

@@ -239,7 +239,7 @@ params = {
 
 **Persistence:** Reuse the Supabase `nba_odds` table. MLB matchup keys (`"NYM@ATL"`) won't collide with NBA keys. The `load_persisted_odds` / `save_persisted_odds` pattern copies directly — or import from `nba.py` and call with the same interface.
 
-**Cron endpoint:** `GET /api/mlb/cron/fetch-odds` — identical to NBA cron, calls `get_odds_map()` and invalidates the `mlb_odds` cache.
+**Cron endpoint:** `POST /api/mlb/cron/fetch-odds` — identical to NBA cron, calls `get_odds_map()` and invalidates the `mlb_odds` cache. Requires `Authorization: Bearer $CRON_SECRET`; `offset` is bounded to `0..1` and `collection_key` to 128 chars.
 
 ---
 

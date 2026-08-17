@@ -18,94 +18,153 @@ jobs:
   fetch-tomorrow-odds:
     runs-on: ubuntu-latest
     environment: production
+    env:
+      API_URL: ${{ secrets.API_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
     steps:
       - name: Wake up Render and fetch tomorrow's NBA odds
         run: |
           echo "Waking up server..."
-          curl -s --max-time 120 "${{ secrets.API_URL }}/api/nba/today" || true
+          curl -s --max-time 120 "$API_URL/api/nba/today" || true
           sleep 30
 
           echo "Fetching tomorrow's NBA odds..."
-          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/nba/cron/fetch-odds?offset=1")
-          echo "Response: $response"
-
-          if echo "$response" | grep -q 'success.*true'; then
-            fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
-            echo "Tomorrow NBA odds fetched: fresh=${fresh}"
-            # fresh=0 is acceptable here — tomorrow may be a dark day, or
-            # lines may not yet be posted. Don't fail the job.
+          if response=$(curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --max-time 120 \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "$API_URL/api/nba/cron/fetch-odds?offset=1"); then
+            printf 'Response: %s\n' "$response"
           else
-            echo "Failed to fetch tomorrow's NBA odds"
-            echo "Full response: $response"
+            curl_status=$?
+            printf 'Request failed:\n%s\n' "$response" >&2
+            exit "$curl_status"
+          fi
+
+          # Still required: collector failures come back as HTTP 200.
+          if ! jq -e '.success == true' >/dev/null <<<"$response"; then
+            printf "Failed to fetch tomorrow's NBA odds:\n%s\n" "$response" >&2
             exit 1
           fi
+
+          fresh=$(jq -r '.fresh_from_api // 0' <<<"$response")
+          echo "Tomorrow NBA odds fetched: fresh=${fresh}"
+          # fresh=0 is acceptable here — tomorrow may be a dark day, or
+          # lines may not yet be posted. Don't fail the job.
 
       - name: Fetch tomorrow's MLB odds
         run: |
           echo "Fetching tomorrow's MLB odds..."
-          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/mlb/cron/fetch-odds?offset=1&collection_key=${{ github.run_id }}-tomorrow")
-          echo "Response: $response"
-
-          if echo "$response" | grep -q 'success.*true'; then
-            fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
-            echo "Tomorrow MLB odds fetched: fresh=${fresh}"
-            # fresh=0 is acceptable — off-day or lines not yet posted.
-            if echo "$response" | grep -q '"pitcher_k_skipped":true'; then
-              echo "WARNING: Tomorrow's MLB pitcher-K markets were rejected; game odds fallback succeeded"
-            elif ! echo "$response" | grep -q '"pitcher_k_success":true'; then
-              echo "Failed to collect tomorrow's MLB pitcher-K odds"
-              echo "Full response: $response"
-              exit 1
-            fi
+          if response=$(curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --max-time 120 \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "$API_URL/api/mlb/cron/fetch-odds?offset=1&collection_key=${{ github.run_id }}-tomorrow"); then
+            printf 'Response: %s\n' "$response"
           else
-            echo "Failed to fetch tomorrow's MLB odds"
-            echo "Full response: $response"
+            curl_status=$?
+            printf 'Request failed:\n%s\n' "$response" >&2
+            exit "$curl_status"
+          fi
+
+          if ! jq -e '.success == true' >/dev/null <<<"$response"; then
+            printf "Failed to fetch tomorrow's MLB odds:\n%s\n" "$response" >&2
+            exit 1
+          fi
+
+          fresh=$(jq -r '.fresh_from_api // 0' <<<"$response")
+          echo "Tomorrow MLB odds fetched: fresh=${fresh}"
+          # fresh=0 is acceptable — off-day or lines not yet posted.
+
+          if jq -e '.pitcher_k_skipped == true' >/dev/null <<<"$response"; then
+            echo "WARNING: Tomorrow's MLB pitcher-K markets were rejected; game odds fallback succeeded"
+          elif ! jq -e '.pitcher_k_success == true' >/dev/null <<<"$response"; then
+            printf "Failed to collect tomorrow's MLB pitcher-K odds:\n%s\n" "$response" >&2
             exit 1
           fi
 
       - name: Fetch tomorrow's NHL odds
         run: |
           echo "Fetching tomorrow's NHL odds..."
-          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/nhl/cron/fetch-odds?offset=1")
-          echo "Response: $response"
-
-          if echo "$response" | grep -q 'success.*true'; then
-            fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
-            echo "Tomorrow NHL odds fetched: fresh=${fresh}"
-            # fresh=0 is acceptable — off-day or lines not yet posted.
+          if response=$(curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --max-time 120 \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "$API_URL/api/nhl/cron/fetch-odds?offset=1"); then
+            printf 'Response: %s\n' "$response"
           else
-            echo "Failed to fetch tomorrow's NHL odds"
-            echo "Full response: $response"
+            curl_status=$?
+            printf 'Request failed:\n%s\n' "$response" >&2
+            exit "$curl_status"
+          fi
+
+          if ! jq -e '.success == true' >/dev/null <<<"$response"; then
+            printf "Failed to fetch tomorrow's NHL odds:\n%s\n" "$response" >&2
             exit 1
           fi
+
+          fresh=$(jq -r '.fresh_from_api // 0' <<<"$response")
+          echo "Tomorrow NHL odds fetched: fresh=${fresh}"
+          # fresh=0 is acceptable — off-day or lines not yet posted.
 
       - name: Fetch tomorrow's WNBA odds
         run: |
           echo "Fetching tomorrow's WNBA odds..."
-          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/wnba/cron/fetch-odds?offset=1")
-          echo "Response: $response"
-
-          if echo "$response" | grep -q 'success.*true'; then
-            fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
-            echo "Tomorrow WNBA odds fetched: fresh=${fresh}"
-            # fresh=0 is acceptable — off-day or lines not yet posted.
+          if response=$(curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --max-time 120 \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "$API_URL/api/wnba/cron/fetch-odds?offset=1"); then
+            printf 'Response: %s\n' "$response"
           else
-            echo "Failed to fetch tomorrow's WNBA odds"
-            echo "Full response: $response"
+            curl_status=$?
+            printf 'Request failed:\n%s\n' "$response" >&2
+            exit "$curl_status"
+          fi
+
+          if ! jq -e '.success == true' >/dev/null <<<"$response"; then
+            printf "Failed to fetch tomorrow's WNBA odds:\n%s\n" "$response" >&2
             exit 1
           fi
+
+          fresh=$(jq -r '.fresh_from_api // 0' <<<"$response")
+          echo "Tomorrow WNBA odds fetched: fresh=${fresh}"
+          # fresh=0 is acceptable — off-day or lines not yet posted.
 
       - name: Fetch tomorrow's NFL odds
         run: |
           echo "Fetching tomorrow's NFL odds..."
-          response=$(curl -s --max-time 120 "${{ secrets.API_URL }}/api/nfl/cron/fetch-odds?offset=1")
-          echo "Response: $response"
-
-          if echo "$response" | grep -q 'success.*true'; then
-            fresh=$(echo "$response" | grep -o '"fresh_from_api":[0-9]*' | grep -o '[0-9]*' || echo "0")
-            echo "Tomorrow NFL odds fetched: fresh=${fresh}"
+          if response=$(curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --max-time 120 \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "$API_URL/api/nfl/cron/fetch-odds?offset=1"); then
+            printf 'Response: %s\n' "$response"
           else
-            echo "Failed to fetch tomorrow's NFL odds"
-            echo "Full response: $response"
+            curl_status=$?
+            printf 'Request failed:\n%s\n' "$response" >&2
+            exit "$curl_status"
+          fi
+
+          if ! jq -e '.success == true' >/dev/null <<<"$response"; then
+            printf "Failed to fetch tomorrow's NFL odds:\n%s\n" "$response" >&2
             exit 1
           fi
+
+          fresh=$(jq -r '.fresh_from_api // 0' <<<"$response")
+          echo "Tomorrow NFL odds fetched: fresh=${fresh}"

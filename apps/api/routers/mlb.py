@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, datetime, timedelta
+from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from .auth import CronOffset, require_cron_auth
 from .utils import (
     CACHE_TTL_DEFAULT,
     CACHE_TTL_LIVE,
@@ -540,8 +542,12 @@ async def get_odds_map(
         ),
     )
 
-@router.get("/cron/fetch-odds")
-async def cron_fetch_odds(offset: int = 0, collection_key: str | None = None):
+@router.post("/cron/fetch-odds", dependencies=[Depends(require_cron_auth)])
+async def cron_fetch_odds(
+    offset: CronOffset = 0,
+    # Workflows pass "<github.run_id>-today" / "-tomorrow", well under 128.
+    collection_key: Annotated[str | None, Query(max_length=128)] = None,
+):
     """GitHub Actions cron: fetch and persist a single ET day's MLB odds.
 
     `offset` selects which ET day to fetch: 0 = today (default), 1 = tomorrow.
