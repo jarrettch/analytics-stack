@@ -5,8 +5,9 @@ import logging
 import os
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from .auth import require_cron_auth
 from .utils import (
     CACHE_TTL_DEFAULT,
     CACHE_TTL_LIVE,
@@ -567,7 +568,7 @@ async def get_odds_map(target_date: date | None = None):
 
 # --- Endpoints --------------------------------------------------------------
 
-@router.get("/cron/fetch-odds")
+@router.post("/cron/fetch-odds", dependencies=[Depends(require_cron_auth)])
 async def cron_fetch_odds(offset: int = 0):
     """Daily odds prefetch. offset=0 fetches today (ET), offset=1 fetches tomorrow."""
     try:

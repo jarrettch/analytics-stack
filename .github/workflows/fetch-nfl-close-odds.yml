@@ -12,31 +12,45 @@ jobs:
   fetch-nfl-close-odds:
     runs-on: ubuntu-latest
     environment: production
+    env:
+      API_URL: ${{ secrets.API_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
     steps:
       - name: Fetch NFL early-window odds
-        env:
-          API_URL: ${{ secrets.API_URL }}
         run: |
           echo "Waking up server..."
           curl -s --max-time 120 "$API_URL/api/nfl/today" || true
           sleep 30
 
           echo "Fetching NFL early-window odds..."
-          response=$(curl -s --max-time 120 "$API_URL/api/nfl/cron/fetch-odds?verify_early_window=true")
-          echo "Response: $response"
+          if response=$(curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --max-time 120 \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "$API_URL/api/nfl/cron/fetch-odds?verify_early_window=true"); then
+            printf 'Response: %s\n' "$response"
+          else
+            curl_status=$?
+            printf 'Request failed:\n%s\n' "$response" >&2
+            exit "$curl_status"
+          fi
 
-          if ! echo "$response" | jq -e '.success == true' >/dev/null; then
-            echo "Failed to fetch NFL early-window odds"
+          # Still required: collector failures come back as HTTP 200.
+          if ! jq -e '.success == true' >/dev/null <<<"$response"; then
+            printf 'Failed to fetch NFL early-window odds:\n%s\n' "$response" >&2
             exit 1
           fi
 
-          fresh=$(echo "$response" | jq -r '.fresh_from_api // 0')
-          scoreboard_ok=$(echo "$response" | jq -r '.early_window_scoreboard_ok // false')
-          expected=$(echo "$response" | jq -r '.early_window_games // 0')
-          candidates=$(echo "$response" | jq -r '.early_window_snapshot_candidates // 0')
-          inserted=$(echo "$response" | jq -r '.snapshots_inserted // 0')
-          deduplicated=$(echo "$response" | jq -r '.snapshots_deduplicated // 0')
-          persistence_ok=$(echo "$response" | jq -r '.snapshot_persistence_ok // false')
+          fresh=$(jq -r '.fresh_from_api // 0' <<<"$response")
+          scoreboard_ok=$(jq -r '.early_window_scoreboard_ok // false' <<<"$response")
+          expected=$(jq -r '.early_window_games // 0' <<<"$response")
+          candidates=$(jq -r '.early_window_snapshot_candidates // 0' <<<"$response")
+          inserted=$(jq -r '.snapshots_inserted // 0' <<<"$response")
+          deduplicated=$(jq -r '.snapshots_deduplicated // 0' <<<"$response")
+          persistence_ok=$(jq -r '.snapshot_persistence_ok // false' <<<"$response")
 
           echo "NFL early-window odds: fresh=${fresh} expected=${expected} candidates=${candidates} inserted=${inserted} deduplicated=${deduplicated}"
 

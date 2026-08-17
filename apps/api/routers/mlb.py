@@ -5,8 +5,9 @@ import logging
 from datetime import date, datetime, timedelta
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from .auth import require_cron_auth
 from .utils import (
     CACHE_TTL_DEFAULT,
     CACHE_TTL_LIVE,
@@ -540,7 +541,7 @@ async def get_odds_map(
         ),
     )
 
-@router.get("/cron/fetch-odds")
+@router.post("/cron/fetch-odds", dependencies=[Depends(require_cron_auth)])
 async def cron_fetch_odds(offset: int = 0, collection_key: str | None = None):
     """GitHub Actions cron: fetch and persist a single ET day's MLB odds.
 
