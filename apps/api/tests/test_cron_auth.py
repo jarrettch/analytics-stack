@@ -69,6 +69,29 @@ def test_fails_closed_when_secret_is_unset(client, monkeypatch, path, module):
 
 
 @pytest.mark.parametrize("path,module", CRON_ROUTES)
+@pytest.mark.parametrize("offset", [-1, 2, 400])
+def test_rejects_offset_outside_supported_range(
+    client, cron_secret, path, module, offset
+):
+    """Every collector supports only today and tomorrow."""
+    response = client.post(
+        path,
+        params={"offset": offset},
+        headers={"Authorization": f"Bearer {SECRET}"},
+    )
+    assert response.status_code == 422
+
+
+def test_rejects_overlong_collection_key(client, cron_secret):
+    response = client.post(
+        "/api/mlb/cron/fetch-odds",
+        params={"collection_key": "x" * 129},
+        headers={"Authorization": f"Bearer {SECRET}"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("path,module", CRON_ROUTES)
 def test_valid_token_reaches_the_collector(
     client, cron_secret, monkeypatch, path, module
 ):

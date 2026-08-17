@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from nba_api.stats.endpoints import leaguestandingsv3, leaguedashteamstats
 
-from .auth import require_cron_auth
+from .auth import CronOffset, require_cron_auth
 from .utils import (
     CACHE_TTL_DEFAULT,
     CACHE_TTL_LIVE,
@@ -409,7 +409,7 @@ async def get_game_win_probability(game_id: str):
 
 
 @router.post("/cron/fetch-odds", dependencies=[Depends(require_cron_auth)])
-async def cron_fetch_odds(offset: int = 0):
+async def cron_fetch_odds(offset: CronOffset = 0):
     """GitHub Actions cron: fetch and persist a single ET day's WNBA odds.
 
     `offset` selects which ET day: 0 = today (default), 1 = tomorrow (pre-fetch).

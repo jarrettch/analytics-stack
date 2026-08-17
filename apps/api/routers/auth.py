@@ -7,11 +7,21 @@ from __future__ import annotations
 
 import os
 import secrets
+from typing import Annotated
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 CRON_SECRET_ENV = "CRON_SECRET"
+
+# Every collector supports exactly today and tomorrow, so bound it here rather
+# than in five routers where the range could drift apart. Annotated (not a bare
+# Query default) keeps 0 as the real Python default, so the collector tests can
+# still call cron_fetch_odds() directly.
+CronOffset = Annotated[
+    int,
+    Query(ge=0, le=1, description="ET day to collect: 0 = today, 1 = tomorrow."),
+]
 
 # auto_error=False so a missing or malformed header reaches us as None and we
 # can answer 401 rather than HTTPBearer's default 403.
