@@ -49,10 +49,13 @@ is only a fallback. The model label is `MARKET + TEAM STATS`, not `DVOA`.
 ## Endpoints
 
 ```text
-GET /api/nfl/today
-GET /api/nfl/game/{game_id}
-GET /api/nfl/cron/fetch-odds?offset=0|1
+GET  /api/nfl/today
+GET  /api/nfl/game/{game_id}
+POST /api/nfl/cron/fetch-odds?offset=0|1
 ```
+
+The cron endpoint requires `Authorization: Bearer $CRON_SECRET` and returns 401
+without it, or 503 when the server has no `CRON_SECRET` configured.
 
 ## Cron cadence
 

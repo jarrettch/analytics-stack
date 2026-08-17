@@ -85,7 +85,7 @@ branches for team stats, live/final score, quarter clock, and ratings.
 ## Endpoints
 
 - `/api/wnba/today` — assembled game payload (same envelope as `/api/nba/today`)
-- `/api/wnba/cron/fetch-odds?offset=0|1` — daily/next-day odds prefetch
+- `POST /api/wnba/cron/fetch-odds?offset=0|1` — daily/next-day odds prefetch. Requires `Authorization: Bearer $CRON_SECRET`.
 - `/api/wnba/debug/standings`, `/api/wnba/debug/scoreboard`
 
 Polling cadence matches NBA: `assembled` TTL is `CACHE_TTL_LIVE` (20s) when any
