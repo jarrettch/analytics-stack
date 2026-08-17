@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import mlb, nba, nfl, nhl, wnba
+from routers import mlb, nba, nfl, nhl, usage, wnba
 from routers.utils import close_http_client, get_http_client
 
 
@@ -33,6 +33,7 @@ app.include_router(mlb.router)
 app.include_router(nhl.router)
 app.include_router(wnba.router)
 app.include_router(nfl.router)
+app.include_router(usage.router)
 
 
 @app.get("/health")
