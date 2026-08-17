@@ -61,8 +61,19 @@ def test_get_is_no_longer_allowed(client, cron_secret, path, module):
 
 
 @pytest.mark.parametrize("path,module", CRON_ROUTES)
-def test_fails_closed_when_secret_is_unset(client, monkeypatch, path, module):
-    monkeypatch.delenv(auth.CRON_SECRET_ENV, raising=False)
+@pytest.mark.parametrize(
+    "configured_value",
+    [None, "", "   "],
+    ids=["missing", "empty", "whitespace"],
+)
+def test_fails_closed_when_secret_is_unconfigured(
+    client, monkeypatch, path, module, configured_value
+):
+    if configured_value is None:
+        monkeypatch.delenv(auth.CRON_SECRET_ENV, raising=False)
+    else:
+        monkeypatch.setenv(auth.CRON_SECRET_ENV, configured_value)
+
     response = client.post(path, headers={"Authorization": f"Bearer {SECRET}"})
     assert response.status_code == 503
     assert "not configured" in response.json()["detail"]

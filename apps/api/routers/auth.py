@@ -46,8 +46,10 @@ def require_cron_auth(
     Fails closed: an unset CRON_SECRET answers 503 instead of waving traffic
     through, so forgetting the Render env var can't silently reopen the routes.
     """
+    # Compare against the raw value, but treat whitespace-only as unconfigured:
+    # a fat-fingered secret should error, not become a guessable one.
     expected = os.getenv(CRON_SECRET_ENV)
-    if not expected:
+    if not expected or not expected.strip():
         raise HTTPException(
             status_code=503, detail="Cron authentication is not configured"
         )
