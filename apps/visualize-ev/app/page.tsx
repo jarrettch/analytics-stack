@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import Link from "next/link";
 import { SportsDashboard, type Sport, type MatchupData, SPORT_LABELS, SPORT_MODELS } from "@repo/ui";
-import { Activity } from "lucide-react";
+import { Activity, Crosshair } from "lucide-react";
 
 const FALLBACK_VISIBLE_SPORTS: Sport[] = ["mlb", "wnba"];
 
@@ -134,7 +135,7 @@ export default function Home() {
     <main className="min-h-screen bg-background px-4 py-6">
       {/* Dashboard header */}
       <div className="mx-auto mb-4 max-w-6xl">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex items-center gap-3">
             <Activity className="size-5 text-primary" />
             <h1 className="font-sans text-lg font-bold text-foreground">
@@ -146,9 +147,18 @@ export default function Home() {
               </span>
             )}
           </div>
-          <span className="font-mono text-[11px] text-muted-foreground">
-            {now?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()} &mdash; MULTI-SPORT
-          </span>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/mlb/pitcher-strikeout-odds"
+              className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Crosshair className="size-3" />
+              Oh-K Corral
+            </Link>
+            <span className="hidden font-mono text-[11px] text-muted-foreground sm:inline">
+              {now?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()} &mdash; MULTI-SPORT
+            </span>
+          </div>
         </div>
         <div className="mt-2 h-px w-full bg-border" />
       </div>
