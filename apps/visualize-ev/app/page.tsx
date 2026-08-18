@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { SportsDashboard, type Sport, type MatchupData, SPORT_LABELS, SPORT_MODELS } from "@repo/ui";
-import { Activity, Crosshair } from "lucide-react";
+import { Activity, ClipboardList, Crosshair } from "lucide-react";
 
 const FALLBACK_VISIBLE_SPORTS: Sport[] = ["mlb", "wnba"];
 
@@ -148,6 +148,13 @@ export default function Home() {
             )}
           </div>
           <div className="flex items-center gap-4">
+            <Link
+              href="/prep"
+              className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ClipboardList className="size-3" />
+              Slate Prep
+            </Link>
             <Link
               href="/mlb/pitcher-strikeout-odds"
               className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
