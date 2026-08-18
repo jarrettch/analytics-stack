@@ -1,0 +1,139 @@
+# Slate Prep — Spec
+
+_Revised: 2026-08-18_
+
+A `/prep` page in `visualize-ev` whose primary object is an **editable slate**:
+
+```text
+Fetch today's games
+→ select, remove, and combine games
+→ copy formatted slate
+→ optionally wrap that same slate in v2 or v3
+```
+
+The page replaces hand-assembled daily matchup lists. It is a slate composer,
+not a prompt generator: prompt wrapping is secondary and must never cause a
+refetch or regenerate the selected slate. LLM execution remains explicitly
+deferred.
+
+---
+
+## Goal
+
+Let the researcher compose one paste-ready, multi-sport slate from today's games
+in Eastern Time, trim it to the work at hand, then copy that exact edited
+selection. The default action is `Copy formatted slate`, because triage,
+combining sports, and deciding batches happen before prompt selection.
+
+## Scope: core v1
+
+- Today only, evaluated in Eastern Time. There is no date picker or arbitrary
+  date input in v1.
+- MLB, WNBA, NFL, NBA, and NHL only. Reuse each sport's existing
+  `/api/{sport}/today` route; do not add new data sources or a separate export
+  fetch path.
+- The user can add any combination of those sports into one slate.
+- Render games grouped under clear sport headings. This is required for NFL so
+  preseason games remain unmistakably labeled.
+- Every game can be removed from the composed slate before copying.
+- One in-memory edited selection is the source for every export. Switching
+  export actions does not reload sport data, reformat a fresh raw slate, or
+  restore removed games.
+
+### Explicitly deferred
+
+- Tennis and UFC.
+- Arbitrary dates and date selection.
+- Automatic batching or a “split into N” control.
+- Running v2/v3 prompts or any other model execution in the stack.
+- Line movement/history, consolidation, grading, and picks tracking.
+
+## Data and formatting
+
+The composer fetches each selected sport's existing `/today` payload on demand,
+then normalizes the result into a client-side game model that retains the
+display-relevant fields (sport, game ID, teams, scheduled time/status, probable
+pitchers where available, and current line snapshot).
+
+Use the existing data assembly as-is; `/prep` is not a second odds pipeline.
+The formatted slate contains selected matchups plus the current line snapshot:
+
+- **MLB:** `Away (Pitcher) vs Home (Pitcher)` — last name only; use `(TBD)` when
+  a probable is unavailable.
+- **NBA, WNBA, NFL, NHL:** `Away @ Home — ML <away>/<home>, O/U <x.5>` using
+  American odds with explicit signs when available.
+- Omit unavailable line fields rather than inventing a value. The snapshot is
+  current context, not movement data and not a replacement for later market
+  research.
+
+Export order follows the slate as displayed: sport groups in the user's chosen
+order, then each route's game order within its group. Each non-empty group begins
+with an unambiguous heading such as `MLB` or `NFL (Preseason)` when the supplied
+game metadata identifies preseason.
+
+## Surface and state
+
+`/prep` is a dedicated page in `visualize-ev` with:
+
+- a multi-select sport control for MLB, WNBA, NFL, NBA, and NHL;
+- loading, empty, and per-sport error states that do not discard already loaded
+  selections from other sports;
+- grouped game rows with a remove control;
+- a monospace preview of the exact formatted slate to be copied; and
+- a primary `Copy formatted slate` action.
+
+Adding a sport fetches its `/today` route once for the current composition.
+Removing a game edits only local composer state. Removing and re-adding a sport
+may fetch its current route payload again; it must not disturb selections in the
+other sport groups.
+
+The page owns selection and formatting state. A shared formatter may be extracted
+for future automation, but v1 does not require `slate-export` endpoints and must
+not use a server endpoint that independently rebuilds the export from raw data.
+
+## Optional prompt wrappers and repo boundary
+
+The sibling `sports` repo remains canonical for `sports_betting_prompt_v2.md`,
+`sports_betting_prompt_v3.md`, consolidation, grading, and `picks.jsonl`.
+v2 is retained whenever prompt export is retained: it is an active workflow
+variant, not a deprecated version.
+
+If product ownership explicitly accepts making the v2/v3 prompt bodies available
+to the web app, add two secondary actions:
+
+- `Copy with v2 prompt`
+- `Copy with v3 prompt`
+
+Each action wraps the already-rendered, edited slate in its selected template and
+copies the result. Neither can fetch games, regenerate the raw slate, or change
+the current selection.
+
+This is an ownership decision, not an implementation detail: embedding template
+bodies in `/prep` duplicates prompt content from `sports` and exposes it through
+the web application. Until that decision is made, ship the multi-sport composer
+with `Copy formatted slate` only. A later alternative is to provide prompt
+templates through private/admin or local configuration rather than bundling them
+into the public app.
+
+## Build order
+
+1. Build the today-ET multi-sport composer over the five existing `/today`
+   routes, with sport groups, removable games, preview, and `Copy formatted slate`.
+2. Verify that all exports derive from the same local edited selection; retain
+   the slate through partial fetch failures and sport additions/removals.
+3. If prompt exposure is approved, add v2 and v3 wrapper actions over that same
+   rendered slate. Otherwise leave them out of the initial release.
+4. _(Later)_ Prompt-template configuration, date selection, batching, tennis/UFC,
+   and line-movement work each need their own scoped decision.
+
+## Acceptance criteria
+
+- A user can compose and copy a single slate containing games from two or more
+  supported sports without any duplicate or unlabeled groups.
+- An NFL preseason game appears under an explicitly NFL/preseason-labeled group.
+- Removing a game removes it from the preview and from every copy action.
+- `Copy formatted slate` is visually and behaviorally the primary/default action.
+- If enabled, v2 and v3 copies differ only by their wrapper/template; their slate
+  body is byte-for-byte the current formatted slate.
+- No v1 path fetches tennis/UFC, accepts a non-today date, batches automatically,
+  or executes a model.
