@@ -7,8 +7,10 @@ map nobody can look up, or ratings computed on the wrong scale.
 from __future__ import annotations
 
 import unittest
+from datetime import date
 
 from routers import espn_team_data
+from routers.utils import ET
 from routers.nba import _canonical_tricode as nba_tricode
 from routers.nba import NBA_TRICODES, _ESPN_TO_NBA_TRICODE
 
@@ -230,3 +232,110 @@ class NBACanonicalTricodeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _event(event_id: str, iso_date: str, away: str, home: str, status: str = "STATUS_SCHEDULED"):
+    def competitor(abbr: str, side: str):
+        return {
+            "homeAway": side,
+            "team": {
+                "id": f"id-{abbr}",
+                "abbreviation": abbr,
+                "location": abbr.title(),
+                "name": "Team",
+            },
+            "records": [{"name": "overall", "summary": "10-5"}],
+            "score": None,
+        }
+
+    return {
+        "id": event_id,
+        "date": iso_date,
+        "competitions": [
+            {
+                "status": {"period": 0, "type": {"name": status, "state": "pre"}},
+                "competitors": [competitor(home, "home"), competitor(away, "away")],
+                "broadcasts": [{"names": ["ESPN"]}],
+            }
+        ],
+    }
+
+
+class NextSlateTest(unittest.TestCase):
+    def tearDown(self):
+        import importlib
+
+        importlib.reload(espn_team_data)
+
+    def _slate(self, events, start=date(2026, 4, 1), lookahead_days=14):
+        espn_team_data._get = lambda *_a, **_k: {"events": events}  # type: ignore[assignment]
+        return espn_team_data.fetch_next_slate(
+            sport="nba",
+            start_date=start,
+            lookahead_days=lookahead_days,
+            canonical_tricode=nba_tricode,
+            timezone=ET,
+        )
+
+    def test_returns_earliest_date_with_games_not_first_event(self):
+        games, slate_date = self._slate(
+            [
+                _event("late", "2026-04-05T23:00Z", "BOS", "NY"),
+                _event("early", "2026-04-03T23:00Z", "GS", "LAL"),
+            ]
+        )
+
+        self.assertEqual(slate_date, date(2026, 4, 3))
+        self.assertEqual([g["gameId"] for g in games], ["early"])
+
+    def test_buckets_by_eastern_day_not_utc(self):
+        """A 00:30Z tip-off is the previous evening in ET and belongs on that slate."""
+        games, slate_date = self._slate([_event("late-tip", "2026-04-02T00:30Z", "BOS", "NY")])
+
+        self.assertEqual(slate_date, date(2026, 4, 1))
+        self.assertTrue(games[0]["gameEt"].startswith("2026-04-01T20:30"))
+
+    def test_skips_postponed_games(self):
+        games, slate_date = self._slate(
+            [
+                _event("off", "2026-04-03T23:00Z", "BOS", "NY", status="STATUS_POSTPONED"),
+                _event("on", "2026-04-04T23:00Z", "GS", "LAL"),
+            ]
+        )
+
+        self.assertEqual(slate_date, date(2026, 4, 4))
+        self.assertEqual([g["gameId"] for g in games], ["on"])
+
+    def test_empty_window_returns_no_date(self):
+        self.assertEqual(self._slate([]), ([], None))
+
+    def test_ignores_games_beyond_the_lookahead_window(self):
+        games, slate_date = self._slate(
+            [_event("far", "2026-05-30T23:00Z", "BOS", "NY")], lookahead_days=14
+        )
+
+        self.assertEqual((games, slate_date), ([], None))
+
+    def test_emits_the_fields_the_slate_builder_reads(self):
+        games, _ = self._slate([_event("g1", "2026-04-01T23:00Z", "GS", "WSH")])
+        game = games[0]
+
+        for key in (
+            "gameId", "gameEt", "gameStatus", "gameStatusText",
+            "period", "gameClock", "awayTeam", "homeTeam",
+            "seriesText", "seriesGameNumber", "broadcasters",
+        ):
+            self.assertIn(key, game)
+        for key in ("teamId", "teamCity", "teamName", "teamTricode", "wins", "losses", "score"):
+            self.assertIn(key, game["awayTeam"])
+
+    def test_canonicalizes_espn_abbreviations(self):
+        games, _ = self._slate([_event("g1", "2026-04-01T23:00Z", "GS", "WSH")])
+
+        self.assertEqual(games[0]["awayTeam"]["teamTricode"], "GSW")
+        self.assertEqual(games[0]["homeTeam"]["teamTricode"], "WAS")
+
+    def test_parses_records_into_wins_and_losses(self):
+        games, _ = self._slate([_event("g1", "2026-04-01T23:00Z", "GS", "WSH")])
+
+        self.assertEqual((games[0]["awayTeam"]["wins"], games[0]["awayTeam"]["losses"]), (10, 5))

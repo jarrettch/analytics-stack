@@ -7,7 +7,6 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from nba_api.live.nba.endpoints import boxscore, playbyplay, scoreboard
-from nba_api.stats.endpoints import scheduleleaguev2
 
 from . import espn_team_data
 from .auth import CronOffset, require_cron_auth
@@ -58,11 +57,6 @@ def _detail_status(game_status: int) -> str:
     if game_status == 3:
         return "final"
     return "preview"
-
-
-def _nba_season_for_date(d: date) -> str:
-    start_year = d.year if d.month >= 9 else d.year - 1
-    return f"{start_year}-{str(start_year + 1)[-2:]}"
 
 
 def _nba_game_datetime(g: dict) -> str:
@@ -375,28 +369,24 @@ def get_arena_map():
 
 
 def get_next_nba_schedule_games(start_date: date, lookahead_days: int = NBA_LOOKAHEAD_DAYS) -> tuple[list[dict], date | None]:
-    """Find the next NBA schedule date with games using the full-season schedule feed."""
-    try:
-        season = _nba_season_for_date(start_date)
-        schedule = scheduleleaguev2.ScheduleLeagueV2(season=season, timeout=15).get_dict()
-        game_dates = schedule.get("leagueSchedule", {}).get("gameDates", [])
-        games_by_date: dict[str, list[dict]] = {}
-        for date_entry in game_dates:
-            for game in date_entry.get("games", []):
-                game_date = str(game.get("gameDateEst", ""))[:10]
-                if game_date:
-                    games_by_date.setdefault(game_date, []).append(game)
+    """Find the next NBA date with games, from ESPN.
 
-        for offset in range(0, lookahead_days + 1):
-            target = start_date + timedelta(days=offset)
-            games = games_by_date.get(target.isoformat(), [])
-            games = [g for g in games if str(g.get("postponedStatus", "N")) != "Y"]
-            if games:
-                logger.info(f"NBA lookahead selected {target.isoformat()} with {len(games)} games")
-                return games, target
+    Replaces ScheduleLeagueV2: it lives on stats.nba.com, which tarpits
+    datacenter IPs, so from Render the lookahead never returned and an empty
+    slate stayed empty instead of rolling forward.
+    """
+    try:
+        return espn_team_data.fetch_next_slate(
+            sport="nba",
+            start_date=start_date,
+            lookahead_days=lookahead_days,
+            canonical_tricode=_canonical_tricode,
+            timezone=ET,
+        )
     except Exception as e:
         logger.warning(f"NBA schedule lookahead failed: {e}", exc_info=True)
     return [], None
+
 
 def get_tricode_from_sgo_team_id(team_id: str) -> str:
     """Map SportsGameOdds teamID to NBA tricode.

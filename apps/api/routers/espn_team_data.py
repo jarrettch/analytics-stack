@@ -238,3 +238,138 @@ def _keys_for(
         if team_id:
             keys.append(str(team_id))
     return keys
+
+
+SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/{sport}/scoreboard"
+# ESPN caps page size; a two-week NBA window is well under this.
+SCOREBOARD_LIMIT = 400
+# Statuses that mean "no game happened", so the lookahead should skip the date.
+_DEAD_STATUSES = {"STATUS_POSTPONED", "STATUS_CANCELED", "STATUS_SUSPENDED"}
+
+
+def _espn_record(competitor: dict) -> tuple[int, int]:
+    for record in competitor.get("records") or []:
+        if record.get("name") in ("overall", "Overall"):
+            summary = record.get("summary") or ""
+            wins, _, losses = summary.partition("-")
+            try:
+                return int(wins), int(losses)
+            except ValueError:
+                return 0, 0
+    return 0, 0
+
+
+def _scheduled_team(competitor: dict, canonical_tricode) -> dict:
+    team = competitor.get("team") or {}
+    wins, losses = _espn_record(competitor)
+    score = competitor.get("score")
+    return {
+        "teamId": str(team.get("id") or ""),
+        "teamCity": team.get("location", ""),
+        "teamName": team.get("name", ""),
+        "teamTricode": canonical_tricode(team.get("abbreviation", "")),
+        "wins": wins,
+        "losses": losses,
+        "score": int(score) if str(score).isdigit() else 0,
+    }
+
+
+def fetch_next_slate(
+    *,
+    sport: str,
+    start_date,
+    lookahead_days: int,
+    canonical_tricode,
+    timezone,
+) -> tuple[list[dict], object]:
+    """Earliest date from start_date with games, in nba_api scoreboard shape.
+
+    Replaces ScheduleLeagueV2, which lives on stats.nba.com and so never returns
+    from a datacenter IP. ESPN accepts a YYYYMMDD-YYYYMMDD range, so the whole
+    lookahead window costs one request instead of one per day.
+
+    ESPN stamps `date` in UTC while the slate is keyed on Eastern days, so games
+    are bucketed after converting — otherwise late tip-offs land on tomorrow.
+    """
+    from datetime import datetime, timedelta
+
+    end_date = start_date + timedelta(days=lookahead_days)
+    payload = _get(
+        SCOREBOARD_URL.format(sport=sport),
+        {
+            "dates": f"{start_date:%Y%m%d}-{end_date:%Y%m%d}",
+            "limit": SCOREBOARD_LIMIT,
+        },
+    )
+
+    by_date: dict[object, list[dict]] = {}
+    for event in payload.get("events") or []:
+        competitions = event.get("competitions") or []
+        if not competitions:
+            continue
+        competition = competitions[0]
+        competitors = competition.get("competitors") or []
+        home = next((c for c in competitors if c.get("homeAway") == "home"), None)
+        away = next((c for c in competitors if c.get("homeAway") == "away"), None)
+        if not home or not away:
+            continue
+
+        status = competition.get("status") or event.get("status") or {}
+        status_type = status.get("type") or {}
+        if status_type.get("name") in _DEAD_STATUSES:
+            continue
+
+        raw_date = event.get("date") or competition.get("date") or ""
+        try:
+            tipoff = datetime.fromisoformat(raw_date.replace("Z", "+00:00")).astimezone(
+                timezone
+            )
+        except ValueError:
+            continue
+
+        state = status_type.get("state")
+        broadcasts = [
+            name
+            for broadcast in competition.get("broadcasts") or []
+            for name in broadcast.get("names") or []
+        ]
+        by_date.setdefault(tipoff.date(), []).append(
+            {
+                "gameId": str(event.get("id") or competition.get("id") or ""),
+                "gameEt": tipoff.isoformat(),
+                "gameStatus": 3 if state == "post" else 2 if state == "in" else 1,
+                "gameStatusText": (
+                    status_type.get("description") or status_type.get("detail") or ""
+                ),
+                "period": status.get("period") or 0,
+                "gameClock": "",
+                "awayTeam": _scheduled_team(away, canonical_tricode),
+                "homeTeam": _scheduled_team(home, canonical_tricode),
+                "seriesText": "",
+                "seriesGameNumber": "",
+                "broadcasters": {
+                    "nationalBroadcasters": [
+                        {"broadcasterDisplay": name} for name in broadcasts
+                    ]
+                },
+            }
+        )
+
+    for offset in range(lookahead_days + 1):
+        target = start_date + timedelta(days=offset)
+        if by_date.get(target):
+            logger.info(
+                "ESPN %s lookahead selected %s with %d games",
+                sport,
+                target.isoformat(),
+                len(by_date[target]),
+            )
+            return by_date[target], target
+
+    logger.info(
+        "ESPN %s lookahead found no games within %d days of %s",
+        sport,
+        lookahead_days,
+        start_date.isoformat(),
+    )
+    return [], None
