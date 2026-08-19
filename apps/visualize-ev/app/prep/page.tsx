@@ -26,6 +26,8 @@ type PrepGame = {
   awayMoneyline?: number | null;
   homeMoneyline?: number | null;
   overUnder?: number | null;
+  overOdds?: number | null;
+  underOdds?: number | null;
   isPreseason: boolean;
 };
 
@@ -78,6 +80,8 @@ function normalizeGame(matchup: MatchupData): PrepGame {
     awayMoneyline: matchup.awayMoneyline,
     homeMoneyline: matchup.homeMoneyline,
     overUnder: matchup.overUnder,
+    overOdds: matchup.overOdds,
+    underOdds: matchup.underOdds,
     isPreseason:
       isNfl(matchup) && matchup.seasonType.toLowerCase().includes("preseason"),
   };
@@ -111,7 +115,12 @@ function formatLine(game: PrepGame): string {
     parts.push(`ML ${awayMoneyline}/${homeMoneyline}`);
   }
   if (typeof game.overUnder === "number" && Number.isFinite(game.overUnder)) {
-    parts.push(`O/U ${game.overUnder}`);
+    // Prices are labelled o/u because, unlike the ML pair, their order isn't
+    // implied by anything else on the line.
+    const over = formatAmericanOdds(game.overOdds);
+    const under = formatAmericanOdds(game.underOdds);
+    const prices = over && under ? ` (o${over}/u${under})` : "";
+    parts.push(`O/U ${game.overUnder}${prices}`);
   }
 
   return parts.length ? ` — ${parts.join(", ")}` : "";
