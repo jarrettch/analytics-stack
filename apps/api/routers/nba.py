@@ -7,8 +7,9 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from nba_api.live.nba.endpoints import boxscore, playbyplay, scoreboard
-from nba_api.stats.endpoints import leaguedashteamstats, leaguestandingsv3, scheduleleaguev2
+from nba_api.stats.endpoints import scheduleleaguev2
 
+from . import espn_team_data
 from .auth import CronOffset, require_cron_auth
 from .utils import (
     CACHE_TTL_DEFAULT,
@@ -269,112 +270,73 @@ def _nba_pbp(actions: list[dict], matchup: dict) -> tuple[list[dict], list[dict]
     return plays, win_probability
 
 # Get the standings map
-# def get_standings_map():
-#   try:
+# ESPN's scoreboard/stats abbreviations are not NBA tricodes. Anything missing
+# here passes through unchanged and silently fails the standings and efficiency
+# joins, which is how the WNBA lost five teams' odds for weeks.
+_ESPN_TO_NBA_TRICODE = {
+    "GS": "GSW",    # Golden State Warriors
+    "NO": "NOP",    # New Orleans Pelicans
+    "NY": "NYK",    # New York Knicks
+    "SA": "SAS",    # San Antonio Spurs
+    "UTAH": "UTA",  # Utah Jazz
+    "WSH": "WAS",   # Washington Wizards
+}
+
+NBA_TRICODES = {
+    "ATL", "BOS", "BKN", "CHA", "CHI", "CLE", "DAL", "DEN", "DET", "GSW",
+    "HOU", "IND", "LAC", "LAL", "MEM", "MIA", "MIL", "MIN", "NOP", "NYK",
+    "OKC", "ORL", "PHI", "PHX", "POR", "SAC", "SAS", "TOR", "UTA", "WAS",
+}
+
+_warned_espn_abbreviations: set[str] = set()
+
+
+def _canonical_tricode(abbreviation: str) -> str:
+    """Translate an ESPN abbreviation to an NBA tricode, warning when we cannot."""
+    tricode = _ESPN_TO_NBA_TRICODE.get(abbreviation, abbreviation)
+    if tricode not in NBA_TRICODES and abbreviation not in _warned_espn_abbreviations:
+        _warned_espn_abbreviations.add(abbreviation)
+        logger.warning(
+            "ESPN NBA abbreviation %r maps to %r, which is not a known tricode — "
+            "standings and ratings will not join until _ESPN_TO_NBA_TRICODE is updated",
+            abbreviation,
+            tricode,
+        )
+    return tricode
+
+
 def get_standings_map():
+    """NBA standings from ESPN, keyed by tricode and full team name.
+
+    Replaces LeagueStandingsV3: stats.nba.com tarpits datacenter IPs, so from
+    Render that call never returned and every team silently fell back to
+    placeholder values.
+    """
     try:
-        logger.info("Fetching standings (v3)...")
-        # Simple call without custom headers - matches working debug endpoint
-        standings = leaguestandingsv3.LeagueStandingsV3(timeout=10).get_dict()
-        logger.info(f"Standings fetched successfully, processing {len(standings['resultSets'][0]['rowSet'])} teams")
-        headers = standings['resultSets'][0]['headers']
-        rows = standings['resultSets'][0]['rowSet']
-
-        # Map headers to indices for safer access
-        h = {header: i for i, header in enumerate(headers)}
-
-        # Map team name to tricode
-        name_to_tricode = {
-            "Hawks": "ATL", "Celtics": "BOS", "Nets": "BKN", "Hornets": "CHA",
-            "Bulls": "CHI", "Cavaliers": "CLE", "Mavericks": "DAL", "Nuggets": "DEN",
-            "Pistons": "DET", "Warriors": "GSW", "Rockets": "HOU", "Pacers": "IND",
-            "Clippers": "LAC", "Lakers": "LAL", "Grizzlies": "MEM", "Heat": "MIA",
-            "Bucks": "MIL", "Timberwolves": "MIN", "Pelicans": "NOP", "Knicks": "NYK",
-            "Thunder": "OKC", "Magic": "ORL", "76ers": "PHI", "Suns": "PHX",
-            "Trail Blazers": "POR", "Kings": "SAC", "Spurs": "SAS", "Raptors": "TOR",
-            "Jazz": "UTA", "Wizards": "WAS",
-        }
-
-        stats_map = {}
-        for row in rows:
-            team_id = str(row[h['TeamID']]) if 'TeamID' in h else None
-            team_name = row[h['TeamName']] if 'TeamName' in h else None
-            tricode = name_to_tricode.get(team_name) if team_name else None
-
-            # Both v3 and legacy use uppercase field names
-            wins = row[h['WINS']]
-            losses = row[h['LOSSES']]
-            conference = row[h['Conference']] if 'Conference' in h else "N/A"
-            seed = row[h['PlayoffRank']] if 'PlayoffRank' in h else 0
-            streak = row[h['strCurrentStreak']] if 'strCurrentStreak' in h else "N/A"
-            last10 = row[h['L10']] if 'L10' in h else "N/A"
-
-            team_data = {
-                "record": f"{wins}-{losses}",
-                "winPct": wins / (wins + losses) if (wins + losses) > 0 else 0.5,
-                "seed": seed,
-                "conference": conference if conference else "N/A",
-                "streak": streak if streak else "N/A",
-                "last10": last10 if last10 else "N/A"
-            }
-
-            # Store by tricode and team ID for flexible lookup
-            if tricode:
-                stats_map[tricode] = team_data
-            if team_id:
-                stats_map[team_id] = team_data
-
-        logger.info(f"Built standings map with {len(stats_map)} teams")
-        return stats_map
+        return espn_team_data.fetch_standings(
+            sport="nba",
+            canonical_tricode=_canonical_tricode,
+        )
     except Exception as e:
         logger.error(f"Standings Fetch Error: {e}", exc_info=True)
-        logger.error(f"Error type: {type(e).__name__}")
-        logger.error(f"Error details: {str(e)}")
         return {}
 
+
 def get_advanced_stats_map():
+    """NBA ORtg/DRtg/pace derived from ESPN season totals.
+
+    pace is possessions per game; NBA regulation is 48 minutes, so this is
+    already on the same scale the per-48 PACE stat used to report.
+    """
     try:
-        logger.info("Fetching advanced team stats...")
-        stats = leaguedashteamstats.LeagueDashTeamStats(
-            measure_type_detailed_defense='Advanced',
-            per_mode_detailed='PerGame',
-            timeout=15
+        return espn_team_data.fetch_efficiency(
+            sport="nba",
+            canonical_tricode=_canonical_tricode,
         )
-
-        result = stats.get_dict()
-        headers = result['resultSets'][0]['headers']
-        rows = result['resultSets'][0]['rowSet']
-
-        logger.info(f"Advanced stats fetched successfully for {len(rows)} teams")
-
-        # Map headers to indices
-        h = {header: i for i, header in enumerate(headers)}
-
-        # Map by both team name AND team ID for reliability
-        advanced_map = {}
-        for row in rows:
-            team_name = row[h['TEAM_NAME']]
-            team_id = str(row[h['TEAM_ID']])
-
-            stats = {
-                "offRating": row[h['OFF_RATING']],
-                "defRating": row[h['DEF_RATING']],
-                "netRating": row[h['NET_RATING']],
-                "pace": row[h.get('PACE', 0)] if 'PACE' in h else 98.5
-            }
-
-            # Store by both name and ID for flexible lookup
-            advanced_map[team_name] = stats
-            advanced_map[team_id] = stats
-
-        logger.info(f"Built advanced stats map with {len(rows)} teams")
-        # Debug: log some team names to verify format
-        team_names = [row[h['TEAM_NAME']] for row in rows[:3]]
-        logger.info(f"Sample team names: {team_names}")
-        return advanced_map
     except Exception as e:
         logger.error(f"Advanced Stats Fetch Error: {e}", exc_info=True)
         return {}
+
 
 def get_arena_map():
     """Static arena map by team tricode. Arenas rarely change."""
@@ -707,8 +669,17 @@ async def get_todays_games():
             home_full_name = f"{g['homeTeam']['teamCity']} {g['homeTeam']['teamName']}"
 
             # Try name first, fallback to ID
-            away_advanced = advanced_stats_map.get(away_full_name) or advanced_stats_map.get(str(g['awayTeam']['teamId']), {})
-            home_advanced = advanced_stats_map.get(home_full_name) or advanced_stats_map.get(str(g['homeTeam']['teamId']), {})
+            # Tricode last: it's the only key guaranteed to agree across feeds.
+            away_advanced = (
+                advanced_stats_map.get(away_full_name)
+                or advanced_stats_map.get(str(g['awayTeam']['teamId']))
+                or advanced_stats_map.get(away_tri, {})
+            )
+            home_advanced = (
+                advanced_stats_map.get(home_full_name)
+                or advanced_stats_map.get(str(g['homeTeam']['teamId']))
+                or advanced_stats_map.get(home_tri, {})
+            )
 
             # Calculate win percentage from scoreboard data
             away_wins = g['awayTeam']['wins']

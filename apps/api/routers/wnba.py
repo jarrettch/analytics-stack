@@ -5,8 +5,8 @@ import logging
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from nba_api.stats.endpoints import leaguestandingsv3, leaguedashteamstats
 
+from . import espn_team_data
 from .auth import CronOffset, require_cron_auth
 from .utils import (
     CACHE_TTL_DEFAULT,
@@ -255,18 +255,12 @@ async def fetch_wnba_scoreboard(target_date: date | None = None) -> dict:
 
 # WNBA league averages (per-game ORtg/DRtg, pace) used only as fallbacks when the
 # advanced-stats endpoint is missing a team.
-DEFAULT_OFF_RATING = 100.0
-DEFAULT_DEF_RATING = 100.0
-DEFAULT_PACE = 96.0
-
-# WNBA regulation is 40 minutes (4x10) vs the NBA's 48; used to rescale the per-48
-# PACE stat when projecting scores.
-WNBA_REG_MINUTES = 40
-
-
-def wnba_season() -> str:
-    """WNBA seasons are single calendar years (May–Oct), so the season string is the year."""
-    return str(datetime.now(ET).year)
+# League averages, used only when a team is missing from the ESPN maps — which
+# should not happen. Pace is possessions per game on the WNBA's 40-minute clock,
+# not the per-48 figure LeagueDashTeamStats used to return.
+DEFAULT_OFF_RATING = 106.0
+DEFAULT_DEF_RATING = 106.0
+DEFAULT_PACE = 82.0
 
 
 def get_tricode_from_name(name: str) -> str:
@@ -291,83 +285,41 @@ def get_arena_map() -> dict[str, str]:
     return {tri: v[3] for tri, v in WNBA_TEAMS.items()}
 
 
+def _wnba_team_id(tricode: str) -> str | None:
+    entry = WNBA_TEAMS.get(tricode)
+    return entry[0] if entry else None
+
+
 def get_standings_map() -> dict:
-    """WNBA standings via LeagueStandingsV3 (league_id=10). Keyed by tricode and team ID."""
+    """WNBA standings from ESPN. Keyed by tricode, full name, and team ID.
+
+    The WNBA seeds its playoffs from the whole league rather than per conference,
+    so seeds are ranked league-wide instead of using ESPN's conference seed.
+    """
     try:
-        season = wnba_season()
-        logger.info(f"Fetching WNBA standings (v3) for {season}...")
-        standings = leaguestandingsv3.LeagueStandingsV3(
-            league_id="10", season=season, timeout=10
-        ).get_dict()
-        rs = standings['resultSets'][0]
-        rows = rs['rowSet']
-        h = {header: i for i, header in enumerate(rs['headers'])}
-
-        stats_map = {}
-        for row in rows:
-            team_id = str(row[h['TeamID']]) if 'TeamID' in h else None
-            team_name = row[h['TeamName']] if 'TeamName' in h else None  # nickname, e.g. "Aces"
-            tricode = _NICKNAME_TO_TRICODE.get((team_name or "").lower())
-
-            wins = row[h['WINS']]
-            losses = row[h['LOSSES']]
-            conference = row[h['Conference']] if 'Conference' in h else "N/A"
-            seed = row[h['PlayoffRank']] if 'PlayoffRank' in h else 0
-            streak = row[h['strCurrentStreak']] if 'strCurrentStreak' in h else "N/A"
-            last10 = row[h['L10']] if 'L10' in h else "N/A"
-
-            team_data = {
-                "record": f"{wins}-{losses}",
-                "winPct": wins / (wins + losses) if (wins + losses) > 0 else 0.5,
-                "seed": seed,
-                "conference": conference if conference else "N/A",
-                "streak": streak if streak else "N/A",
-                "last10": last10 if last10 else "N/A",
-            }
-            if tricode:
-                stats_map[tricode] = team_data
-            if team_id:
-                stats_map[team_id] = team_data
-
-        logger.info(f"Built WNBA standings map with {len(stats_map)} entries")
-        return stats_map
+        return espn_team_data.fetch_standings(
+            sport="wnba",
+            canonical_tricode=_canonical_tricode,
+            team_id_for=_wnba_team_id,
+            league_wide_seed=True,
+        )
     except Exception as e:
         logger.error(f"WNBA Standings Fetch Error: {e}", exc_info=True)
         return {}
 
 
 def get_advanced_stats_map() -> dict:
-    """WNBA advanced team stats (ORtg/DRtg/pace). Keyed by full team name and team ID."""
+    """WNBA ORtg/DRtg/pace derived from ESPN season totals.
+
+    pace here is possessions per game, already on the WNBA's 40-minute clock —
+    do not apply the old 48-minute rescaling to it.
+    """
     try:
-        season = wnba_season()
-        logger.info(f"Fetching WNBA advanced team stats for {season}...")
-        stats = leaguedashteamstats.LeagueDashTeamStats(
-            measure_type_detailed_defense='Advanced',
-            per_mode_detailed='PerGame',
-            league_id_nullable="10",
-            season=season,
-            timeout=15,
+        return espn_team_data.fetch_efficiency(
+            sport="wnba",
+            canonical_tricode=_canonical_tricode,
+            team_id_for=_wnba_team_id,
         )
-        result = stats.get_dict()
-        rs = result['resultSets'][0]
-        rows = rs['rowSet']
-        h = {header: i for i, header in enumerate(rs['headers'])}
-
-        advanced_map = {}
-        for row in rows:
-            team_name = row[h['TEAM_NAME']]
-            team_id = str(row[h['TEAM_ID']])
-            team_stats = {
-                "offRating": row[h['OFF_RATING']],
-                "defRating": row[h['DEF_RATING']],
-                "netRating": row[h['NET_RATING']] if 'NET_RATING' in h else None,
-                "pace": row[h['PACE']] if 'PACE' in h else DEFAULT_PACE,
-            }
-            advanced_map[team_name] = team_stats
-            advanced_map[team_id] = team_stats
-
-        logger.info(f"Built WNBA advanced stats map with {len(rows)} teams")
-        return advanced_map
     except Exception as e:
         logger.error(f"WNBA Advanced Stats Fetch Error: {e}", exc_info=True)
         return {}
@@ -577,8 +529,17 @@ async def get_todays_games():
 
             away_full_name = f"{g['awayTeam']['teamCity']} {g['awayTeam']['teamName']}"
             home_full_name = f"{g['homeTeam']['teamCity']} {g['homeTeam']['teamName']}"
-            away_advanced = advanced_stats_map.get(away_full_name) or advanced_stats_map.get(away_team_id, {})
-            home_advanced = advanced_stats_map.get(home_full_name) or advanced_stats_map.get(home_team_id, {})
+            # Tricode last: it's the only key guaranteed to agree across feeds.
+            away_advanced = (
+                advanced_stats_map.get(away_full_name)
+                or advanced_stats_map.get(away_team_id)
+                or advanced_stats_map.get(away_tri, {})
+            )
+            home_advanced = (
+                advanced_stats_map.get(home_full_name)
+                or advanced_stats_map.get(home_team_id)
+                or advanced_stats_map.get(home_tri, {})
+            )
 
             away_wins = g['awayTeam']['wins']
             away_losses = g['awayTeam']['losses']
@@ -594,10 +555,11 @@ async def get_todays_games():
             home_drtg = home_advanced.get("defRating", DEFAULT_DEF_RATING)
             home_pace = home_advanced.get("pace", DEFAULT_PACE)
 
-            # PACE from the advanced-stats endpoint is normalized per 48 minutes (NBA
-            # convention), but WNBA games are 40 minutes — without scaling, naive
-            # projections run ~20% hot (e.g. ~200 totals for an ~165-point league).
-            game_pace = (away_pace + home_pace) / 2 * (WNBA_REG_MINUTES / 48)
+            # pace is possessions per game from ESPN, already on the WNBA's
+            # 40-minute clock. It used to come from LeagueDashTeamStats normalized
+            # per 48 minutes and needed a 40/48 correction; applying that here
+            # would run projections ~17% cold.
+            game_pace = (away_pace + home_pace) / 2
             naive_away = game_pace * (away_ortg + home_drtg) / 2 / 100
             naive_home = game_pace * (home_ortg + away_drtg) / 2 / 100
             naive_margin = naive_home - naive_away
