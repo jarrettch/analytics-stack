@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import unittest
 
-from routers.wnba import adapt_espn_scoreboard, adapt_espn_win_probability
+from routers.wnba import (
+    _ESPN_TO_WNBA_TRICODE,
+    WNBA_TEAMS,
+    _canonical_tricode,
+    _warned_espn_abbreviations,
+    adapt_espn_scoreboard,
+    adapt_espn_win_probability,
+)
 
 
 class ESPNScoreboardAdapterTest(unittest.TestCase):
@@ -108,6 +115,41 @@ class ESPNScoreboardAdapterTest(unittest.TestCase):
         }
 
         self.assertEqual(adapt_espn_win_probability(payload), [])
+
+
+class CanonicalTricodeTest(unittest.TestCase):
+    """The odds join is keyed on WNBA_TEAMS tricodes, so an ESPN abbreviation
+    that doesn't translate silently drops that team's odds from /today."""
+
+    def test_every_espn_abbreviation_resolves_to_a_known_team(self):
+        # ESPN's current WNBA vocabulary. GS/LA/LV/NY/WSH were unmapped when the
+        # scoreboard moved to ESPN, which dropped odds for five teams.
+        espn_abbreviations = [
+            "ATL", "CHI", "CON", "DAL", "GS", "IND", "LA", "LV",
+            "MIN", "NY", "PHX", "POR", "SEA", "TOR", "WSH",
+        ]
+
+        unresolved = [
+            abbreviation
+            for abbreviation in espn_abbreviations
+            if _canonical_tricode(abbreviation) not in WNBA_TEAMS
+        ]
+
+        self.assertEqual(unresolved, [])
+
+    def test_mapping_targets_are_all_real_tricodes(self):
+        """Guards a typo in the map itself, which would fail the same way."""
+        for abbreviation, tricode in _ESPN_TO_WNBA_TRICODE.items():
+            self.assertIn(tricode, WNBA_TEAMS, f"{abbreviation} -> {tricode}")
+
+    def test_unknown_abbreviation_passes_through_with_a_warning(self):
+        _warned_espn_abbreviations.discard("ZZZ")
+
+        with self.assertLogs("routers.wnba", level="WARNING") as captured:
+            self.assertEqual(_canonical_tricode("ZZZ"), "ZZZ")
+
+        self.assertIn("ZZZ", captured.output[0])
+        self.assertIn("not in WNBA_TEAMS", captured.output[0])
 
 
 if __name__ == "__main__":
