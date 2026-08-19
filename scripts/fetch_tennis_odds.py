@@ -147,41 +147,44 @@ def fetch_sport(client: httpx.Client, key: str, sport_key: str, window: tuple[st
     return rows
 
 
-def active_tennis_keys(client: httpx.Client, key: str) -> dict[str, str]:
-    """{sport_key: title} for tennis tournaments currently live.
+def active_sport_keys(client: httpx.Client, key: str) -> dict[str, str]:
+    """{sport_key: title} for every live key, across all sports.
 
-    /v4/sports costs no quota, so checking here is free and saves paying
-    markets x regions for a tournament that has already ended.
+    Not tennis-only on purpose: --sports is regularly pointed at other groups
+    (mma_mixed_martial_arts, baseball_mlb, ...). /v4/sports costs no quota, so
+    checking is free and saves paying markets x regions to be told 0 matches.
     """
     resp = client.get(f"{API_BASE}/sports", params={"apiKey": key}, timeout=25)
     resp.raise_for_status()
-    return {
-        s["key"]: s["title"]
-        for s in resp.json()
-        if s.get("group") == "Tennis" and s.get("active")
-    }
+    return {s["key"]: s["title"] for s in resp.json() if s.get("active")}
 
 
 def drop_inactive(requested: list[str], active: dict[str, str]) -> list[str]:
     """Keep only live keys, explaining any that were dropped.
 
-    Deliberately does not substitute a different tournament — silently pulling a
-    slate you didn't ask for is worse than saying nothing is live.
+    Deliberately does not substitute anything — silently pulling a slate you
+    didn't ask for is worse than saying nothing is live. Only the same group as
+    the requested keys is suggested, so asking for a fight card doesn't print
+    every tennis tournament.
     """
     live = [k for k in requested if k in active]
     for sport_key in requested:
         if sport_key not in active:
             print(f"  {sport_key}: not active, skipping", file=sys.stderr)
     if not live:
-        print(
-            "\nNo requested tournament is active. Currently live:", file=sys.stderr
-        )
-        for sport_key, title in sorted(active.items()):
+        prefixes = {k.split("_")[0] for k in requested}
+        related = {
+            k: title
+            for k, title in active.items()
+            if k.split("_")[0] in prefixes
+        } or active
+        print("\nNothing requested is active. Currently live:", file=sys.stderr)
+        for sport_key, title in sorted(related.items()):
             print(f"  {sport_key:34} {title}", file=sys.stderr)
         if not active:
-            print("  (no tennis tournaments are live right now)", file=sys.stderr)
+            print("  (nothing is live right now)", file=sys.stderr)
         print(
-            "\nPass --sports with one of the above, or update DEFAULT_SPORTS.",
+            "\nPass --sports with one of the above, or run --list to see them all.",
             file=sys.stderr,
         )
     return live
@@ -222,7 +225,7 @@ def main() -> None:
         window = day_window(target)
         print(f"Fetching {target} ET — books: {', '.join(args.books)}", file=sys.stderr)
 
-        sports = drop_inactive(args.sports, active_tennis_keys(client, key))
+        sports = drop_inactive(args.sports, active_sport_keys(client, key))
         if not sports:
             sys.exit(1)
 
