@@ -67,7 +67,40 @@ WNBA_TEAMS: dict[str, tuple[str, str, str, str, str]] = {
 _FULLNAME_TO_TRICODE = {v[1].lower(): tri for tri, v in WNBA_TEAMS.items()}
 _NICKNAME_TO_TRICODE = {v[2].lower(): tri for tri, v in WNBA_TEAMS.items()}
 _ESPN_SLUG = {tri: v[4] for tri, v in WNBA_TEAMS.items()}
-_ESPN_TO_WNBA_TRICODE = {"POR": "PDX"}
+# ESPN's scoreboard abbreviations are not our tricodes. Any code missing here
+# passes through unchanged and silently fails the odds join, which is keyed on
+# (game_date, "AWAY@HOME") using WNBA_TEAMS tricodes — see _canonical_tricode.
+_ESPN_TO_WNBA_TRICODE = {
+    "POR": "PDX",  # Portland Fire
+    "GS": "GSV",   # Golden State Valkyries
+    "LA": "LAS",   # Los Angeles Sparks
+    "LV": "LVA",   # Las Vegas Aces
+    "NY": "NYL",   # New York Liberty
+    "WSH": "WAS",  # Washington Mystics
+}
+
+# Unknown abbreviations are logged once each; a persistent gap is a data bug to
+# fix, not something to re-report on every poll.
+_warned_espn_abbreviations: set[str] = set()
+
+
+def _canonical_tricode(abbreviation: str) -> str:
+    """Translate an ESPN abbreviation to our tricode, warning when we can't.
+
+    Returns the input unchanged on no match so the scoreboard still renders, but
+    the odds join for that team will miss — which is exactly what went unnoticed
+    when the scoreboard moved to ESPN and only Portland had been mapped.
+    """
+    tricode = _ESPN_TO_WNBA_TRICODE.get(abbreviation, abbreviation)
+    if tricode not in WNBA_TEAMS and abbreviation not in _warned_espn_abbreviations:
+        _warned_espn_abbreviations.add(abbreviation)
+        logger.warning(
+            "ESPN WNBA abbreviation %r maps to %r, which is not in WNBA_TEAMS — "
+            "odds will not join for this team until _ESPN_TO_WNBA_TRICODE is updated",
+            abbreviation,
+            tricode,
+        )
+    return tricode
 
 
 def _safe_int(value, default: int = 0) -> int:
@@ -102,7 +135,7 @@ def _espn_record(competitor: dict) -> tuple[int, int]:
 def _espn_team(competitor: dict) -> dict:
     team = competitor.get("team") or {}
     abbreviation = team.get("abbreviation", "")
-    tricode = _ESPN_TO_WNBA_TRICODE.get(abbreviation, abbreviation)
+    tricode = _canonical_tricode(abbreviation)
     wins, losses = _espn_record(competitor)
     canonical_id = WNBA_TEAMS.get(tricode, (str(team.get("id", "")),))[0]
     return {

@@ -60,8 +60,10 @@ The formatted slate contains selected matchups plus the current line snapshot:
 
 - **MLB:** `Away (Pitcher) vs Home (Pitcher)` — last name only; use `(TBD)` when
   a probable is unavailable.
-- **NBA, WNBA, NFL, NHL:** `Away @ Home — ML <away>/<home>, O/U <x.5>` using
-  American odds with explicit signs when available.
+- **NBA, WNBA, NFL, NHL:** `Away @ Home — ML <away>/<home>, O/U <x.5> (o<over>/u<under>)`
+  using American odds with explicit signs when available. The total's prices are
+  labelled `o`/`u` because, unlike the ML pair, their order isn't implied by the
+  rest of the line. Both prices are omitted together when either is missing.
 - Omit unavailable line fields rather than inventing a value. The snapshot is
   current context, not movement data and not a replacement for later market
   research.
