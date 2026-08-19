@@ -5,12 +5,12 @@ Outputs CSV ready to paste into the betting tool:
     tour,start,player_1,ml_1,player_2,ml_2,total_games,over,under,book
 
 Lines come from one book per match — BetOnline first, Pinnacle as fallback
-(override with --books). Defaults to tomorrow ET, ATP + WTA French Open.
+(override with --books). Defaults to tomorrow ET, ATP + WTA US Open.
 
 Usage:
-    python scripts/fetch_tennis_odds.py                 # tomorrow's French Open
-    python scripts/fetch_tennis_odds.py --date 2026-05-28
-    python scripts/fetch_tennis_odds.py --sports tennis_atp_wimbledon tennis_wta_wimbledon
+    python scripts/fetch_tennis_odds.py                 # tomorrow's US Open
+    python scripts/fetch_tennis_odds.py --date 2026-08-31
+    python scripts/fetch_tennis_odds.py --sports tennis_atp_cincinnati_open tennis_wta_cincinnati_open
     python scripts/fetch_tennis_odds.py -o slate.csv    # write to file instead of stdout
 
 Run `python scripts/fetch_tennis_odds.py --list` to see currently active tennis keys.
@@ -33,9 +33,17 @@ UTC = ZoneInfo("UTC")
 API_BASE = "https://api.the-odds-api.com/v4"
 
 # The Odds API sport keys. ATP/WTA share the same tournament suffix.
-DEFAULT_SPORTS = ["tennis_atp_french_open", "tennis_wta_french_open"]
+# Rotate this each Slam — a tournament's keys go inactive once it ends. Inactive
+# keys are now detected up front rather than silently returning 0 matches, and
+# --list shows what is currently live.
+DEFAULT_SPORTS = ["tennis_atp_us_open", "tennis_wta_us_open"]
 # Bookmaker keys in preference order; first available per match wins.
 DEFAULT_BOOKS = ["betonlineag", "pinnacle"]
+# Only the eu region is requested: quota cost is markets x regions, and eu alone
+# carries both preferred books (betonlineag is listed in us and eu, pinnacle only
+# in eu). Adding us would double the cost for no extra coverage.
+REGIONS = "eu"
+MARKETS = "h2h,totals"
 # Tour label keyed off the sport key, for the output's `tour` column.
 TOUR_LABELS = {"tennis_atp_": "ATP", "tennis_wta_": "WTA"}
 
@@ -124,8 +132,8 @@ def extract_row(event: dict, sport_key: str, books: list[str]) -> dict:
 def fetch_sport(client: httpx.Client, key: str, sport_key: str, window: tuple[str, str]) -> list[dict]:
     params = {
         "apiKey": key,
-        "regions": "us,eu",
-        "markets": "h2h,totals",
+        "regions": REGIONS,
+        "markets": MARKETS,
         "oddsFormat": "american",
         "commenceTimeFrom": window[0],
         "commenceTimeTo": window[1],
@@ -137,6 +145,46 @@ def fetch_sport(client: httpx.Client, key: str, sport_key: str, window: tuple[st
     rows = [extract_row(e, sport_key, FETCH_BOOKS) for e in resp.json()]
     print(f"  {sport_key}: {len(rows)} match(es)  [credits left: {remaining}]", file=sys.stderr)
     return rows
+
+
+def active_tennis_keys(client: httpx.Client, key: str) -> dict[str, str]:
+    """{sport_key: title} for tennis tournaments currently live.
+
+    /v4/sports costs no quota, so checking here is free and saves paying
+    markets x regions for a tournament that has already ended.
+    """
+    resp = client.get(f"{API_BASE}/sports", params={"apiKey": key}, timeout=25)
+    resp.raise_for_status()
+    return {
+        s["key"]: s["title"]
+        for s in resp.json()
+        if s.get("group") == "Tennis" and s.get("active")
+    }
+
+
+def drop_inactive(requested: list[str], active: dict[str, str]) -> list[str]:
+    """Keep only live keys, explaining any that were dropped.
+
+    Deliberately does not substitute a different tournament — silently pulling a
+    slate you didn't ask for is worse than saying nothing is live.
+    """
+    live = [k for k in requested if k in active]
+    for sport_key in requested:
+        if sport_key not in active:
+            print(f"  {sport_key}: not active, skipping", file=sys.stderr)
+    if not live:
+        print(
+            "\nNo requested tournament is active. Currently live:", file=sys.stderr
+        )
+        for sport_key, title in sorted(active.items()):
+            print(f"  {sport_key:34} {title}", file=sys.stderr)
+        if not active:
+            print("  (no tennis tournaments are live right now)", file=sys.stderr)
+        print(
+            "\nPass --sports with one of the above, or update DEFAULT_SPORTS.",
+            file=sys.stderr,
+        )
+    return live
 
 
 def list_active_tennis(client: httpx.Client, key: str) -> None:
@@ -174,8 +222,12 @@ def main() -> None:
         window = day_window(target)
         print(f"Fetching {target} ET — books: {', '.join(args.books)}", file=sys.stderr)
 
+        sports = drop_inactive(args.sports, active_tennis_keys(client, key))
+        if not sports:
+            sys.exit(1)
+
         rows: list[dict] = []
-        for sport_key in args.sports:
+        for sport_key in sports:
             rows.extend(fetch_sport(client, key, sport_key, window))
 
     rows.sort(key=lambda r: (r["tour"], r["_sort"]))
