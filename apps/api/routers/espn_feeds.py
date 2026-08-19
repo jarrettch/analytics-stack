@@ -1,4 +1,4 @@
-"""ESPN-backed team standings and efficiency ratings.
+"""ESPN-backed team standings, efficiency ratings, and schedule lookahead.
 
 stats.nba.com tarpits datacenter IPs. From Render both LeagueStandingsV3 and
 LeagueDashTeamStats blow past their timeouts and return nothing — which degraded

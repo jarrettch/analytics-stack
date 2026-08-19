@@ -9,7 +9,7 @@ from __future__ import annotations
 import unittest
 from datetime import date
 
-from routers import espn_team_data
+from routers import espn_feeds
 from routers.utils import ET
 from routers.nba import _canonical_tricode as nba_tricode
 from routers.nba import NBA_TRICODES, _ESPN_TO_NBA_TRICODE
@@ -49,20 +49,20 @@ def _efficiency_payload(**overrides):
 
 class EfficiencyMathTest(unittest.TestCase):
     def setUp(self):
-        espn_team_data._get = lambda *_a, **_k: self.payload  # type: ignore[assignment]
+        espn_feeds._get = lambda *_a, **_k: self.payload  # type: ignore[assignment]
         self.payload = _efficiency_payload()
 
     def tearDown(self):
         import importlib
 
-        importlib.reload(espn_team_data)
+        importlib.reload(espn_feeds)
 
     def test_derives_ratings_and_pace_from_season_totals(self):
         # possessions = 3000 - 300 + 500 + 0.44*1000 = 3640
         # offRating   = 100 * 3800 / 3640 = 104.4
         # defRating   = 100 * (3800-100) / 3640 = 101.6
         # pace        = 3640 / 40 = 91.0
-        result = espn_team_data.fetch_efficiency(
+        result = espn_feeds.fetch_efficiency(
             sport="nba", canonical_tricode=nba_tricode
         )
 
@@ -73,13 +73,13 @@ class EfficiencyMathTest(unittest.TestCase):
 
     def test_pace_is_per_game_not_per_48_minutes(self):
         """The WNBA path used to rescale pace by 40/48; this value must not be."""
-        result = espn_team_data.fetch_efficiency(
+        result = espn_feeds.fetch_efficiency(
             sport="nba", canonical_tricode=nba_tricode
         )
         self.assertAlmostEqual(result["GSW"]["pace"], 3640 / 40, places=1)
 
     def test_keys_by_tricode_and_display_name(self):
-        result = espn_team_data.fetch_efficiency(
+        result = espn_feeds.fetch_efficiency(
             sport="nba", canonical_tricode=nba_tricode
         )
         self.assertIn("GSW", result)
@@ -87,7 +87,7 @@ class EfficiencyMathTest(unittest.TestCase):
         self.assertNotIn("GS", result)  # the raw ESPN abbreviation is not a key
 
     def test_team_id_alias_is_added_when_resolvable(self):
-        result = espn_team_data.fetch_efficiency(
+        result = espn_feeds.fetch_efficiency(
             sport="nba",
             canonical_tricode=nba_tricode,
             team_id_for=lambda tri: "1610612744" if tri == "GSW" else None,
@@ -97,7 +97,7 @@ class EfficiencyMathTest(unittest.TestCase):
     def test_skips_team_with_incomplete_stats_rather_than_inventing(self):
         self.payload = _efficiency_payload(offensive=[3800, None, 300, 500, 1000])
 
-        result = espn_team_data.fetch_efficiency(
+        result = espn_feeds.fetch_efficiency(
             sport="nba", canonical_tricode=nba_tricode
         )
 
@@ -106,7 +106,7 @@ class EfficiencyMathTest(unittest.TestCase):
     def test_skips_team_with_zero_games_played(self):
         self.payload = _efficiency_payload(games_played=0)
 
-        result = espn_team_data.fetch_efficiency(
+        result = espn_feeds.fetch_efficiency(
             sport="nba", canonical_tricode=nba_tricode
         )
 
@@ -155,22 +155,22 @@ class StandingsAdapterTest(unittest.TestCase):
     }
 
     def setUp(self):
-        espn_team_data._get = lambda *_a, **_k: self.payload  # type: ignore[assignment]
+        espn_feeds._get = lambda *_a, **_k: self.payload  # type: ignore[assignment]
 
     def tearDown(self):
         import importlib
 
-        importlib.reload(espn_team_data)
+        importlib.reload(espn_feeds)
 
     def test_maps_conference_names_to_short_form(self):
-        result = espn_team_data.fetch_standings(
+        result = espn_feeds.fetch_standings(
             sport="nba", canonical_tricode=nba_tricode
         )
         self.assertEqual(result["NYK"]["conference"], "East")
         self.assertEqual(result["GSW"]["conference"], "West")
 
     def test_carries_record_streak_and_last_ten(self):
-        result = espn_team_data.fetch_standings(
+        result = espn_feeds.fetch_standings(
             sport="nba", canonical_tricode=nba_tricode
         )
         self.assertEqual(
@@ -186,7 +186,7 @@ class StandingsAdapterTest(unittest.TestCase):
         )
 
     def test_conference_seed_is_used_by_default(self):
-        result = espn_team_data.fetch_standings(
+        result = espn_feeds.fetch_standings(
             sport="nba", canonical_tricode=nba_tricode
         )
         self.assertEqual(result["NYK"]["seed"], 3)
@@ -194,7 +194,7 @@ class StandingsAdapterTest(unittest.TestCase):
 
     def test_league_wide_seed_reranks_across_conferences(self):
         """The WNBA seeds its playoffs from the whole league, not per conference."""
-        result = espn_team_data.fetch_standings(
+        result = espn_feeds.fetch_standings(
             sport="nba", canonical_tricode=nba_tricode, league_wide_seed=True
         )
         self.assertEqual(result["NYK"]["seed"], 1)  # .646 win pct
@@ -265,11 +265,11 @@ class NextSlateTest(unittest.TestCase):
     def tearDown(self):
         import importlib
 
-        importlib.reload(espn_team_data)
+        importlib.reload(espn_feeds)
 
     def _slate(self, events, start=date(2026, 4, 1), lookahead_days=14):
-        espn_team_data._get = lambda *_a, **_k: {"events": events}  # type: ignore[assignment]
-        return espn_team_data.fetch_next_slate(
+        espn_feeds._get = lambda *_a, **_k: {"events": events}  # type: ignore[assignment]
+        return espn_feeds.fetch_next_slate(
             sport="nba",
             start_date=start,
             lookahead_days=lookahead_days,
@@ -339,3 +339,42 @@ class NextSlateTest(unittest.TestCase):
         games, _ = self._slate([_event("g1", "2026-04-01T23:00Z", "GS", "WSH")])
 
         self.assertEqual((games[0]["awayTeam"]["wins"], games[0]["awayTeam"]["losses"]), (10, 5))
+
+    def test_ignores_games_before_the_start_date(self):
+        """A late tip the evening before converts to an earlier ET day, which is
+        inside ESPN's UTC range but must not be selected as the slate."""
+        games, slate_date = self._slate(
+            [
+                _event("yesterday", "2026-04-01T00:30Z", "BOS", "NY"),  # 03-31 ET
+                _event("today", "2026-04-01T23:00Z", "GS", "LAL"),
+            ],
+            start=date(2026, 4, 1),
+        )
+
+        self.assertEqual(slate_date, date(2026, 4, 1))
+        self.assertEqual([g["gameId"] for g in games], ["today"])
+
+    def test_converts_using_real_dst_offsets(self):
+        """America/New_York, not a fixed offset: 23:00Z is 19:00 in April (EDT)
+        and 18:00 in January (EST)."""
+        _, april = self._slate(
+            [_event("g", "2026-04-01T23:00Z", "BOS", "NY")], start=date(2026, 4, 1)
+        )
+        april_games, _ = self._slate(
+            [_event("g", "2026-04-01T23:00Z", "BOS", "NY")], start=date(2026, 4, 1)
+        )
+        january_games, _ = self._slate(
+            [_event("g", "2026-01-15T23:00Z", "BOS", "NY")], start=date(2026, 1, 15)
+        )
+
+        self.assertTrue(april_games[0]["gameEt"].startswith("2026-04-01T19:00"))
+        self.assertTrue(january_games[0]["gameEt"].startswith("2026-01-15T18:00"))
+
+    def test_midnight_eastern_starts_the_next_slate(self):
+        games, slate_date = self._slate(
+            [_event("g", "2026-01-16T05:00Z", "BOS", "NY")],  # 00:00 ET Jan 16
+            start=date(2026, 1, 15),
+        )
+
+        self.assertEqual(slate_date, date(2026, 1, 16))
+        self.assertTrue(games[0]["gameEt"].startswith("2026-01-16T00:00"))

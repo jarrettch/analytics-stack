@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from . import espn_team_data
+from . import espn_feeds
 from .auth import CronOffset, require_cron_auth
 from .utils import (
     CACHE_TTL_DEFAULT,
@@ -297,7 +297,7 @@ def get_standings_map() -> dict:
     so seeds are ranked league-wide instead of using ESPN's conference seed.
     """
     try:
-        return espn_team_data.fetch_standings(
+        return espn_feeds.fetch_standings(
             sport="wnba",
             canonical_tricode=_canonical_tricode,
             team_id_for=_wnba_team_id,
@@ -315,7 +315,7 @@ def get_advanced_stats_map() -> dict:
     do not apply the old 48-minute rescaling to it.
     """
     try:
-        return espn_team_data.fetch_efficiency(
+        return espn_feeds.fetch_efficiency(
             sport="wnba",
             canonical_tricode=_canonical_tricode,
             team_id_for=_wnba_team_id,

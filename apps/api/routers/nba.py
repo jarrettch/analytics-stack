@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from nba_api.live.nba.endpoints import boxscore, playbyplay, scoreboard
 
-from . import espn_team_data
+from . import espn_feeds
 from .auth import CronOffset, require_cron_auth
 from .utils import (
     CACHE_TTL_DEFAULT,
@@ -307,7 +307,7 @@ def get_standings_map():
     placeholder values.
     """
     try:
-        return espn_team_data.fetch_standings(
+        return espn_feeds.fetch_standings(
             sport="nba",
             canonical_tricode=_canonical_tricode,
         )
@@ -323,7 +323,7 @@ def get_advanced_stats_map():
     already on the same scale the per-48 PACE stat used to report.
     """
     try:
-        return espn_team_data.fetch_efficiency(
+        return espn_feeds.fetch_efficiency(
             sport="nba",
             canonical_tricode=_canonical_tricode,
         )
@@ -376,7 +376,7 @@ def get_next_nba_schedule_games(start_date: date, lookahead_days: int = NBA_LOOK
     slate stayed empty instead of rolling forward.
     """
     try:
-        return espn_team_data.fetch_next_slate(
+        return espn_feeds.fetch_next_slate(
             sport="nba",
             start_date=start_date,
             lookahead_days=lookahead_days,
