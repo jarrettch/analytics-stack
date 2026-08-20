@@ -191,9 +191,14 @@ async function fetchSport(sport: Sport): Promise<PrepGame[]> {
     throw new Error(`${SPORT_LABELS[sport]} feed returned an invalid payload`);
 
   const todayET = easternDateKey();
-  return (payload as MatchupData[])
-    .map(normalizeGame)
-    .filter((game) => game.date === todayET);
+  return (
+    (payload as MatchupData[])
+      // All five existing /today payloads normalize 1 = scheduled, 2 = live,
+      // and 3 = final. Keep live games available for an in-progress analysis.
+      .filter((matchup) => matchup.gameStatus !== 3)
+      .map(normalizeGame)
+      .filter((game) => game.date === todayET)
+  );
 }
 
 export default function SlatePrepPage() {
@@ -420,7 +425,8 @@ export default function SlatePrepPage() {
                       </div>
                     ) : state.games.length === 0 ? (
                       <div className="px-4 py-5 text-sm text-muted-foreground">
-                        No {SPORT_LABELS[sport]} games are scheduled today.
+                        No scheduled or in-progress {SPORT_LABELS[sport]} games
+                        remain today.
                       </div>
                     ) : (
                       <ul className="divide-y divide-border">
