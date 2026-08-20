@@ -20,17 +20,31 @@ jobs:
         run: |
           # First request wakes the server (may timeout on cold start)
           echo "Waking up server..."
-          curl -s --max-time 120 "$API_URL/api/nba/today" || true
+          for attempt in {1..6}; do
+            if curl --fail --silent --show-error --max-time 20 \
+              "$API_URL/health" >/dev/null; then
+              echo "Server is ready"
+              break
+            fi
 
-          # Wait for server to fully warm up
-          sleep 30
+            if [ "$attempt" -eq 6 ]; then
+              echo "Server did not become ready" >&2
+              exit 1
+            fi
+
+            echo "Server unavailable, retrying in 15 seconds..."
+            sleep 15
+          done
 
           # Fetch and persist odds
           echo "Fetching odds..."
           if response=$(curl \
+            --retry 4 \
+            --retry-delay 15 \
+            --retry-max-time 180 \
             --silent \
             --show-error \
-            --fail-with-body \
+            --fail \
             --max-time 120 \
             --request POST \
             --header "Authorization: Bearer ${CRON_SECRET}" \
@@ -59,9 +73,12 @@ jobs:
         run: |
           echo "Fetching MLB odds..."
           if response=$(curl \
+            --retry 4 \
+            --retry-delay 15 \
+            --retry-max-time 180 \
             --silent \
             --show-error \
-            --fail-with-body \
+            --fail \
             --max-time 120 \
             --request POST \
             --header "Authorization: Bearer ${CRON_SECRET}" \
@@ -99,9 +116,12 @@ jobs:
         run: |
           echo "Fetching NHL odds..."
           if response=$(curl \
+            --retry 4 \
+            --retry-delay 15 \
+            --retry-max-time 180 \
             --silent \
             --show-error \
-            --fail-with-body \
+            --fail \
             --max-time 120 \
             --request POST \
             --header "Authorization: Bearer ${CRON_SECRET}" \
@@ -129,9 +149,12 @@ jobs:
         run: |
           echo "Fetching WNBA odds..."
           if response=$(curl \
+            --retry 4 \
+            --retry-delay 15 \
+            --retry-max-time 180 \
             --silent \
             --show-error \
-            --fail-with-body \
+            --fail \
             --max-time 120 \
             --request POST \
             --header "Authorization: Bearer ${CRON_SECRET}" \
@@ -159,9 +182,12 @@ jobs:
         run: |
           echo "Fetching NFL odds..."
           if response=$(curl \
+            --retry 4 \
+            --retry-delay 15 \
+            --retry-max-time 180 \
             --silent \
             --show-error \
-            --fail-with-body \
+            --fail \
             --max-time 120 \
             --request POST \
             --header "Authorization: Bearer ${CRON_SECRET}" \
