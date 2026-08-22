@@ -30,7 +30,7 @@ async function fetchSportSlate(sport: Sport): Promise<MatchupData[]> {
 
 export default function Home() {
   const [activeSport, setActiveSport] = useState<Sport>("mlb");
-  const [visibleSports, setVisibleSports] = useState<Sport[]>(FALLBACK_VISIBLE_SPORTS);
+  const [visibleSports, setVisibleSports] = useState<Sport[] | null>(null);
   const [matchups, setMatchups] = useState<MatchupData[]>([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState<Date | null>(null);
@@ -73,6 +73,7 @@ export default function Home() {
         }
       } catch (err) {
         console.error("Failed to auto-select sport:", err);
+        if (!cancelled) setVisibleSports(FALLBACK_VISIBLE_SPORTS);
       }
     }
 
@@ -162,8 +163,10 @@ export default function Home() {
               <Crosshair className="size-3" />
               Oh-K Corral
             </Link>
-            <span className="hidden font-mono text-[11px] text-muted-foreground sm:inline">
-              {now?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()} &mdash; MULTI-SPORT
+            <span className="hidden min-w-36 text-right font-mono text-[11px] tabular-nums text-muted-foreground sm:inline">
+              {now
+                ? `${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()} — MULTI-SPORT`
+                : "\u00A0"}
             </span>
           </div>
         </div>
@@ -175,8 +178,8 @@ export default function Home() {
         <div className="w-full">
           <div className="flex items-center justify-between">
             {/* Tabs */}
-            <div className="flex h-8 bg-secondary rounded-md">
-              {visibleSports.map((sport) => (
+            <div className="flex h-8 min-w-52 bg-secondary rounded-md">
+              {(visibleSports ?? []).map((sport) => (
                 <button
                   key={sport}
                   onClick={() => {
@@ -206,7 +209,9 @@ export default function Home() {
           <div className="mt-4 h-px w-full bg-border" />
 
           {/* Content */}
-          <div className="mt-4">
+          {/* Reserve the grid's rough height so the footer doesn't jump when
+              the spinner is replaced by cards. */}
+          <div className="mt-4 min-h-[70vh]">
             {loading ? (
               <div className="flex flex-col items-center justify-center py-20 font-mono text-xs text-muted-foreground">
                 <div className="mb-2 h-4 w-4 animate-spin border-2 border-primary border-t-transparent rounded-full" />
@@ -238,8 +243,10 @@ export default function Home() {
           <span className="font-mono text-[10px] text-muted-foreground">
             Models: EV-MODEL-V1 (NBA/WNBA) &bull; Market + team stats (NFL) &bull; PECOTA v2.8 (MLB) &bull; xG v5.0 (NHL)
           </span>
-          <span className="font-mono text-[10px] text-muted-foreground">
-            Updated {now?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ET &bull; For entertainment only
+          <span className="min-w-64 text-right font-mono text-[10px] tabular-nums text-muted-foreground">
+            {now
+              ? `Updated ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ET • For entertainment only`
+              : "\u00A0"}
           </span>
         </div>
       </div>

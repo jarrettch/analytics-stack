@@ -36,13 +36,19 @@ type PrepGame = {
 
 type CopyState = "idle" | "copied" | "error";
 
+// Matches the API's slate_date_et(): a slate day runs until 6am ET, so late
+// West Coast games stay on the previous day's board instead of vanishing at
+// midnight while they're still being played.
+const SLATE_ROLLOVER_HOUR = 6;
+
 function easternDateKey(now = new Date()): string {
+  const rolled = new Date(now.getTime() - SLATE_ROLLOVER_HOUR * 60 * 60 * 1000);
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(now);
+  }).formatToParts(rolled);
   const value = Object.fromEntries(
     parts.map(({ type, value }) => [type, value]),
   );

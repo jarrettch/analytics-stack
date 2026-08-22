@@ -29,6 +29,11 @@ CACHE_TTL_LIVE = 20
 CACHE_TTL_DEFAULT = 60
 CACHE_TTL_ODDS = 1800
 
+# A slate day runs until 6am ET, not midnight. A 7:10pm PT first pitch is
+# 10:10pm ET and can run past 1am ET; rolling at midnight dropped those games
+# from the board while they were still being played.
+SLATE_ROLLOVER_HOUR = 6
+
 supabase = None
 if os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_KEY"):
     supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
@@ -64,6 +69,18 @@ class Cache:
 
 
 _http_client: httpx.AsyncClient | None = None
+
+
+def slate_date_et(now: datetime | None = None) -> date:
+    """The ET date whose slate should currently be on the board.
+
+    Only for deciding which slate to *display*. Odds capture and the cron
+    prefetch endpoints stay on the calendar date: the 2am ET cron passes
+    offset=1 to mean "tomorrow", and shifting its baseline would silently make
+    that mean "today".
+    """
+    current = now or datetime.now(ET)
+    return (current - timedelta(hours=SLATE_ROLLOVER_HOUR)).date()
 
 
 def get_http_client() -> httpx.AsyncClient:

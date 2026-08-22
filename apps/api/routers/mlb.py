@@ -21,6 +21,7 @@ from .utils import (
     get_http_client,
     load_persisted_odds,
     local_time_hhmm,
+    slate_date_et,
 )
 from .mlb_pitcher_k_odds import (
     PITCHER_K_ODD_IDS,
@@ -590,7 +591,7 @@ async def get_todays_games():
         return cached_response
 
     try:
-        today_et = datetime.now(ET).date()
+        today_et = slate_date_et()
         date_str = today_et.isoformat()
 
         # Fetch uncached data sources in parallel
