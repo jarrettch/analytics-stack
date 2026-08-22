@@ -712,7 +712,7 @@ async def fetch_odds_api_odds(
 
     books = books or ODDS_API_BOOKS
     try:
-        # Scope to a single ET day's window (commenceTime is UTC), matching the SGO path.
+        # Scope The Odds API to the target ET calendar day; commenceTime filters use UTC.
         target = target_date or datetime.now(ET).date()
         starts_after_utc = datetime.combine(target, datetime.min.time(), ET).astimezone(UTC)
         starts_before_utc = datetime.combine(target + timedelta(days=1), datetime.min.time(), ET).astimezone(UTC)
