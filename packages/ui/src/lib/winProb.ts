@@ -71,6 +71,68 @@ export interface WinProbSnapshot {
 // Module-level singleton — shared across all components for the browser session
 export const winProbHistory = new Map<string, WinProbSnapshot[]>()
 
+// The sparkline viewBox is 300 units wide, so more than ~2 points per unit is
+// detail no one can see. Cap well above that and halve resolution when we cross
+// it, rather than dropping the oldest points — a FIFO cap would turn the chart
+// into a sliding window and lose tip-off.
+const MAX_SNAPSHOTS = 600
+
+/**
+ * Halves resolution in place once a history exceeds MAX_SNAPSHOTS, always
+ * keeping the first and last points so the rendered span still runs
+ * tip-off -> now. Visually lossless at the size the sparkline renders.
+ */
+export function capHistory(history: WinProbSnapshot[]): void {
+  if (history.length <= MAX_SNAPSHOTS) return
+
+  const kept: WinProbSnapshot[] = []
+  for (let i = 0; i < history.length; i += 2) kept.push(history[i]!)
+
+  // Keep the newest sample even when the stride skipped it — MLB's x-axis
+  // continues from last.timeRemaining, so losing the tail would rewind it.
+  const newest = history[history.length - 1]!
+  if (kept[kept.length - 1] !== newest) kept.push(newest)
+
+  history.length = 0
+  for (const snapshot of kept) history.push(snapshot)
+}
+
+// Finished games keep their history — their cards still render a sparkline
+// (gameStatus >= 2), so evicting on Final would blank the chart. What needs
+// bounding is games that roll off the slate entirely at the date change.
+const MAX_GAMES = 100
+
+/**
+ * Marks a game as most-recently-used and evicts the coldest entries once we
+ * hold more than MAX_GAMES. Map iterates in insertion order, so re-inserting on
+ * touch makes the front of the map the least-recently-used end.
+ *
+ * Anything currently on screen is touched every poll, so eviction only ever
+ * reaches games the user has moved on from — a previous day's slate, or a sport
+ * they switched away from long ago.
+ */
+function touchGame(key: string): void {
+  const history = winProbHistory.get(key)
+  if (history !== undefined) {
+    winProbHistory.delete(key)
+    winProbHistory.set(key, history)
+  }
+
+  while (winProbHistory.size > MAX_GAMES) {
+    const coldest = winProbHistory.keys().next()
+    if (coldest.done) break
+    winProbHistory.delete(coldest.value)
+  }
+}
+
+/** Caps, stores, and marks a freshly hydrated timeline as most-recently-used. */
+function storeHistory(key: string, history: WinProbSnapshot[]): WinProbSnapshot[] {
+  capHistory(history)
+  winProbHistory.set(key, history)
+  touchGame(key)
+  return history
+}
+
 /**
  * Hydrates the full win prob history from the NBA CDN play-by-play feed.
  * Call once on component mount — rebuilds the timeline from tip-off to now.
@@ -116,8 +178,7 @@ export async function hydrateWinProbHistory(
       }
     }
 
-    winProbHistory.set(gameId, history)
-    return history
+    return storeHistory(gameId, history)
   } catch {
     return []
   }
@@ -145,13 +206,18 @@ export function recordSnapshot(
 
   if (!last || last.scoreDiff !== scoreDiff || last.timeRemaining !== timeRemaining) {
     history.push({ timestamp: Date.now(), winProb, scoreDiff, timeRemaining, period })
+    capHistory(history)
   }
+  touchGame(gameId)
 
   return winProb
 }
 
 export function getHistory(gameId: string): WinProbSnapshot[] {
-  return winProbHistory.get(gameId) ?? []
+  const history = winProbHistory.get(gameId)
+  if (history === undefined) return []
+  touchGame(gameId)
+  return history
 }
 
 // ─── MLB Win Probability (API-sourced) ───────────────────────────────────────
@@ -193,8 +259,7 @@ export async function hydrateMLBWinProbHistory(
       period: play.about?.inning ?? 0,
     }))
 
-    winProbHistory.set(key, history)
-    return history
+    return storeHistory(key, history)
   } catch {
     return []
   }
@@ -227,6 +292,8 @@ export function recordMLBSnapshot(
     timeRemaining: nextIndex,
     period: inning,
   })
+  capHistory(history)
+  touchGame(key)
 }
 
 // ─── WNBA Win Probability (ESPN-sourced) ────────────────────────────────────
@@ -282,8 +349,7 @@ export async function hydrateWNBAWinProbHistory(
       }
     })
 
-    winProbHistory.set(key, history)
-    return history
+    return storeHistory(key, history)
   } catch {
     return []
   }
