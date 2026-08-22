@@ -441,7 +441,11 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
     }
     return sgo_map.get(team_id.upper(), "")
 
-async def get_odds_map(target_date: date | None = None):
+async def get_odds_map(
+    target_date: date | None = None,
+    *,
+    request_time: datetime | None = None,
+):
     """Fetch NBA odds from SportsGameOdds, merged with persisted rows."""
     return await fetch_sgo_odds(
         sport="nba",
@@ -449,6 +453,7 @@ async def get_odds_map(target_date: date | None = None):
         table_name="nba_odds",
         tricode_for=get_tricode_from_sgo_team_id,
         target_date=target_date,
+        request_time=request_time,
     )
 
 @router.get("/debug/standings")
@@ -478,8 +483,12 @@ async def cron_fetch_odds(offset: CronOffset = 0):
     UI has data when it rolls the slate forward after the last game ends.
     """
     try:
-        target = datetime.now(ET).date() + timedelta(days=offset)
-        odds, fresh_count = await get_odds_map(target_date=target)
+        request_time = datetime.now(ET)
+        target = request_time.date() + timedelta(days=offset)
+        odds, fresh_count = await get_odds_map(
+            target_date=target,
+            request_time=request_time,
+        )
         cache.set("odds", odds)  # Bust the 30-min cache so the next /games request sees updated data
         return {
             "success": True,

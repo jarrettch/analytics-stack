@@ -557,7 +557,11 @@ async def get_next_nhl_scoreboard(start_date: date, lookahead_days: int = NHL_LO
 
 # --- Odds (SGO) -------------------------------------------------------------
 
-async def get_odds_map(target_date: date | None = None):
+async def get_odds_map(
+    target_date: date | None = None,
+    *,
+    request_time: datetime | None = None,
+):
     """Fetch NHL odds from SportsGameOdds, merged with persisted rows."""
     return await fetch_sgo_odds(
         sport="nhl",
@@ -565,6 +569,7 @@ async def get_odds_map(target_date: date | None = None):
         table_name="nhl_odds",
         tricode_for=get_tricode_from_sgo_team_id,
         target_date=target_date,
+        request_time=request_time,
     )
 
 # --- Endpoints --------------------------------------------------------------
@@ -573,8 +578,12 @@ async def get_odds_map(target_date: date | None = None):
 async def cron_fetch_odds(offset: CronOffset = 0):
     """Daily odds prefetch. offset=0 fetches today (ET), offset=1 fetches tomorrow."""
     try:
-        target = datetime.now(ET).date() + timedelta(days=offset)
-        odds, fresh_count = await get_odds_map(target_date=target)
+        request_time = datetime.now(ET)
+        target = request_time.date() + timedelta(days=offset)
+        odds, fresh_count = await get_odds_map(
+            target_date=target,
+            request_time=request_time,
+        )
         cache.set("odds", odds)
         return {
             "success": True,

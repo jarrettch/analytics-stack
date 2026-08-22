@@ -514,6 +514,7 @@ async def get_stats_map() -> dict:
 async def get_odds_map(
     target_date: date | None = None,
     *,
+    request_time: datetime | None = None,
     pitcher_k_stats: PitcherKCollectionStats | None = None,
     pitcher_k_collection_id: str | None = None,
 ):
@@ -534,6 +535,7 @@ async def get_odds_map(
         table_name="mlb_odds",
         tricode_for=get_tricode_from_sgo_team_id,
         target_date=target_date,
+        request_time=request_time,
         extra_odd_ids=PITCHER_K_ODD_IDS,
         include_alt_lines=True,
         include_open_close_odds=True,
@@ -556,10 +558,12 @@ async def cron_fetch_odds(
     UI has data when it rolls the slate forward after the last game ends.
     """
     try:
-        target = datetime.now(ET).date() + timedelta(days=offset)
+        request_time = datetime.now(ET)
+        target = request_time.date() + timedelta(days=offset)
         pitcher_k_stats = PitcherKCollectionStats()
         odds, fresh_count = await get_odds_map(
             target_date=target,
+            request_time=request_time,
             pitcher_k_stats=pitcher_k_stats,
             pitcher_k_collection_id=collection_id_for(collection_key),
         )
