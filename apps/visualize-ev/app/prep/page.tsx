@@ -25,6 +25,9 @@ type PrepGame = {
   homePitcher?: string;
   awayMoneyline?: number | null;
   homeMoneyline?: number | null;
+  homeSpread?: number | null;
+  spreadOddsAway?: number | null;
+  spreadOddsHome?: number | null;
   overUnder?: number | null;
   overOdds?: number | null;
   underOdds?: number | null;
@@ -32,8 +35,6 @@ type PrepGame = {
 };
 
 type CopyState = "idle" | "copied" | "error";
-
-const PITCHER_SUFFIXES = new Set(["jr", "sr", "ii", "iii", "iv", "v"]);
 
 function easternDateKey(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -79,6 +80,9 @@ function normalizeGame(matchup: MatchupData): PrepGame {
       matchup.sport === "mlb" ? matchup.home.probablePitcher : undefined,
     awayMoneyline: matchup.awayMoneyline,
     homeMoneyline: matchup.homeMoneyline,
+    homeSpread: matchup.pregameSpread,
+    spreadOddsAway: matchup.spreadOddsAway,
+    spreadOddsHome: matchup.spreadOddsHome,
     overUnder: matchup.overUnder,
     overOdds: matchup.overOdds,
     underOdds: matchup.underOdds,
@@ -87,22 +91,17 @@ function normalizeGame(matchup: MatchupData): PrepGame {
   };
 }
 
-function pitcherLastName(name?: string): string {
+function pitcherDisplayName(name?: string): string {
   if (!name || name.trim().toUpperCase() === "TBD") return "TBD";
-  const pieces = name.trim().split(/\s+/);
-  while (
-    pieces.length > 1 &&
-    PITCHER_SUFFIXES.has(
-      pieces[pieces.length - 1]?.replaceAll(".", "").toLowerCase() ?? "",
-    )
-  ) {
-    pieces.pop();
-  }
-  return pieces[pieces.length - 1] || "TBD";
+  return name.trim();
 }
 
 function formatAmericanOdds(value?: number | null): string | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
+function formatSpread(value: number): string {
   return value > 0 ? `+${value}` : `${value}`;
 }
 
@@ -111,6 +110,16 @@ function formatLine(game: PrepGame): string {
   const homeMoneyline = formatAmericanOdds(game.homeMoneyline);
   const parts: string[] = [];
 
+  if (typeof game.homeSpread === "number" && Number.isFinite(game.homeSpread)) {
+    const awaySpread = formatSpread(-game.homeSpread);
+    const homeSpread = formatSpread(game.homeSpread);
+    const awayPrice = formatAmericanOdds(game.spreadOddsAway);
+    const homePrice = formatAmericanOdds(game.spreadOddsHome);
+    const prices = awayPrice && homePrice ? ` (${awayPrice}/${homePrice})` : "";
+    parts.push(
+      `${game.sport === "mlb" ? "RL" : "Spread"} ${awaySpread}/${homeSpread}${prices}`,
+    );
+  }
   if (awayMoneyline && homeMoneyline) {
     parts.push(`ML ${awayMoneyline}/${homeMoneyline}`);
   }
@@ -129,7 +138,7 @@ function formatLine(game: PrepGame): string {
 function formatGame(game: PrepGame): string {
   const matchup =
     game.sport === "mlb"
-      ? `${game.away} (${pitcherLastName(game.awayPitcher)}) vs ${game.home} (${pitcherLastName(game.homePitcher)})`
+      ? `${game.away} (${pitcherDisplayName(game.awayPitcher)}) vs ${game.home} (${pitcherDisplayName(game.homePitcher)})`
       : `${game.away} @ ${game.home}`;
   return `${matchup}${formatLine(game)}`;
 }
