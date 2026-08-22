@@ -17,6 +17,8 @@ from collections.abc import Callable
 
 import httpx
 
+from .utils import slate_date_et
+
 logger = logging.getLogger(__name__)
 
 STANDINGS_URL = "https://site.api.espn.com/apis/v2/sports/basketball/{sport}/standings"
@@ -290,6 +292,12 @@ def fetch_next_slate(
 
     ESPN stamps `date` in UTC while the slate is keyed on Eastern days, so games
     are bucketed after converting — otherwise late tip-offs land on tomorrow.
+
+    Bucketing goes through slate_date_et, the same function the /today routes use
+    to pick which slate to show. A slate day runs 6am-6am ET, so a 9pm PT tip
+    (midnight ET) belongs to the night it started rather than the calendar date
+    it crossed into. Assignment and display must share one boundary: if they
+    disagree, a game is either dropped mid-play or invisible at its own tip-off.
     """
     from datetime import datetime, timedelta
 
@@ -333,7 +341,7 @@ def fetch_next_slate(
             for broadcast in competition.get("broadcasts") or []
             for name in broadcast.get("names") or []
         ]
-        by_date.setdefault(tipoff.date(), []).append(
+        by_date.setdefault(slate_date_et(tipoff), []).append(
             {
                 "gameId": str(event.get("id") or competition.get("id") or ""),
                 "gameEt": tipoff.isoformat(),

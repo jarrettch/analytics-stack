@@ -18,6 +18,7 @@ from .utils import (
     format_et_time,
     get_http_client,
     load_persisted_odds,
+    slate_date_et,
     to_num,
 )
 
@@ -632,7 +633,7 @@ async def get_todays_games():
         fetch_keys = []
         coros = []
 
-        today_et = datetime.now(ET).date()
+        today_et = slate_date_et()
         slate_date = today_et
 
         if not cached_scoreboard:

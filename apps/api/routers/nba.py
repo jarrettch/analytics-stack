@@ -18,6 +18,7 @@ from .utils import (
     Cache,
     fetch_sgo_odds,
     load_persisted_odds,
+    slate_date_et,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -576,7 +577,7 @@ async def get_todays_games():
             logger.error("No scoreboard data available")
             return cache.get_stale("assembled") or []
 
-        today_et = datetime.now(ET).date()
+        today_et = slate_date_et()
         data = sb.get_dict()
         games = data.get('scoreboard', {}).get('games', [])
         slate_date = today_et

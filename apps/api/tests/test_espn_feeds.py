@@ -370,11 +370,36 @@ class NextSlateTest(unittest.TestCase):
         self.assertTrue(april_games[0]["gameEt"].startswith("2026-04-01T19:00"))
         self.assertTrue(january_games[0]["gameEt"].startswith("2026-01-15T18:00"))
 
-    def test_midnight_eastern_starts_the_next_slate(self):
+    def test_midnight_eastern_stays_on_the_night_it_started(self):
+        """A slate day runs 6am-6am ET, so a 9pm PT tip is still that night's game.
+
+        This previously asserted the opposite — that midnight ET opened the next
+        slate. Bucketing on the calendar date put such a game on Jan 16 while the
+        board still showed Jan 15 until 6am, making it invisible at its own
+        tip-off. Assignment and display now share slate_date_et.
+        """
         games, slate_date = self._slate(
             [_event("g", "2026-01-16T05:00Z", "BOS", "NY")],  # 00:00 ET Jan 16
             start=date(2026, 1, 15),
         )
 
-        self.assertEqual(slate_date, date(2026, 1, 16))
+        self.assertEqual(slate_date, date(2026, 1, 15))
         self.assertTrue(games[0]["gameEt"].startswith("2026-01-16T00:00"))
+
+    def test_six_am_eastern_opens_the_next_slate(self):
+        """The other side of the boundary: 6am ET is a new slate day."""
+        games, slate_date = self._slate(
+            [_event("g", "2026-01-16T11:00Z", "BOS", "NY")],  # 06:00 ET Jan 16
+            start=date(2026, 1, 15),
+        )
+
+        self.assertEqual(slate_date, date(2026, 1, 16))
+
+    def test_late_west_coast_finish_stays_on_its_own_slate(self):
+        """2am ET (11pm PT) — the CBB/CFB late-window case."""
+        _games, slate_date = self._slate(
+            [_event("g", "2026-01-16T07:00Z", "BOS", "NY")],  # 02:00 ET Jan 16
+            start=date(2026, 1, 15),
+        )
+
+        self.assertEqual(slate_date, date(2026, 1, 15))

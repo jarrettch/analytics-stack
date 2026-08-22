@@ -19,6 +19,7 @@ from .utils import (
     format_et_time,
     get_http_client,
     load_persisted_odds,
+    slate_date_et,
 )
 
 logger = logging.getLogger(__name__)
@@ -320,7 +321,7 @@ def _team_payload(competitor: dict, stats: dict, predicted_score: int, win_proba
 
 
 async def _assemble_slate() -> list[dict]:
-    today = datetime.now(ET).date()
+    today = slate_date_et()
     scoreboard, slate_date = await _next_scoreboard(today)
     events = scoreboard.get("events", [])
     if not events:

@@ -17,6 +17,7 @@ from .utils import (
     fetch_odds_api_odds,
     get_http_client,
     load_persisted_odds,
+    slate_date_et,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -244,7 +245,7 @@ def adapt_espn_win_probability(payload: dict) -> list[dict]:
 
 async def fetch_wnba_scoreboard(target_date: date | None = None) -> dict:
     """Fetch a WNBA slate from ESPN; the WNBA CDN blocks Render with Akamai WAF."""
-    target = target_date or datetime.now(ET).date()
+    target = target_date or slate_date_et()
     client = get_http_client()
     response = await client.get(
         ESPN_WNBA_SCOREBOARD_URL,
