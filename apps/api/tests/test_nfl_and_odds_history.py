@@ -240,8 +240,9 @@ class NFLVerificationTest(unittest.IsolatedAsyncioTestCase):
                 ]}],
             }
 
-        async def fake_get_odds_map(*, target_date, collection_stats):
+        async def fake_get_odds_map(*, target_date, collection_stats, request_time):
             self.assertEqual(target_date, target)
+            self.assertEqual(request_time.date(), target)
             collection_stats.update({
                 "pregame_snapshot_candidates": 2,
                 "pregame_snapshot_matchups": ["PIT@CLE", "LV@DEN"],

@@ -73,7 +73,10 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
 
 
 async def get_odds_map(
-    target_date: date | None = None, collection_stats: dict | None = None
+    target_date: date | None = None,
+    collection_stats: dict | None = None,
+    *,
+    request_time: datetime | None = None,
 ):
     return await fetch_sgo_odds(
         sport="nfl",
@@ -81,6 +84,7 @@ async def get_odds_map(
         table_name="nfl_odds",
         tricode_for=get_tricode_from_sgo_team_id,
         target_date=target_date,
+        request_time=request_time,
         collection_stats=collection_stats,
     )
 
@@ -416,11 +420,13 @@ async def _assemble_slate() -> list[dict]:
 @router.post("/cron/fetch-odds", dependencies=[Depends(require_cron_auth)])
 async def cron_fetch_odds(offset: CronOffset = 0, verify_early_window: bool = False):
     try:
-        target = datetime.now(ET).date() + timedelta(days=offset)
+        request_time = datetime.now(ET)
+        target = request_time.date() + timedelta(days=offset)
         collection_stats: dict = {}
         odds, fresh_count = await get_odds_map(
             target_date=target,
             collection_stats=collection_stats,
+            request_time=request_time,
         )
         cache.set("odds", odds)
         cache.set("assembled", [])

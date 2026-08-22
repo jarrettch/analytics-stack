@@ -83,6 +83,32 @@ def slate_date_et(now: datetime | None = None) -> date:
     return (current - timedelta(hours=SLATE_ROLLOVER_HOUR)).date()
 
 
+def sgo_event_window(
+    target: date,
+    now: datetime | None = None,
+) -> tuple[datetime, datetime]:
+    """Return the UTC bounds for one ET calendar day of SGO events.
+
+    Collection uses calendar dates because providers and persisted odds key
+    games that way. It must not use the 6am display-slate rollover. Today's
+    window begins now so repeated polls do not pay for games already underway.
+    Future-day windows begin at midnight ET so opening lines cover the full day.
+    Past dates are rejected because fetching them would rebill completed games.
+    """
+    current = (now or datetime.now(ET)).astimezone(ET)
+    if target < current.date():
+        raise ValueError("SGO event windows cannot target a past ET date")
+    starts_at = datetime.combine(target, datetime.min.time(), ET)
+    if target == current.date():
+        starts_at = max(starts_at, current)
+    ends_at = datetime.combine(
+        target + timedelta(days=1),
+        datetime.min.time(),
+        ET,
+    )
+    return starts_at.astimezone(UTC), ends_at.astimezone(UTC)
+
+
 def get_http_client() -> httpx.AsyncClient:
     """Module-level httpx client, created lazily on first use."""
     global _http_client
@@ -373,6 +399,7 @@ async def fetch_sgo_odds(
     table_name: str,
     tricode_for: Callable[[str], str],
     target_date: date | None = None,
+    request_time: datetime | None = None,
     extra_odd_ids: Iterable[str] = (),
     include_alt_lines: bool = False,
     include_open_close_odds: bool = False,
@@ -420,9 +447,17 @@ async def fetch_sgo_odds(
         # Scope to a single ET day's window so SGO only returns that day's slate.
         # Without these filters, SGO returns up to `limit` upcoming events spanning
         # multiple days, billing entities for games we don't need.
-        target = target_date or datetime.now(ET).date()
-        starts_after_utc = datetime.combine(target, datetime.min.time(), ET).astimezone(UTC)
-        starts_before_utc = datetime.combine(target + timedelta(days=1), datetime.min.time(), ET).astimezone(UTC)
+        current = (request_time or datetime.now(ET)).astimezone(ET)
+        target = target_date or current.date()
+        try:
+            starts_after_utc, starts_before_utc = sgo_event_window(target, current)
+        except ValueError:
+            logger.warning(
+                "Skipping SportsGameOdds %s request for past ET date %s",
+                league_id,
+                target,
+            )
+            return odds_map, 0
 
         optional_odd_ids = list(extra_odd_ids)
         requested_odd_ids = list(dict.fromkeys([*SGO_ODD_IDS, *optional_odd_ids]))
@@ -677,7 +712,7 @@ async def fetch_odds_api_odds(
 
     books = books or ODDS_API_BOOKS
     try:
-        # Scope to a single ET day's window (commenceTime is UTC), matching the SGO path.
+        # Scope The Odds API to the target ET calendar day; commenceTime filters use UTC.
         target = target_date or datetime.now(ET).date()
         starts_after_utc = datetime.combine(target, datetime.min.time(), ET).astimezone(UTC)
         starts_before_utc = datetime.combine(target + timedelta(days=1), datetime.min.time(), ET).astimezone(UTC)
