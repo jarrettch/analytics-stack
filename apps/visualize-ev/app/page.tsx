@@ -237,6 +237,12 @@ export default function Home() {
       </div>
 
       {/* Footer */}
+      {/* Held back until the slate resolves. Any reserved height is a guess at
+          the grid's final size, and the guess fails hardest on mobile, where a
+          single-column grid runs far past it and shoves the footer thousands of
+          pixels down. An element that mounts below the fold shifts nothing, so
+          rendering it late costs no layout and no CLS. */}
+      {!loading && (
       <div className="mx-auto mt-6 max-w-6xl">
         <div className="h-px w-full bg-border" />
         <div className="flex items-center justify-between pt-2">
@@ -250,6 +256,7 @@ export default function Home() {
           </span>
         </div>
       </div>
+      )}
     </main>
   );
 }
