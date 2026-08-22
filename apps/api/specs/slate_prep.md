@@ -35,7 +35,8 @@ combining sports, and deciding batches happen before prompt selection.
 - The user can add any combination of those sports into one slate.
 - Render games grouped under clear sport headings. This is required for NFL so
   preseason games remain unmistakably labeled.
-- Every game can be removed from the composed slate before copying.
+- Every game can be unchecked and rechecked before copying.
+- Final games are excluded; scheduled and in-progress games remain available.
 - One in-memory edited selection is the source for every export. Switching
   export actions does not reload sport data, reformat a fresh raw slate, or
   restore removed games.
@@ -58,12 +59,14 @@ pitchers where available, and current line snapshot).
 Use the existing data assembly as-is; `/prep` is not a second odds pipeline.
 The formatted slate contains selected matchups plus the current line snapshot:
 
-- **MLB:** `Away (Pitcher) vs Home (Pitcher)` — last name only; use `(TBD)` when
-  a probable is unavailable.
-- **NBA, WNBA, NFL, NHL:** `Away @ Home — ML <away>/<home>, O/U <x.5> (o<over>/u<under>)`
-  using American odds with explicit signs when available. The total's prices are
-  labelled `o`/`u` because, unlike the ML pair, their order isn't implied by the
-  rest of the line. Both prices are omitted together when either is missing.
+- **MLB:** `Away (Full Pitcher Name) vs Home (Full Pitcher Name) — RL <away>/<home> (<away price>/<home price>), ML <away>/<home>, O/U <x.5> (o<over>/u<under>)`.
+  Use `(TBD)` when a probable pitcher is unavailable.
+- **NBA, WNBA, NFL, NHL:** `Away @ Home — Spread <away>/<home> (<away price>/<home price>), ML <away>/<home>, O/U <x.5> (o<over>/u<under>)`.
+- Spread/runline and moneyline pairs are always away/home order. All odds are
+  American odds with explicit signs. Total prices are labelled `o`/`u` because
+  their order is otherwise not implied by the line.
+- A market is emitted only when its line is available. Paired prices are omitted
+  together when either side is unavailable.
 - Omit unavailable line fields rather than inventing a value. The snapshot is
   current context, not movement data and not a replacement for later market
   research.
@@ -80,14 +83,15 @@ game metadata identifies preseason.
 - a multi-select sport control for MLB, WNBA, NFL, NBA, and NHL;
 - loading, empty, and per-sport error states that do not discard already loaded
   selections from other sports;
-- grouped game rows with a remove control;
+- grouped game rows with selection checkboxes, including excluded games so they
+  can be restored individually;
 - a monospace preview of the exact formatted slate to be copied; and
 - a primary `Copy formatted slate` action.
 
 Adding a sport fetches its `/today` route once for the current composition.
-Removing a game edits only local composer state. Removing and re-adding a sport
-may fetch its current route payload again; it must not disturb selections in the
-other sport groups.
+Unchecking a game edits only local composer state. Removing and re-adding a
+sport may fetch its current route payload again; it must not disturb selections
+in the other sport groups.
 
 The page owns selection and formatting state. A shared formatter may be extracted
 for future automation, but v1 does not require `slate-export` endpoints and must
@@ -133,7 +137,8 @@ into the public app.
 - A user can compose and copy a single slate containing games from two or more
   supported sports without any duplicate or unlabeled groups.
 - An NFL preseason game appears under an explicitly NFL/preseason-labeled group.
-- Removing a game removes it from the preview and from every copy action.
+- Unchecking a game removes it from the preview and from every copy action;
+  rechecking it restores it without altering other selections.
 - `Copy formatted slate` is visually and behaviorally the primary/default action.
 - If enabled, v2 and v3 copies differ only by their wrapper/template; their slate
   body is byte-for-byte the current formatted slate.
