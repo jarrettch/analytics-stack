@@ -47,3 +47,8 @@ venv/
 # Cached data
 apps/api/data/
 
+
+# Agent skills (restore with: npx skills experimental_install)
+.agents/skills/
+.claude/skills/
+.claude/settings.local.json
