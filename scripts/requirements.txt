@@ -1,0 +1,6 @@
+# Deps for the scripts/ Python utilities.
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r scripts/requirements.txt
+httpx>=0.28
+python-dotenv>=1.0
+MLB-StatsAPI>=1.9   # fetch_roster.py, fetch_stats.py
