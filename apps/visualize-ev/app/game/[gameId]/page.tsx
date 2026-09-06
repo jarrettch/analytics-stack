@@ -30,7 +30,7 @@ export default async function GamePage({ params, searchParams }: PageProps) {
     }
 
     const detail = (await res.json()) as GameDetail
-    return <GameDetailView detail={detail} />
+    return <GameDetailView detail={detail} apiBaseUrl={apiBase} />
   } catch {
     return <ErrorState message={`Could not load ${sport.toUpperCase()} game ${gameId}.`} />
   }

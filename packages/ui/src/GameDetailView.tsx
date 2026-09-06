@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Activity, ArrowLeft, BarChart3, ListOrdered, Star, Table2, Target } from "lucide-react"
 import { Badge } from "./components/ui/badge"
 import { Separator } from "./components/ui/separator"
@@ -17,6 +17,7 @@ import type {
   PlayByPlayEvent,
   WinProbPoint,
 } from "./types/game-detail-types"
+import { startGameDetailPolling } from "./lib/gameDetailPolling"
 
 function fmt(v: number | null | undefined, digits = 1): string {
   return v == null || Number.isNaN(v) ? "--" : v.toFixed(digits)
@@ -745,7 +746,41 @@ function TabbedShell({
   )
 }
 
-export function GameDetailView({ detail }: { detail: GameDetail }) {
+export function GameDetailView({
+  detail: initialDetail,
+  apiBaseUrl = "",
+}: {
+  detail: GameDetail
+  apiBaseUrl?: string
+}) {
+  const [detail, setDetail] = useState(initialDetail)
+
+  useEffect(() => {
+    setDetail(initialDetail)
+  }, [initialDetail])
+
+  useEffect(() => {
+    const { gameId, sport, status } = initialDetail
+
+    return startGameDetailPolling<GameDetail>({
+      initialStatus: status,
+      fetchDetail: async (signal) => {
+        const response = await fetch(
+          `${apiBaseUrl}/api/${sport}/game/${encodeURIComponent(gameId)}`,
+          { cache: "no-store", signal },
+        )
+        if (!response.ok) {
+          throw new Error(`Detail feed returned ${response.status}`)
+        }
+        return (await response.json()) as GameDetail
+      },
+      onDetail: setDetail,
+      onError: (error) => {
+        console.error(`Failed to refresh ${sport.toUpperCase()} game ${gameId}:`, error)
+      },
+    })
+  }, [apiBaseUrl, initialDetail])
+
   const title = useMemo(() => `${detail.matchup.away.abbreviation} @ ${detail.matchup.home.abbreviation}`, [detail])
   return (
     <main className="min-h-screen bg-background px-4 py-6">
