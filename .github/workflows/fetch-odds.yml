@@ -191,7 +191,7 @@ jobs:
             --max-time 120 \
             --request POST \
             --header "Authorization: Bearer ${CRON_SECRET}" \
-            "$API_URL/api/nfl/cron/fetch-odds"); then
+            "$API_URL/api/nfl/cron/fetch-odds?lookahead_days=7"); then
             printf 'Response: %s\n' "$response"
           else
             curl_status=$?

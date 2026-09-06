@@ -4,9 +4,9 @@ import asyncio
 import logging
 import math
 from datetime import date, datetime, timedelta
-from typing import overload
+from typing import Annotated, overload
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .auth import CronOffset, require_cron_auth
 from .utils import (
@@ -30,6 +30,14 @@ ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nf
 ESPN_STANDINGS_URL = "https://site.api.espn.com/apis/v2/sports/football/nfl/standings"
 ESPN_SUMMARY_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary"
 NFL_LOOKAHEAD_DAYS = 7
+NFLCollectionLookahead = Annotated[
+    int,
+    Query(
+        ge=0,
+        le=NFL_LOOKAHEAD_DAYS,
+        description="Additional ET days to scan for scheduled NFL games.",
+    ),
+]
 
 cache = Cache({
     "scoreboard": CACHE_TTL_DEFAULT,
@@ -116,6 +124,34 @@ async def _next_scoreboard(start_date: date) -> tuple[dict, date]:
         if scoreboard.get("events"):
             return scoreboard, target
     return {}, start_date
+
+
+async def _scheduled_collection_dates(
+    start_date: date,
+    lookahead_days: int,
+) -> tuple[list[date], list[date]]:
+    if lookahead_days == 0:
+        return [start_date], []
+
+    targets = [
+        start_date + timedelta(days=offset)
+        for offset in range(lookahead_days + 1)
+    ]
+    scoreboards = await asyncio.gather(
+        *(_scoreboard_for_date_with_status(target) for target in targets)
+    )
+
+    collection_dates = []
+    unavailable_dates = []
+    for target, (scoreboard, available) in zip(targets, scoreboards):
+        if not available:
+            # Query SGO directly when ESPN is unavailable rather than risk missing
+            # a rescheduled game on that date.
+            unavailable_dates.append(target)
+            collection_dates.append(target)
+        elif scoreboard.get("events"):
+            collection_dates.append(target)
+    return collection_dates, unavailable_dates
 
 
 def _stat_map(stats: list[dict]) -> dict[str, dict]:
@@ -418,25 +454,66 @@ async def _assemble_slate() -> list[dict]:
 
 
 @router.post("/cron/fetch-odds", dependencies=[Depends(require_cron_auth)])
-async def cron_fetch_odds(offset: CronOffset = 0, verify_early_window: bool = False):
+async def cron_fetch_odds(
+    offset: CronOffset = 0,
+    verify_early_window: bool = False,
+    lookahead_days: NFLCollectionLookahead = 0,
+):
     try:
         request_time = datetime.now(ET)
-        target = request_time.date() + timedelta(days=offset)
-        collection_stats: dict = {}
-        odds, fresh_count = await get_odds_map(
-            target_date=target,
-            collection_stats=collection_stats,
-            request_time=request_time,
+        start_date = request_time.date() + timedelta(days=offset)
+        collection_dates, unavailable_dates = await _scheduled_collection_dates(
+            start_date,
+            lookahead_days,
         )
+        odds = {}
+        fresh_count = 0
+        collection_stats = {
+            "pregame_snapshot_candidates": 0,
+            "pregame_snapshot_matchups": [],
+            "snapshots_inserted": 0,
+            "snapshots_deduplicated": 0,
+            "snapshot_persistence_ok": True,
+        }
+        for target in collection_dates:
+            target_stats: dict = {}
+            target_odds, target_fresh_count = await get_odds_map(
+                target_date=target,
+                collection_stats=target_stats,
+                request_time=request_time,
+            )
+            odds.update(target_odds)
+            fresh_count += target_fresh_count
+            collection_stats["pregame_snapshot_candidates"] += target_stats.get(
+                "pregame_snapshot_candidates", 0
+            )
+            collection_stats["pregame_snapshot_matchups"].extend(
+                target_stats.get("pregame_snapshot_matchups", [])
+            )
+            collection_stats["snapshots_inserted"] += target_stats.get(
+                "snapshots_inserted", 0
+            )
+            collection_stats["snapshots_deduplicated"] += target_stats.get(
+                "snapshots_deduplicated", 0
+            )
+            collection_stats["snapshot_persistence_ok"] = (
+                collection_stats["snapshot_persistence_ok"]
+                and target_stats.get("snapshot_persistence_ok", False)
+            )
         cache.set("odds", odds)
         cache.set("assembled", [])
         result = {
             "success": True,
             "fresh_from_api": fresh_count,
-            "persisted_loaded": len(odds) - fresh_count,
+            "persisted_loaded": max(0, len(odds) - fresh_count),
             "total_matchups": len(odds),
             "persisted_to": "supabase:nfl_odds+odds_snapshots",
-            "date": target.isoformat(),
+            "date": start_date.isoformat(),
+            "dates": [target.isoformat() for target in collection_dates],
+            "lookahead_days": lookahead_days,
+            "schedule_lookup_failures": [
+                target.isoformat() for target in unavailable_dates
+            ],
             "early_window_verification_requested": verify_early_window,
             "pregame_snapshot_candidates": collection_stats.get(
                 "pregame_snapshot_candidates", 0
@@ -450,9 +527,11 @@ async def cron_fetch_odds(offset: CronOffset = 0, verify_early_window: bool = Fa
             ),
         }
         if verify_early_window:
-            scoreboard, scoreboard_ok = await _scoreboard_for_date_with_status(target)
+            scoreboard, scoreboard_ok = await _scoreboard_for_date_with_status(
+                start_date
+            )
             expected_matchups = _early_window_matchup_keys(
-                scoreboard.get("events", []), target
+                scoreboard.get("events", []), start_date
             )
             candidate_matchups = set(
                 collection_stats.get("pregame_snapshot_matchups", [])

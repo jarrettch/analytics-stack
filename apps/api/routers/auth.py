@@ -14,10 +14,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 CRON_SECRET_ENV = "CRON_SECRET"
 
-# Every collector supports exactly today and tomorrow, so bound it here rather
-# than in five routers where the range could drift apart. Annotated (not a bare
-# Query default) keeps 0 as the real Python default, so the collector tests can
-# still call cron_fetch_odds() directly.
+# Every collector's shared offset supports exactly today and tomorrow. Sports
+# with different schedules can expose a separate bounded lookahead. Annotated
+# (not a bare Query default) keeps 0 as the real Python default, so collector
+# tests can still call cron_fetch_odds() directly.
 CronOffset = Annotated[
     int,
     Query(ge=0, le=1, description="ET day to collect: 0 = today, 1 = tomorrow."),

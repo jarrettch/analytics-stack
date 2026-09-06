@@ -169,9 +169,9 @@ jobs:
           echo "Tomorrow WNBA odds fetched: fresh=${fresh}"
           # fresh=0 is acceptable — off-day or lines not yet posted.
 
-      - name: Fetch tomorrow's NFL odds
+      - name: Fetch upcoming NFL odds
         run: |
-          echo "Fetching tomorrow's NFL odds..."
+          echo "Fetching upcoming NFL odds..."
           if response=$(curl \
             --retry 4 \
             --retry-delay 15 \
@@ -182,7 +182,7 @@ jobs:
             --max-time 120 \
             --request POST \
             --header "Authorization: Bearer ${CRON_SECRET}" \
-            "$API_URL/api/nfl/cron/fetch-odds?offset=1"); then
+            "$API_URL/api/nfl/cron/fetch-odds?lookahead_days=7"); then
             printf 'Response: %s\n' "$response"
           else
             curl_status=$?
@@ -191,9 +191,9 @@ jobs:
           fi
 
           if ! jq -e '.success == true' >/dev/null <<<"$response"; then
-            printf "Failed to fetch tomorrow's NFL odds:\n%s\n" "$response" >&2
+            printf "Failed to fetch upcoming NFL odds:\n%s\n" "$response" >&2
             exit 1
           fi
 
           fresh=$(jq -r '.fresh_from_api // 0' <<<"$response")
-          echo "Tomorrow NFL odds fetched: fresh=${fresh}"
+          echo "Upcoming NFL odds fetched: fresh=${fresh}"

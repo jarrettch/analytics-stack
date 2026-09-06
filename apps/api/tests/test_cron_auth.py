@@ -102,6 +102,18 @@ def test_rejects_overlong_collection_key(client, cron_secret):
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize("lookahead_days", [-1, 8, 400])
+def test_nfl_rejects_lookahead_outside_supported_range(
+    client, cron_secret, lookahead_days
+):
+    response = client.post(
+        "/api/nfl/cron/fetch-odds",
+        params={"lookahead_days": lookahead_days},
+        headers={"Authorization": f"Bearer {SECRET}"},
+    )
+    assert response.status_code == 422
+
+
 @pytest.mark.parametrize("path,module", CRON_ROUTES)
 def test_valid_token_reaches_the_collector(
     client, cron_secret, monkeypatch, path, module

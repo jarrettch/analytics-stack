@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -227,6 +227,46 @@ class NFLParsingTest(unittest.TestCase):
 
 
 class NFLVerificationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_lookahead_collects_only_dates_with_scheduled_games(self):
+        fixed_now = datetime(2026, 9, 7, 12, tzinfo=ET)
+        today = fixed_now.date()
+        thursday = today + timedelta(days=3)
+        monday = today + timedelta(days=7)
+        collected_dates = []
+
+        async def fake_scoreboard(target):
+            events = [{}] if target in {thursday, monday} else []
+            return {"events": events}, True
+
+        async def fake_get_odds_map(*, target_date, collection_stats, request_time):
+            collected_dates.append(target_date)
+            collection_stats.update({
+                "pregame_snapshot_candidates": 0,
+                "pregame_snapshot_matchups": [],
+                "snapshots_inserted": 0,
+                "snapshots_deduplicated": 0,
+                "snapshot_persistence_ok": True,
+            })
+            return {}, 0
+
+        with (
+            patch("routers.nfl.datetime") as datetime_mock,
+            patch("routers.nfl.get_odds_map", new=fake_get_odds_map),
+            patch(
+                "routers.nfl._scoreboard_for_date_with_status",
+                new=fake_scoreboard,
+            ),
+        ):
+            datetime_mock.now.return_value = fixed_now
+            result = await cron_fetch_odds(lookahead_days=7)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(collected_dates, [thursday, monday])
+        self.assertEqual(
+            result["dates"],
+            [thursday.isoformat(), monday.isoformat()],
+        )
+
     async def test_verification_intersects_expected_and_candidate_matchups(self):
         target = datetime.now(ET).date()
         early_start = datetime.combine(target, time(13), ET).isoformat()
