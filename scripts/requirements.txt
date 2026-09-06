@@ -4,3 +4,4 @@
 httpx>=0.28
 python-dotenv>=1.0
 MLB-StatsAPI>=1.9   # fetch_roster.py, fetch_stats.py
+supabase>=2.30      # pitcher_k_coverage.py
