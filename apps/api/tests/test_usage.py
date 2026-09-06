@@ -33,7 +33,8 @@ def test_normalize_camel_case_sgo_usage_shape_redacts_account_fields():
     assert result["provider"] == "SportsGameOdds"
     assert result["tier"] == "amateur"
     assert result["active"] is True
-    assert result["billingCycleDay"] == 8
+    assert result["billingCycleAnchor"] == "2026-04-08T00:00:00Z"
+    assert result["billingWindowDays"] == 30
     assert monthly["entities"] == {"current": 625, "max": 2500}
     assert monthly["requests"] == {"current": "n/a", "max": "unlimited"}
     assert monthly["resetsAt"] == "2026-09-01T00:00:00.000Z"
@@ -72,16 +73,25 @@ def test_normalize_current_sgo_usage_shape():
     assert monthly["entities"] == {"current": 400, "max": 2500}
 
 
-def test_billing_cycle_day_env_override(monkeypatch):
-    monkeypatch.setenv("SGO_BILLING_CYCLE_DAY", "23")
+def test_billing_cycle_anchor_env_override(monkeypatch):
+    monkeypatch.setenv("SGO_BILLING_CYCLE_ANCHOR", "2026-09-05T14:30:00-04:00")
     payload = {"success": True, "data": {"isActive": True, "rateLimits": {}}}
-    assert usage.normalize_sgo_usage(payload)["billingCycleDay"] == 23
+    assert (
+        usage.normalize_sgo_usage(payload)["billingCycleAnchor"]
+        == "2026-09-05T18:30:00Z"
+    )
 
-    monkeypatch.setenv("SGO_BILLING_CYCLE_DAY", "31")
-    assert usage.normalize_sgo_usage(payload)["billingCycleDay"] == 8
+    monkeypatch.setenv("SGO_BILLING_CYCLE_ANCHOR", "2026-09-07")
+    assert (
+        usage.normalize_sgo_usage(payload)["billingCycleAnchor"]
+        == "2026-04-08T00:00:00Z"
+    )
 
-    monkeypatch.setenv("SGO_BILLING_CYCLE_DAY", "not-a-day")
-    assert usage.normalize_sgo_usage(payload)["billingCycleDay"] == 8
+    monkeypatch.setenv("SGO_BILLING_CYCLE_ANCHOR", "not-a-date")
+    assert (
+        usage.normalize_sgo_usage(payload)["billingCycleAnchor"]
+        == "2026-04-08T00:00:00Z"
+    )
 
 
 def test_forced_refresh_within_floor_skips_upstream_call(monkeypatch):

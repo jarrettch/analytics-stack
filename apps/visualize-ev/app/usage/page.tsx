@@ -13,6 +13,7 @@ import {
   TrendingUp,
   Zap,
 } from "lucide-react";
+import { getUsageWindow } from "@repo/ui";
 
 type LimitValue = number | "unlimited" | "n/a" | null;
 
@@ -28,7 +29,8 @@ type UsageResponse = {
   provider: string;
   tier: string;
   active: boolean;
-  billingCycleDay: number;
+  billingCycleAnchor?: string;
+  billingWindowDays?: number;
   fetchedAt: string;
   cached: boolean;
   intervals: UsageInterval[];
@@ -47,43 +49,6 @@ function formatNumber(value: LimitValue): string {
 function percentage(current: LimitValue, max: LimitValue): number | null {
   if (!finite(current) || !finite(max) || max <= 0) return null;
   return Math.min((current / max) * 100, 100);
-}
-
-function getBillingWindow(resetsAt: string | null, billingCycleDay: number, now: Date) {
-  const parsedReset = resetsAt ? new Date(resetsAt) : null;
-  let reset: Date;
-  let start: Date;
-
-  if (parsedReset && !Number.isNaN(parsedReset.getTime()) && parsedReset > now) {
-    // Provider's own interval end is authoritative; the window start is exactly
-    // one month before it, so the two can never disagree on cycle length.
-    reset = parsedReset;
-    start = new Date(Date.UTC(
-      reset.getUTCFullYear(),
-      reset.getUTCMonth() - 1,
-      reset.getUTCDate(),
-      reset.getUTCHours(),
-      reset.getUTCMinutes(),
-      reset.getUTCSeconds(),
-    ));
-  } else {
-    const thisMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), billingCycleDay));
-    if (now >= thisMonthStart) {
-      start = thisMonthStart;
-      reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, billingCycleDay));
-    } else {
-      reset = thisMonthStart;
-      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, billingCycleDay));
-    }
-  }
-  const totalMs = reset.getTime() - start.getTime();
-  const elapsedMs = Math.max(now.getTime() - start.getTime(), 60 * 60 * 1000);
-  return {
-    reset,
-    elapsedDays: elapsedMs / 86_400_000,
-    remainingDays: Math.max((reset.getTime() - now.getTime()) / 86_400_000, 0),
-    totalDays: totalMs / 86_400_000,
-  };
 }
 
 function LimitBar({ current, max }: { current: LimitValue; max: LimitValue }) {
@@ -153,7 +118,12 @@ export default function UsagePage() {
     if (!finite(current) || !finite(max)) return null;
 
     const now = new Date();
-    const window = getBillingWindow(monthly.resetsAt, usage?.billingCycleDay ?? 8, now);
+    const window = getUsageWindow({
+      resetsAt: monthly.resetsAt,
+      fallbackAnchor: usage?.billingCycleAnchor ?? "2026-04-08T00:00:00Z",
+      windowDays: usage?.billingWindowDays ?? 30,
+      now,
+    });
     const averagePerDay = current / window.elapsedDays;
     const projected = Math.round(averagePerDay * window.totalDays);
     const remaining = Math.max(max - current, 0);
@@ -245,7 +215,7 @@ export default function UsagePage() {
                 <div className="rounded-lg border border-border bg-card p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Monthly entities</p>
+                      <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">30-day entities</p>
                       <div className="mt-2 flex items-baseline gap-2 font-mono">
                         <span className="text-4xl font-semibold tracking-tight text-foreground">{formatNumber(metrics.current)}</span>
                         <span className="text-sm text-muted-foreground">/ {formatNumber(metrics.max)}</span>
@@ -292,8 +262,8 @@ export default function UsagePage() {
                     {metrics.health === "healthy"
                       ? "Current burn rate is within budget."
                       : metrics.health === "watch"
-                        ? "Usage is trending close to the monthly cap."
-                        : "Usage is projected to exceed the monthly cap."}
+                        ? "Usage is trending close to the 30-day cap."
+                        : "Usage is projected to exceed the 30-day cap."}
                   </p>
                   <p className="mt-3 text-sm leading-6 text-muted-foreground">
                     At the current pace, this cycle is projected to finish at{" "}

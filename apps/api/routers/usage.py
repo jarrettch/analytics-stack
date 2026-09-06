@@ -14,6 +14,8 @@ from routers.utils import get_http_client
 router = APIRouter(prefix="/api/usage", tags=["usage"])
 
 SGO_USAGE_URL = "https://api.sportsgameodds.com/v2/account/usage"
+SGO_BILLING_WINDOW_DAYS = 30
+DEFAULT_SGO_BILLING_CYCLE_ANCHOR = "2026-04-08T00:00:00Z"
 USAGE_CACHE_TTL = 60
 # Forced refreshes still reuse a cache younger than this, so the public
 # endpoint can't be used to hammer SGO's shared per-minute request limit.
@@ -21,13 +23,19 @@ USAGE_REFRESH_FLOOR = 10
 UTC = ZoneInfo("UTC")
 
 
-def _billing_cycle_day() -> int:
-    """Day of month the SGO cycle resets; re-anchor via env on plan changes."""
+def _billing_cycle_anchor() -> str:
+    """Known reset boundary used when SGO omits its interval end timestamp."""
+    value = os.getenv(
+        "SGO_BILLING_CYCLE_ANCHOR",
+        DEFAULT_SGO_BILLING_CYCLE_ANCHOR,
+    )
     try:
-        day = int(os.getenv("SGO_BILLING_CYCLE_DAY", "8"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
-        return 8
-    return day if 1 <= day <= 28 else 8
+        return DEFAULT_SGO_BILLING_CYCLE_ANCHOR
+    if parsed.tzinfo is None:
+        return DEFAULT_SGO_BILLING_CYCLE_ANCHOR
+    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 _usage_cache: dict | None = None
 _usage_cache_time = 0.0
@@ -90,7 +98,8 @@ def normalize_sgo_usage(payload: dict) -> dict:
         "provider": "SportsGameOdds",
         "tier": data.get("tier", "unknown"),
         "active": bool(data.get("isActive", False)),
-        "billingCycleDay": _billing_cycle_day(),
+        "billingCycleAnchor": _billing_cycle_anchor(),
+        "billingWindowDays": SGO_BILLING_WINDOW_DAYS,
         "fetchedAt": datetime.now(UTC).isoformat(),
         "intervals": intervals,
     }
