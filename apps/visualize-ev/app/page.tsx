@@ -9,6 +9,24 @@ const FALLBACK_VISIBLE_SPORTS: Sport[] = ["mlb", "wnba"];
 
 // Sports with a live backend endpoint (others fall through to "coming soon").
 const LIVE_SPORTS: Sport[] = ["nba", "wnba", "nfl", "mlb", "nhl"];
+const LAST_SELECTED_SPORT_KEY = "sports-dashboard:last-selected-sport";
+
+function storedSport(): Sport | null {
+  try {
+    const value = window.localStorage.getItem(LAST_SELECTED_SPORT_KEY);
+    return LIVE_SPORTS.includes(value as Sport) ? value as Sport : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberSport(sport: Sport) {
+  try {
+    window.localStorage.setItem(LAST_SELECTED_SPORT_KEY, sport);
+  } catch {
+    // Storage can be unavailable in private or restricted browser contexts.
+  }
+}
 
 function hasGameStatus(matchup: MatchupData): matchup is MatchupData & { gameStatus: number } {
   return "gameStatus" in matchup && typeof matchup.gameStatus === "number";
@@ -33,12 +51,21 @@ export default function Home() {
   const [visibleSports, setVisibleSports] = useState<Sport[] | null>(null);
   const [matchups, setMatchups] = useState<MatchupData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [preferenceReady, setPreferenceReady] = useState(false);
   const [now, setNow] = useState<Date | null>(null);
   const lastDataRef = useRef<string>("");
+  const preferredSportRef = useRef<Sport | null>(null);
   const userSelectedSportRef = useRef(false);
 
   useEffect(() => {
     setNow(new Date());
+  }, []);
+
+  useEffect(() => {
+    const preferred = storedSport();
+    preferredSportRef.current = preferred;
+    if (preferred) setActiveSport(preferred);
+    setPreferenceReady(true);
   }, []);
 
   useEffect(() => {
@@ -58,7 +85,10 @@ export default function Home() {
 
         const live = results.find(({ data }) => data.some(m => hasGameStatus(m) && m.gameStatus === 2));
         const populated = results.find(({ data }) => data.length > 0);
-        const selected = live ?? populated;
+        const preferred = results.find(
+          ({ sport, data }) => sport === preferredSportRef.current && data.length > 0,
+        );
+        const selected = preferred ?? live ?? populated;
         const sportsWithSlates = results
           .filter(({ data }) => data.length > 0)
           .map(({ sport }) => sport);
@@ -85,6 +115,8 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!preferenceReady) return;
+
     const fetchData = async (isInitial = false) => {
       if (LIVE_SPORTS.includes(activeSport)) {
         if (isInitial) setLoading(true);
@@ -127,7 +159,7 @@ export default function Home() {
     return () => {
       if (pollInterval) clearInterval(pollInterval);
     };
-  }, [activeSport]);
+  }, [activeSport, preferenceReady]);
 
   const gameCount = matchups.length;
   const hasLiveGames = matchups.some(m => hasGameStatus(m) && m.gameStatus === 2);
@@ -184,6 +216,8 @@ export default function Home() {
                   key={sport}
                   onClick={() => {
                     userSelectedSportRef.current = true;
+                    preferredSportRef.current = sport;
+                    rememberSport(sport);
                     setActiveSport(sport);
                   }}
                   className={`px-4 font-mono text-xs uppercase tracking-wider transition-colors ${
