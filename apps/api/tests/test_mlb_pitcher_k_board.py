@@ -312,6 +312,16 @@ class FetchDayRowsTest(unittest.TestCase):
 
 
 class ParseGameDateTest(unittest.TestCase):
+    def test_default_uses_shared_sports_slate_date(self):
+        with patch.object(
+            board.router_utils,
+            "slate_date_et",
+            return_value=date(2026, 8, 17),
+        ) as slate_date:
+            self.assertEqual(board._parse_game_date(None), date(2026, 8, 17))
+
+        slate_date.assert_called_once_with()
+
     def test_rejects_malformed_date(self):
         with self.assertRaises(HTTPException) as ctx:
             board._parse_game_date("08/17/2026")

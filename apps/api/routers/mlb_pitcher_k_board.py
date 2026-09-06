@@ -48,7 +48,7 @@ def _book_sort_key(bookmaker_id: str) -> tuple[int, str]:
 
 def _parse_game_date(value: str | None) -> date:
     if value is None:
-        return datetime.now(router_utils.ET).date()
+        return router_utils.slate_date_et()
     try:
         return date.fromisoformat(value)
     except ValueError:
