@@ -55,3 +55,9 @@ jobs:
           fi
 
           jq -r '.dates[] | "\(.date): \(.result_rows) pitcher rows, \(.identity_pitchers.resolved)/\(.identity_pitchers.found) identities resolved, policy-pending=\(.status_counts.policy_pending.observations // 0)"' <<<"$response"
+
+          stale=$(jq -r '.stale_settlements.observations // 0' <<<"$response")
+          if [ "$stale" -gt 0 ]; then
+            echo "WARNING: ${stale} retryable pitcher-K settlements are older than the automatic lookback window"
+            jq -r '.stale_settlements | "oldest=\(.oldestDate), by-status=\(.byStatus)"' <<<"$response"
+          fi

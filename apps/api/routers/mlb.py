@@ -35,6 +35,7 @@ from .mlb_pitcher_k_settlement import (
     identity_sources_from_sgo_events,
     load_snapshot_identity_sources,
     load_settlement_status_counts,
+    load_stale_settlement_counts,
     persist_pitching_results,
     reconcile_pitcher_k_identities,
 )
@@ -686,9 +687,19 @@ async def cron_settle_pitcher_ks(
         dates = []
         for target in targets:
             dates.append(await _settle_pitcher_k_date(target))
+        stale_before = (
+            min(targets)
+            if game_date is None
+            else datetime.now(ET).date() - timedelta(days=3)
+        )
+        stale_settlements = await asyncio.to_thread(
+            load_stale_settlement_counts,
+            stale_before,
+        )
         return {
             "success": all(result["success"] for result in dates),
             "dates": dates,
+            "stale_settlements": stale_settlements,
             "persisted_to": (
                 "supabase:mlb_sgo_event_map+mlb_sgo_pitcher_map+"
                 "mlb_pitcher_k_results"

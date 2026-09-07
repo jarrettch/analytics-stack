@@ -138,6 +138,16 @@ def test_valid_token_reaches_pitcher_k_settlement(client, cron_secret, monkeypat
         return {"success": True}
 
     monkeypatch.setattr(mlb, "_settle_pitcher_k_date", fake_settle)
+    monkeypatch.setattr(
+        mlb,
+        "load_stale_settlement_counts",
+        lambda before_date: {
+            "beforeDate": before_date.isoformat(),
+            "oldestDate": None,
+            "observations": 0,
+            "byStatus": {},
+        },
+    )
     response = client.post(
         "/api/mlb/cron/settle-pitcher-ks",
         params={"date": "2026-08-17"},

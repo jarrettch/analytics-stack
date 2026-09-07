@@ -9,6 +9,7 @@ from routers.mlb_pitcher_k_settlement import (
     build_identity_rows,
     build_pitching_result_rows,
     load_settlement_status_counts,
+    load_stale_settlement_counts,
     persist_identity_batch,
     persist_pitching_results,
 )
@@ -218,6 +219,13 @@ class Query:
         self.filters.append(("eq", column, value))
         return self
 
+    def lt(self, column, value):
+        self.filters.append(("lt", column, value))
+        return self
+
+    def order(self, *_args, **_kwargs):
+        return self
+
     def upsert(self, rows, **_kwargs):
         self.mode = "upsert"
         self.rows = rows
@@ -236,8 +244,10 @@ class Query:
         for operator, column, value in self.filters:
             if operator == "eq":
                 selected = [row for row in selected if row.get(column) == value]
-            else:
+            elif operator == "in":
                 selected = [row for row in selected if row.get(column) in value]
+            else:
+                selected = [row for row in selected if row.get(column) < value]
         if self.mode == "update":
             self.database.updates.setdefault(self.table, []).append({
                 "values": self.rows,
@@ -410,3 +420,47 @@ def test_status_counts_surface_policy_backlog(monkeypatch):
     counts = load_settlement_status_counts(date(2026, 8, 17))
 
     assert counts == {"policy_pending": {"observations": 12, "games": 1}}
+
+
+def test_stale_counts_find_retryable_rows_outside_lookback(monkeypatch):
+    database = Database({
+        "mlb_pitcher_k_settlement_status_counts": [
+            {
+                "game_date": "2026-08-12",
+                "settlement_status": "pending",
+                "observation_count": 8,
+                "game_count": 1,
+            },
+            {
+                "game_date": "2026-08-13",
+                "settlement_status": "unresolved_identity",
+                "observation_count": 4,
+                "game_count": 1,
+            },
+            {
+                "game_date": "2026-08-12",
+                "settlement_status": "policy_pending",
+                "observation_count": 20,
+                "game_count": 2,
+            },
+            {
+                "game_date": "2026-08-17",
+                "settlement_status": "pending",
+                "observation_count": 6,
+                "game_count": 1,
+            },
+        ],
+    })
+    monkeypatch.setattr(settlement.router_utils, "supabase", database)
+
+    counts = load_stale_settlement_counts(date(2026, 8, 15))
+
+    assert counts == {
+        "beforeDate": "2026-08-15",
+        "oldestDate": "2026-08-12",
+        "observations": 12,
+        "byStatus": {
+            "pending": {"observations": 8, "games": 1},
+            "unresolved_identity": {"observations": 4, "games": 1},
+        },
+    }

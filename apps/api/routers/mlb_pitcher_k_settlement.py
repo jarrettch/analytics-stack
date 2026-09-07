@@ -15,6 +15,11 @@ EVENT_MAP_TABLE = "mlb_sgo_event_map"
 PITCHER_MAP_TABLE = "mlb_sgo_pitcher_map"
 RESULTS_TABLE = "mlb_pitcher_k_results"
 STATUS_COUNTS_VIEW = "mlb_pitcher_k_settlement_status_counts"
+RETRYABLE_SETTLEMENT_STATUSES = (
+    "pending",
+    "unresolved_identity",
+    "data_pending",
+)
 SNAPSHOT_TABLE = "mlb_pitcher_k_odds"
 SNAPSHOT_PAGE_SIZE = 1000
 SNAPSHOT_MAX_PAGES = 50
@@ -542,4 +547,38 @@ def load_settlement_status_counts(game_date: date) -> dict[str, dict[str, int]]:
         }
         for row in (response.data or [])
         if row.get("settlement_status")
+    }
+
+
+def load_stale_settlement_counts(before_date: date) -> dict:
+    """Count retryable settlements old enough to fall outside the cron window."""
+    if not router_utils.supabase:
+        raise RuntimeError("Supabase is not configured")
+    response = (
+        router_utils.supabase.table(STATUS_COUNTS_VIEW)
+        .select("game_date,settlement_status,observation_count,game_count")
+        .lt("game_date", before_date.isoformat())
+        .in_("settlement_status", list(RETRYABLE_SETTLEMENT_STATUSES))
+        .order("game_date")
+        .execute()
+    )
+    rows = response.data or []
+    by_status: dict[str, dict[str, int]] = {}
+    for row in rows:
+        status = row.get("settlement_status")
+        if not status:
+            continue
+        bucket = by_status.setdefault(status, {"observations": 0, "games": 0})
+        bucket["observations"] += int(row.get("observation_count") or 0)
+        bucket["games"] += int(row.get("game_count") or 0)
+    return {
+        "beforeDate": before_date.isoformat(),
+        "oldestDate": min(
+            (row.get("game_date") for row in rows if row.get("game_date")),
+            default=None,
+        ),
+        "observations": sum(
+            bucket["observations"] for bucket in by_status.values()
+        ),
+        "byStatus": by_status,
     }
