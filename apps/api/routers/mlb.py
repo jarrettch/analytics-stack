@@ -34,6 +34,7 @@ from .mlb_pitcher_k_settlement import (
     build_pitching_result_rows,
     identity_sources_from_sgo_events,
     load_snapshot_identity_sources,
+    load_settlement_status_counts,
     persist_pitching_results,
     reconcile_pitcher_k_identities,
 )
@@ -618,25 +619,30 @@ async def _settle_pitcher_k_date(target: date) -> dict:
     )
     result_rows = []
     feed_failures = []
+    projection_failures = []
     for game, feed in zip(final_games, feeds):
         game_pk = int(game["gamePk"])
         if feed is None:
             feed_failures.append(game_pk)
             continue
-        result_rows.extend(
-            build_pitching_result_rows(game_pk, target, feed, fetched_at)
-        )
+        game_rows = build_pitching_result_rows(game_pk, target, feed, fetched_at)
+        if not game_rows:
+            projection_failures.append(game_pk)
+            continue
+        result_rows.extend(game_rows)
     result_stats = await asyncio.to_thread(
         persist_pitching_results,
         result_rows,
         schedule,
         fetched_at,
     )
+    status_counts = await asyncio.to_thread(load_settlement_status_counts, target)
     return {
         "date": target.isoformat(),
         "scheduled_games": len(schedule),
         "final_games": len(final_games),
         "feed_failures": feed_failures,
+        "projection_failures": projection_failures,
         "result_rows": result_stats.result_rows,
         "identity_events": {
             "found": identity_stats.events_found,
@@ -649,10 +655,12 @@ async def _settle_pitcher_k_date(target: date) -> dict:
         "identity_succeeded": identity_stats.succeeded,
         "results_succeeded": result_stats.succeeded,
         "frozen_events": result_stats.frozen_events,
+        "status_counts": status_counts,
         "success": (
             identity_stats.succeeded
             and result_stats.succeeded
             and not feed_failures
+            and not projection_failures
         ),
     }
 

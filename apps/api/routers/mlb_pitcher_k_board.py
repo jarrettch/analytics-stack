@@ -32,12 +32,14 @@ ROW_COLUMNS = (
     "market_phase,line,american_odds,open_line,open_american_odds"
 )
 SETTLEMENT_VIEW = "mlb_pitcher_k_settlements"
+SETTLEMENT_PAGE_SIZE = 1000
+SETTLEMENT_MAX_PAGES = 100
 SETTLEMENT_COLUMNS = (
-    "game_date,mlb_game_pk,sgo_event_id,sgo_player_id,pitcher_name,"
+    "odds_observation_id,game_date,mlb_game_pk,sgo_event_id,sgo_player_id,pitcher_name,"
     "away_team,home_team,bookmaker_id,side,is_alternate,line,american_odds,"
     "captured_at,strikeouts,did_start,appeared,innings_pitched,outs_recorded,"
-    "batters_faced,pitches_thrown,result_fetched_at,settlement_status,grade,"
-    "void_reason,profit_units"
+    "batters_faced,pitches_thrown,results_fetched_at,result_fetched_at,"
+    "settlement_status,grade,void_reason,profit_units"
 )
 
 # Display order for the board's book columns; unknown books sort after, alphabetically.
@@ -314,6 +316,8 @@ def _side_summary(rows: list[dict], side: str) -> dict:
     pushes = sum(row["grade"] == "push" for row in graded)
     decisions = wins + losses
     profit = sum(float(row.get("profit_units") or 0) for row in graded)
+    # Hit rate treats pushes as no decision. ROI counts every settled wager,
+    # including a push with zero profit, in its amount-staked denominator.
     return {
         "bets": len(graded),
         "wins": wins,
@@ -335,23 +339,48 @@ def build_settlement_history(rows: list[dict], player_id: str) -> dict:
         (row.get("pitcher_name") for row in ordered if row.get("pitcher_name")),
         player_id,
     )
+    main_rows = [row for row in ordered if not row.get("is_alternate")]
+    alternate_rows = [row for row in ordered if row.get("is_alternate")]
     return {
         "playerId": player_id,
         "playerName": player_name,
         "asOf": max(
-            (row.get("result_fetched_at") for row in ordered if row.get("result_fetched_at")),
+            (
+                row.get("results_fetched_at") or row.get("result_fetched_at")
+                for row in ordered
+                if row.get("results_fetched_at") or row.get("result_fetched_at")
+            ),
             default=None,
         ),
         "summary": {
-            "over": _side_summary(ordered, "over"),
-            "under": _side_summary(ordered, "under"),
-            "voids": sum(row.get("settlement_status") == "void" for row in ordered),
-            "pending": sum(
-                row.get("settlement_status") in {
-                    "pending", "policy_pending", "unresolved_identity"
-                }
-                for row in ordered
-            ),
+            "main": {
+                "over": _side_summary(main_rows, "over"),
+                "under": _side_summary(main_rows, "under"),
+            },
+            "alternates": {
+                "over": _side_summary(alternate_rows, "over"),
+                "under": _side_summary(alternate_rows, "under"),
+            },
+            "statuses": {
+                "void": sum(
+                    row.get("settlement_status") == "void" for row in ordered
+                ),
+                "pending": sum(
+                    row.get("settlement_status") == "pending" for row in ordered
+                ),
+                "policyPending": sum(
+                    row.get("settlement_status") == "policy_pending"
+                    for row in ordered
+                ),
+                "dataPending": sum(
+                    row.get("settlement_status") == "data_pending"
+                    for row in ordered
+                ),
+                "unresolvedIdentity": sum(
+                    row.get("settlement_status") == "unresolved_identity"
+                    for row in ordered
+                ),
+            },
         },
         "settlements": [{
             "date": row.get("game_date"),
@@ -385,20 +414,31 @@ def fetch_settlement_rows(player_id: str, include_alternates: bool) -> list[dict
     if not router_utils.supabase:
         raise HTTPException(status_code=503, detail="Settlement history is not configured")
     try:
-        query = (
-            router_utils.supabase.table(SETTLEMENT_VIEW)
-            .select(SETTLEMENT_COLUMNS)
-            .eq("sgo_player_id", player_id)
+        rows = []
+        for page in range(SETTLEMENT_MAX_PAGES):
+            query = (
+                router_utils.supabase.table(SETTLEMENT_VIEW)
+                .select(SETTLEMENT_COLUMNS)
+                .eq("sgo_player_id", player_id)
+            )
+            if not include_alternates:
+                query = query.eq("is_alternate", False)
+            start = page * SETTLEMENT_PAGE_SIZE
+            chunk = (
+                query.order("game_date", desc=True)
+                .order("captured_at", desc=True)
+                .order("odds_observation_id", desc=True)
+                .range(start, start + SETTLEMENT_PAGE_SIZE - 1)
+                .execute()
+                .data
+                or []
+            )
+            rows.extend(chunk)
+            if len(chunk) < SETTLEMENT_PAGE_SIZE:
+                return rows
+        raise RuntimeError(
+            f"Settlement history exceeded {SETTLEMENT_MAX_PAGES} pages"
         )
-        if not include_alternates:
-            query = query.eq("is_alternate", False)
-        response = (
-            query.order("game_date", desc=True)
-            .order("captured_at", desc=True)
-            .limit(500)
-            .execute()
-        )
-        return response.data or []
     except Exception as exc:
         logger.exception("Pitcher-K settlement history failed for %s", player_id)
         raise HTTPException(

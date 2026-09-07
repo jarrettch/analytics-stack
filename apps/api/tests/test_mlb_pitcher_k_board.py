@@ -299,25 +299,93 @@ class BuildSettlementHistoryTest(unittest.TestCase):
         history = board.build_settlement_history(rows, "P1")
 
         self.assertEqual(history["playerName"], "Test Pitcher")
-        self.assertEqual(history["summary"]["over"]["hitRate"], 0.5)
-        self.assertEqual(history["summary"]["over"]["roi"], 0.1)
-        self.assertEqual(history["summary"]["under"]["hitRate"], 0.0)
+        main = history["summary"]["main"]
+        self.assertEqual(main["over"]["hitRate"], 0.5)
+        self.assertEqual(main["over"]["roi"], 0.1)
+        self.assertEqual(main["under"]["hitRate"], 0.0)
         self.assertEqual(history["settlements"][0]["date"], "2026-08-17")
 
-    def test_counts_void_and_unresolved_rows_separately(self):
+    def test_alternates_do_not_change_main_line_summary(self):
         rows = [
-            {"side": "over", "settlement_status": "void", "grade": None},
             {
                 "side": "over",
+                "is_alternate": False,
+                "settlement_status": "graded",
+                "grade": "win",
+                "profit_units": 1,
+            },
+            {
+                "side": "over",
+                "is_alternate": True,
+                "settlement_status": "graded",
+                "grade": "loss",
+                "profit_units": -1,
+            },
+        ]
+
+        summary = board.build_settlement_history(rows, "P1")["summary"]
+
+        self.assertEqual(summary["main"]["over"]["hitRate"], 1.0)
+        self.assertEqual(summary["alternates"]["over"]["hitRate"], 0.0)
+
+    def test_push_is_excluded_from_hit_rate_and_included_in_roi_stake(self):
+        rows = [
+            {
+                "side": "over",
+                "is_alternate": False,
+                "settlement_status": "graded",
+                "grade": "win",
+                "profit_units": 1,
+            },
+            {
+                "side": "over",
+                "is_alternate": False,
+                "settlement_status": "graded",
+                "grade": "push",
+                "profit_units": 0,
+            },
+        ]
+
+        over = board.build_settlement_history(rows, "P1")["summary"]["main"]["over"]
+
+        self.assertEqual(over["hitRate"], 1.0)
+        self.assertEqual(over["roi"], 0.5)
+
+    def test_counts_nonterminal_states_separately(self):
+        rows = [
+            {
+                "side": "over",
+                "is_alternate": False,
+                "settlement_status": "void",
+                "grade": None,
+            },
+            {
+                "side": "over",
+                "is_alternate": False,
                 "settlement_status": "unresolved_identity",
+                "grade": None,
+            },
+            {
+                "side": "under",
+                "is_alternate": False,
+                "settlement_status": "policy_pending",
+                "grade": None,
+            },
+            {
+                "side": "under",
+                "is_alternate": False,
+                "settlement_status": "data_pending",
                 "grade": None,
             },
         ]
 
         history = board.build_settlement_history(rows, "P1")
 
-        self.assertEqual(history["summary"]["voids"], 1)
-        self.assertEqual(history["summary"]["pending"], 1)
+        statuses = history["summary"]["statuses"]
+        self.assertEqual(statuses["void"], 1)
+        self.assertEqual(statuses["unresolvedIdentity"], 1)
+        self.assertEqual(statuses["policyPending"], 1)
+        self.assertEqual(statuses["dataPending"], 1)
 
 
 class _SelectQuery:
@@ -333,7 +401,7 @@ class _SelectQuery:
     def eq(self, *_args):
         return self
 
-    def order(self, *_args):
+    def order(self, *_args, **_kwargs):
         return self
 
     def range(self, start, end):
@@ -356,6 +424,34 @@ class _Supabase:
 
     def table(self, _name):
         return _SelectQuery(self.rows, self.calls, self.fail)
+
+
+class FetchSettlementRowsTest(unittest.TestCase):
+    def test_paginates_instead_of_silently_truncating_summary_rows(self):
+        rows = [{"id": index} for index in range(5)]
+        fake = _Supabase(rows)
+
+        with (
+            patch.object(board.router_utils, "supabase", fake),
+            patch.object(board, "SETTLEMENT_PAGE_SIZE", 2),
+        ):
+            fetched = board.fetch_settlement_rows("P1", include_alternates=True)
+
+        self.assertEqual(fetched, rows)
+        self.assertEqual(fake.calls, [(0, 1), (2, 3), (4, 5)])
+
+    def test_explicitly_fails_if_the_safety_ceiling_is_reached(self):
+        fake = _Supabase([{"id": index} for index in range(4)])
+
+        with (
+            patch.object(board.router_utils, "supabase", fake),
+            patch.object(board, "SETTLEMENT_PAGE_SIZE", 2),
+            patch.object(board, "SETTLEMENT_MAX_PAGES", 2),
+            self.assertRaises(HTTPException) as context,
+        ):
+            board.fetch_settlement_rows("P1", include_alternates=True)
+
+        self.assertEqual(context.exception.status_code, 503)
 
 
 class FetchDayRowsTest(unittest.TestCase):

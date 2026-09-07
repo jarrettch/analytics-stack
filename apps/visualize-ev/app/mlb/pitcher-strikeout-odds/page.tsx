@@ -95,6 +95,7 @@ type SettlementRow = {
     | "void"
     | "pending"
     | "policy_pending"
+    | "data_pending"
     | "unresolved_identity";
   grade: "win" | "loss" | "push" | null;
   voidReason: string | null;
@@ -106,10 +107,21 @@ type SettlementResponse = {
   playerName: string;
   asOf: string | null;
   summary: {
-    over: SettlementSideSummary;
-    under: SettlementSideSummary;
-    voids: number;
-    pending: number;
+    main: {
+      over: SettlementSideSummary;
+      under: SettlementSideSummary;
+    };
+    alternates: {
+      over: SettlementSideSummary;
+      under: SettlementSideSummary;
+    };
+    statuses: {
+      void: number;
+      pending: number;
+      policyPending: number;
+      dataPending: number;
+      unresolvedIdentity: number;
+    };
   };
   settlements: SettlementRow[];
 };
@@ -453,6 +465,7 @@ function SettlementHistory({ history }: { history: SettlementResponse }) {
     if (row.settlementStatus === "unresolved_identity")
       return "identity pending";
     if (row.settlementStatus === "policy_pending") return "review pending";
+    if (row.settlementStatus === "data_pending") return "stats pending";
     return row.settlementStatus;
   };
   const statusColor = (row: SettlementRow) => {
@@ -474,7 +487,7 @@ function SettlementHistory({ history }: { history: SettlementResponse }) {
       </div>
       <div className="mb-4 grid gap-2 sm:grid-cols-2">
         {(["over", "under"] as const).map((side) => {
-          const summary = history.summary[side];
+          const summary = history.summary.main[side];
           return (
             <div
               key={side}
@@ -553,10 +566,18 @@ function SettlementHistory({ history }: { history: SettlementResponse }) {
           </table>
         </div>
       )}
-      {(history.summary.voids > 0 || history.summary.pending > 0) && (
+      {Object.values(history.summary.statuses).some((count) => count > 0) && (
         <p className="mt-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-          {history.summary.voids} void · {history.summary.pending} pending
-          across observed books/sides
+          {history.summary.statuses.void} void ·{" "}
+          {history.summary.statuses.pending +
+            history.summary.statuses.policyPending +
+            history.summary.statuses.dataPending +
+            history.summary.statuses.unresolvedIdentity}{" "}
+          pending
+          {history.summary.statuses.policyPending > 0
+            ? ` · ${history.summary.statuses.policyPending} need rule review`
+            : ""}{" "}
+          · across observed books/sides
         </p>
       )}
     </div>

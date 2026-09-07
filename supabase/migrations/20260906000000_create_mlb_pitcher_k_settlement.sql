@@ -13,6 +13,7 @@ create table if not exists public.mlb_sgo_event_map (
     resolution_method text,
     mlb_abstract_state text,
     mlb_detailed_state text,
+    results_fetched_at timestamptz,
     last_attempted_at timestamptz not null,
     resolved_at timestamptz,
     frozen_at timestamptz,
@@ -51,7 +52,7 @@ create table if not exists public.mlb_pitcher_k_results (
     mlb_player_id bigint not null,
     game_date date not null,
     pitcher_name text not null,
-    strikeouts integer not null check (strikeouts >= 0),
+    strikeouts integer check (strikeouts >= 0),
     did_start boolean not null,
     appeared boolean not null default true,
     innings_pitched text,
@@ -73,8 +74,11 @@ alter table public.mlb_sgo_event_map enable row level security;
 alter table public.mlb_sgo_pitcher_map enable row level security;
 alter table public.mlb_pitcher_k_results enable row level security;
 
+create index if not exists mlb_pitcher_k_odds_player_history_idx
+    on public.mlb_pitcher_k_odds (player_id, game_date desc, captured_at desc);
+
 comment on table public.mlb_sgo_event_map is
-    'Mutable SGO event to MLB game identity map; frozen after the mapped MLB game is final.';
+    'Mutable SGO event to MLB game identity map; frozen after its final boxscore is fetched.';
 
 comment on table public.mlb_sgo_pitcher_map is
     'Event-scoped SGO pitcher to MLB person identity map; unresolved rows retry while pregame.';
@@ -164,6 +168,7 @@ with joined as (
         event_map.resolution_status as event_resolution_status,
         event_map.mlb_abstract_state,
         event_map.mlb_detailed_state,
+        event_map.results_fetched_at,
         pitcher_map.mlb_player_id,
         pitcher_map.resolution_status as pitcher_resolution_status,
         coalesce(
@@ -188,18 +193,23 @@ with joined as (
                 then 'unresolved_identity'
             when event_map.mlb_abstract_state is distinct from 'Final'
                 then 'pending'
+            when event_map.results_fetched_at is null
+                then 'pending'
             when event_map.mlb_detailed_state is distinct from 'Final'
                 then 'policy_pending'
             when results.mlb_player_id is null
                 then 'void'
             when not results.did_start
                 then 'void'
+            when results.strikeouts is null
+                then 'data_pending'
             else 'graded'
         end as settlement_status,
         case
             when results.mlb_player_id is null
                  and event_map.mlb_abstract_state = 'Final'
                  and event_map.mlb_detailed_state = 'Final'
+                 and event_map.results_fetched_at is not null
                 then 'did_not_appear'
             when results.mlb_player_id is not null
                  and not results.did_start
@@ -269,6 +279,18 @@ group by
     results.mlb_player_id,
     results.pitcher_name;
 
+create or replace view public.mlb_pitcher_k_settlement_status_counts
+with (security_invoker = true)
+as
+select
+    game_date,
+    settlement_status,
+    count(*) as observation_count,
+    count(distinct mlb_game_pk) as game_count
+from public.mlb_pitcher_k_settlements
+where settlement_status not in ('graded', 'void')
+group by game_date, settlement_status;
+
 comment on view public.mlb_pitcher_k_observed_close is
     'Latest independently observed pregame price per main side, plus the latest alternate ladder.';
 
@@ -277,3 +299,6 @@ comment on view public.mlb_pitcher_k_settlements is
 
 comment on view public.mlb_pitcher_k_starter_coverage is
     'Actual MLB starters left joined to stored pitcher-K markets for collection coverage checks.';
+
+comment on view public.mlb_pitcher_k_settlement_status_counts is
+    'Daily nonterminal settlement counts for cron monitoring and policy backlog visibility.';

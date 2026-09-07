@@ -54,4 +54,4 @@ jobs:
             exit 1
           fi
 
-          jq -r '.dates[] | "\(.date): \(.result_rows) pitcher rows, \(.identity_pitchers.resolved)/\(.identity_pitchers.found) identities resolved"' <<<"$response"
+          jq -r '.dates[] | "\(.date): \(.result_rows) pitcher rows, \(.identity_pitchers.resolved)/\(.identity_pitchers.found) identities resolved, policy-pending=\(.status_counts.policy_pending.observations // 0)"' <<<"$response"

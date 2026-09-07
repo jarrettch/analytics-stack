@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 EVENT_MAP_TABLE = "mlb_sgo_event_map"
 PITCHER_MAP_TABLE = "mlb_sgo_pitcher_map"
 RESULTS_TABLE = "mlb_pitcher_k_results"
+STATUS_COUNTS_VIEW = "mlb_pitcher_k_settlement_status_counts"
 SNAPSHOT_TABLE = "mlb_pitcher_k_odds"
 SNAPSHOT_PAGE_SIZE = 1000
 SNAPSHOT_MAX_PAGES = 50
@@ -422,12 +423,13 @@ def build_pitching_result_rows(
             person = player.get("person") or {}
             pitching = (player.get("stats") or {}).get("pitching") or {}
             innings_pitched = pitching.get("inningsPitched")
+            strikeouts = _safe_int(pitching.get("strikeOuts"), None)
             rows.append({
                 "mlb_game_pk": game_pk,
                 "mlb_player_id": player_id,
                 "game_date": game_date.isoformat(),
                 "pitcher_name": person.get("fullName") or str(player_id),
-                "strikeouts": _safe_int(pitching.get("strikeOuts")),
+                "strikeouts": strikeouts,
                 "did_start": player_id == starter_id,
                 "appeared": True,
                 "innings_pitched": (
@@ -457,6 +459,11 @@ def persist_pitching_results(
         logger.warning("Supabase not configured; skipping MLB pitcher-K results")
         return stats
     timestamp = persisted_at.isoformat()
+    fetched_game_pks = {
+        row["mlb_game_pk"]
+        for row in rows
+        if isinstance(row.get("mlb_game_pk"), int)
+    }
     try:
         if rows:
             (
@@ -470,11 +477,18 @@ def persist_pitching_results(
             except (KeyError, TypeError, ValueError):
                 continue
             is_final = game.get("abstractGameState") == "Final"
+            if is_final and game_pk not in fetched_game_pks:
+                # A final schedule state does not prove its boxscore was read.
+                # Leave the mapping pending so an absent result cannot look
+                # like a pitcher who never appeared.
+                continue
             update = {
                 "mlb_abstract_state": game.get("abstractGameState"),
                 "mlb_detailed_state": game.get("detailedState"),
                 "updated_at": timestamp,
             }
+            if game_pk in fetched_game_pks:
+                update["results_fetched_at"] = timestamp
             if is_final:
                 update["frozen_at"] = timestamp
                 stats.final_games += 1
@@ -510,3 +524,22 @@ def persist_pitching_results(
     except Exception:
         logger.exception("Failed to persist MLB pitcher-K results")
     return stats
+
+
+def load_settlement_status_counts(game_date: date) -> dict[str, dict[str, int]]:
+    if not router_utils.supabase:
+        raise RuntimeError("Supabase is not configured")
+    response = (
+        router_utils.supabase.table(STATUS_COUNTS_VIEW)
+        .select("settlement_status,observation_count,game_count")
+        .eq("game_date", game_date.isoformat())
+        .execute()
+    )
+    return {
+        row["settlement_status"]: {
+            "observations": int(row.get("observation_count") or 0),
+            "games": int(row.get("game_count") or 0),
+        }
+        for row in (response.data or [])
+        if row.get("settlement_status")
+    }

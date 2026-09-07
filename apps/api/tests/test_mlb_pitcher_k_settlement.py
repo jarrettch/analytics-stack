@@ -8,6 +8,7 @@ from routers.mlb_pitcher_k_settlement import (
     IdentityBatch,
     build_identity_rows,
     build_pitching_result_rows,
+    load_settlement_status_counts,
     persist_identity_batch,
     persist_pitching_results,
 )
@@ -159,6 +160,44 @@ def test_boxscore_results_include_starter_and_reliever():
     assert rows[1]["pitches_thrown"] == 22
 
 
+def test_missing_strikeout_stat_is_not_coerced_to_zero():
+    feed = {
+        "gameData": {
+            "status": {
+                "abstractGameState": "Final",
+                "detailedState": "Final",
+            }
+        },
+        "liveData": {
+            "boxscore": {
+                "teams": {
+                    "away": {
+                        "pitchers": [1001],
+                        "players": {
+                            "ID1001": {
+                                "person": {"fullName": "Starter One"},
+                                "stats": {"pitching": {}},
+                            }
+                        },
+                    },
+                    "home": {"pitchers": [], "players": {}},
+                }
+            }
+        },
+    }
+
+    rows = build_pitching_result_rows(
+        801,
+        date(2026, 8, 17),
+        feed,
+        CAPTURED_AT,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["strikeouts"] is None
+    assert rows[0]["did_start"] is True
+
+
 class Query:
     def __init__(self, database, table):
         self.database = database
@@ -308,7 +347,7 @@ def test_persistence_skips_frozen_mappings(monkeypatch):
     assert database.writes == {}
 
 
-def test_final_result_persistence_freezes_event_and_pitcher_maps(monkeypatch):
+def test_final_game_without_feed_rows_stays_unfetched_and_unfrozen(monkeypatch):
     database = Database({
         "mlb_sgo_event_map": [{
             "sgo_event_id": "SGO-1",
@@ -325,9 +364,49 @@ def test_final_result_persistence_freezes_event_and_pitcher_maps(monkeypatch):
     stats = persist_pitching_results([], schedule, CAPTURED_AT)
 
     assert stats.succeeded is True
+    assert stats.final_games == 0
+    assert stats.frozen_events == 0
+    assert database.updates == {}
+
+
+def test_final_game_with_feed_rows_marks_results_fetched_and_freezes(monkeypatch):
+    database = Database({
+        "mlb_sgo_event_map": [{
+            "sgo_event_id": "SGO-1",
+            "mlb_game_pk": 801,
+        }],
+    })
+    monkeypatch.setattr(settlement.router_utils, "supabase", database)
+    schedule = [{
+        "gamePk": "801",
+        "abstractGameState": "Final",
+        "detailedState": "Final",
+    }]
+    rows = [{"mlb_game_pk": 801, "mlb_player_id": 1001, "strikeouts": 7}]
+
+    stats = persist_pitching_results(rows, schedule, CAPTURED_AT)
+
+    assert stats.succeeded is True
     assert stats.final_games == 1
     assert stats.frozen_events == 1
     event_update = database.updates["mlb_sgo_event_map"][0]
     pitcher_update = database.updates["mlb_sgo_pitcher_map"][0]
     assert event_update["values"]["frozen_at"] == CAPTURED_AT.isoformat()
+    assert event_update["values"]["results_fetched_at"] == CAPTURED_AT.isoformat()
     assert pitcher_update["filters"] == [("in", "sgo_event_id", ["SGO-1"])]
+
+
+def test_status_counts_surface_policy_backlog(monkeypatch):
+    database = Database({
+        "mlb_pitcher_k_settlement_status_counts": [{
+            "game_date": "2026-08-17",
+            "settlement_status": "policy_pending",
+            "observation_count": 12,
+            "game_count": 1,
+        }],
+    })
+    monkeypatch.setattr(settlement.router_utils, "supabase", database)
+
+    counts = load_settlement_status_counts(date(2026, 8, 17))
+
+    assert counts == {"policy_pending": {"observations": 12, "games": 1}}
