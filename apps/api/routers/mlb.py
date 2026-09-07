@@ -49,6 +49,7 @@ SettlementLookback = Annotated[
     int,
     Query(ge=1, le=7, description="Completed ET dates to recheck."),
 ]
+DEFAULT_SETTLEMENT_LOOKBACK_DAYS = 3
 
 cache = Cache({
     "schedule":         CACHE_TTL_DEFAULT,
@@ -672,7 +673,7 @@ async def _settle_pitcher_k_date(target: date) -> dict:
 )
 async def cron_settle_pitcher_ks(
     game_date: Annotated[date | None, Query(alias="date")] = None,
-    lookback_days: SettlementLookback = 3,
+    lookback_days: SettlementLookback = DEFAULT_SETTLEMENT_LOOKBACK_DAYS,
 ):
     """Reconcile identities and upsert official results for completed games."""
     try:
@@ -690,7 +691,9 @@ async def cron_settle_pitcher_ks(
         stale_before = (
             min(targets)
             if game_date is None
-            else datetime.now(ET).date() - timedelta(days=3)
+            else datetime.now(ET).date() - timedelta(
+                days=DEFAULT_SETTLEMENT_LOOKBACK_DAYS
+            )
         )
         stale_settlements = await asyncio.to_thread(
             load_stale_settlement_counts,

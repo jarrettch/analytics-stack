@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(6);
+select plan(7);
 
 insert into public.mlb_sgo_event_map (
     sgo_event_id,
@@ -139,6 +139,15 @@ select is(
      where sgo_event_id = 'TEST-DATA'),
     null::text,
     'missing strikeout facts never grade an under as a win'
+);
+
+select is(
+    (select game_count::integer
+     from public.mlb_pitcher_k_settlement_status_counts
+     where game_date = '2026-08-17'
+       and settlement_status = 'unresolved_identity'),
+    1,
+    'unresolved events count as games even without an MLB gamePk'
 );
 
 select * from finish();

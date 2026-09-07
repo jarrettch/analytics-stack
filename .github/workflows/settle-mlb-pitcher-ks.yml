@@ -41,7 +41,7 @@ jobs:
             --max-time 180 \
             --request POST \
             --header "Authorization: Bearer ${CRON_SECRET}" \
-            "$API_URL/api/mlb/cron/settle-pitcher-ks?lookback_days=3"); then
+            "$API_URL/api/mlb/cron/settle-pitcher-ks"); then
             printf 'Response: %s\n' "$response"
           else
             curl_status=$?
@@ -58,6 +58,6 @@ jobs:
 
           stale=$(jq -r '.stale_settlements.observations // 0' <<<"$response")
           if [ "$stale" -gt 0 ]; then
-            echo "WARNING: ${stale} retryable pitcher-K settlements are older than the automatic lookback window"
+            echo "::warning::${stale} retryable pitcher-K settlements are older than the automatic lookback window"
             jq -r '.stale_settlements | "oldest=\(.oldestDate), by-status=\(.byStatus)"' <<<"$response"
           fi
