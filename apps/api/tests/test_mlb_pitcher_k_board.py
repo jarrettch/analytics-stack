@@ -197,6 +197,21 @@ class BuildBoardTest(unittest.TestCase):
         self.assertEqual([b["bookmakerId"] for b in entry["books"]],
                          ["fanduel", "bovada", "unknownbook"])
 
+    def test_invalid_player_team_does_not_invent_an_opponent(self):
+        row = _row(
+            captured_at="2026-08-17T16:00:00+00:00",
+            collection_id="c1",
+            side="over",
+            line=4.5,
+            odds=-108,
+        )
+        row["player_team_id"] = "DETROIT_TIGERS_MLB"
+
+        entry = board.build_board([row])[0]
+
+        self.assertEqual(entry["playerTeam"], "")
+        self.assertEqual(entry["opponentTeam"], "")
+
 
 class BuildHistoryTest(unittest.TestCase):
     def test_history_orders_collections_and_skips_alternates(self):
@@ -224,6 +239,85 @@ class BuildHistoryTest(unittest.TestCase):
 
         self.assertEqual([p["line"] for p in first_start[0]["points"]], [4.5])
         self.assertEqual([p["line"] for p in second_start[0]["points"]], [6.5])
+
+
+class BuildSettlementHistoryTest(unittest.TestCase):
+    def test_summarizes_each_side_without_mixing_hit_rate_and_roi(self):
+        rows = [
+            {
+                "game_date": "2026-08-17",
+                "sgo_event_id": "EVT1",
+                "sgo_player_id": "P1",
+                "pitcher_name": "Test Pitcher",
+                "bookmaker_id": "fanduel",
+                "side": "over",
+                "is_alternate": False,
+                "line": 5.5,
+                "american_odds": 120,
+                "captured_at": "2026-08-17T16:00:00Z",
+                "result_fetched_at": "2026-08-18T05:00:00Z",
+                "strikeouts": 7,
+                "settlement_status": "graded",
+                "grade": "win",
+                "profit_units": 1.2,
+            },
+            {
+                "game_date": "2026-08-12",
+                "sgo_event_id": "EVT0",
+                "sgo_player_id": "P1",
+                "pitcher_name": "Test Pitcher",
+                "bookmaker_id": "fanduel",
+                "side": "over",
+                "is_alternate": False,
+                "line": 6.5,
+                "american_odds": -110,
+                "captured_at": "2026-08-12T16:00:00Z",
+                "result_fetched_at": "2026-08-13T05:00:00Z",
+                "strikeouts": 4,
+                "settlement_status": "graded",
+                "grade": "loss",
+                "profit_units": -1,
+            },
+            {
+                "game_date": "2026-08-17",
+                "sgo_event_id": "EVT1",
+                "sgo_player_id": "P1",
+                "pitcher_name": "Test Pitcher",
+                "bookmaker_id": "fanduel",
+                "side": "under",
+                "is_alternate": False,
+                "line": 5.5,
+                "american_odds": -140,
+                "captured_at": "2026-08-17T16:00:00Z",
+                "strikeouts": 7,
+                "settlement_status": "graded",
+                "grade": "loss",
+                "profit_units": -1,
+            },
+        ]
+
+        history = board.build_settlement_history(rows, "P1")
+
+        self.assertEqual(history["playerName"], "Test Pitcher")
+        self.assertEqual(history["summary"]["over"]["hitRate"], 0.5)
+        self.assertEqual(history["summary"]["over"]["roi"], 0.1)
+        self.assertEqual(history["summary"]["under"]["hitRate"], 0.0)
+        self.assertEqual(history["settlements"][0]["date"], "2026-08-17")
+
+    def test_counts_void_and_unresolved_rows_separately(self):
+        rows = [
+            {"side": "over", "settlement_status": "void", "grade": None},
+            {
+                "side": "over",
+                "settlement_status": "unresolved_identity",
+                "grade": None,
+            },
+        ]
+
+        history = board.build_settlement_history(rows, "P1")
+
+        self.assertEqual(history["summary"]["voids"], 1)
+        self.assertEqual(history["summary"]["pending"], 1)
 
 
 class _SelectQuery:

@@ -107,6 +107,9 @@ jobs:
           elif ! jq -e '.pitcher_k_success == true' >/dev/null <<<"$response"; then
             printf "Failed to collect tomorrow's MLB pitcher-K odds:\n%s\n" "$response" >&2
             exit 1
+          elif ! jq -e '.pitcher_k_identity_success == true' >/dev/null <<<"$response"; then
+            printf "Failed to persist tomorrow's MLB pitcher-K identity mappings:\n%s\n" "$response" >&2
+            exit 1
           fi
 
       - name: Fetch tomorrow's NHL odds

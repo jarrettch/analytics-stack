@@ -32,6 +32,12 @@ class PitcherKCollectionStats:
     malformed_prices: int = 0
     events_skipped: int = 0
     rows_deduplicated: int = 0
+    identity_events_found: int = 0
+    identity_events_resolved: int = 0
+    identity_pitchers_found: int = 0
+    identity_pitchers_resolved: int = 0
+    identity_frozen_rows_skipped: int = 0
+    identity_succeeded: bool = False
     succeeded: bool = False
     skipped: bool = False
 
@@ -42,6 +48,12 @@ class PitcherKCollectionStats:
         self.malformed_prices = other.malformed_prices
         self.events_skipped = other.events_skipped
         self.rows_deduplicated = other.rows_deduplicated
+        self.identity_events_found = other.identity_events_found
+        self.identity_events_resolved = other.identity_events_resolved
+        self.identity_pitchers_found = other.identity_pitchers_found
+        self.identity_pitchers_resolved = other.identity_pitchers_resolved
+        self.identity_frozen_rows_skipped = other.identity_frozen_rows_skipped
+        self.identity_succeeded = other.identity_succeeded
         self.succeeded = other.succeeded
         self.skipped = other.skipped
 

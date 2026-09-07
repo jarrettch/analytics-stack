@@ -1,4 +1,4 @@
-"""HTTP-level auth coverage for the five cron collectors.
+"""HTTP-level auth coverage for the odds and settlement cron collectors.
 
 The per-sport collector tests call cron_fetch_odds() directly, which bypasses
 FastAPI's dependency layer entirely, so they prove nothing about whether these
@@ -21,6 +21,10 @@ CRON_ROUTES = [
     pytest.param("/api/wnba/cron/fetch-odds", wnba, id="wnba"),
     pytest.param("/api/nfl/cron/fetch-odds", nfl, id="nfl"),
 ]
+PROTECTED_CRON_ROUTES = [
+    *CRON_ROUTES,
+    pytest.param("/api/mlb/cron/settle-pitcher-ks", mlb, id="mlb-pitcher-k-settlement"),
+]
 
 
 @pytest.fixture
@@ -36,24 +40,24 @@ def cron_secret(monkeypatch):
     return SECRET
 
 
-@pytest.mark.parametrize("path,module", CRON_ROUTES)
+@pytest.mark.parametrize("path,module", PROTECTED_CRON_ROUTES)
 def test_rejects_request_without_token(client, cron_secret, path, module):
     assert client.post(path).status_code == 401
 
 
-@pytest.mark.parametrize("path,module", CRON_ROUTES)
+@pytest.mark.parametrize("path,module", PROTECTED_CRON_ROUTES)
 def test_rejects_wrong_token(client, cron_secret, path, module):
     response = client.post(path, headers={"Authorization": "Bearer wrong-secret"})
     assert response.status_code == 401
 
 
-@pytest.mark.parametrize("path,module", CRON_ROUTES)
+@pytest.mark.parametrize("path,module", PROTECTED_CRON_ROUTES)
 def test_rejects_non_bearer_scheme(client, cron_secret, path, module):
     response = client.post(path, headers={"Authorization": f"Basic {SECRET}"})
     assert response.status_code == 401
 
 
-@pytest.mark.parametrize("path,module", CRON_ROUTES)
+@pytest.mark.parametrize("path,module", PROTECTED_CRON_ROUTES)
 def test_get_is_no_longer_allowed(client, cron_secret, path, module):
     # These endpoints trigger provider spend and writes, so they must not sit
     # behind a method that crawlers and prefetchers treat as safe.
@@ -112,6 +116,37 @@ def test_nfl_rejects_lookahead_outside_supported_range(
         headers={"Authorization": f"Bearer {SECRET}"},
     )
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize("lookback_days", [0, 8, 400])
+def test_mlb_settlement_rejects_lookback_outside_supported_range(
+    client, cron_secret, lookback_days
+):
+    response = client.post(
+        "/api/mlb/cron/settle-pitcher-ks",
+        params={"lookback_days": lookback_days},
+        headers={"Authorization": f"Bearer {SECRET}"},
+    )
+    assert response.status_code == 422
+
+
+def test_valid_token_reaches_pitcher_k_settlement(client, cron_secret, monkeypatch):
+    calls = []
+
+    async def fake_settle(target):
+        calls.append(target)
+        return {"success": True}
+
+    monkeypatch.setattr(mlb, "_settle_pitcher_k_date", fake_settle)
+    response = client.post(
+        "/api/mlb/cron/settle-pitcher-ks",
+        params={"date": "2026-08-17"},
+        headers={"Authorization": f"Bearer {SECRET}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert [target.isoformat() for target in calls] == ["2026-08-17"]
 
 
 @pytest.mark.parametrize("path,module", CRON_ROUTES)

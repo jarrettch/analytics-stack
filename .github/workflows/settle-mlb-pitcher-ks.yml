@@ -1,0 +1,57 @@
+name: Settle MLB Pitcher K Results
+
+on:
+  schedule:
+    - cron: "30 4 * * *"
+      timezone: "America/New_York"
+  workflow_dispatch:
+
+jobs:
+  settle-pitcher-ks:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      API_URL: ${{ secrets.API_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Wake up API
+        run: |
+          for attempt in {1..6}; do
+            if curl --fail --silent --show-error --max-time 20 \
+              "$API_URL/health" >/dev/null; then
+              break
+            fi
+
+            if [ "$attempt" -eq 6 ]; then
+              echo "Server did not become ready" >&2
+              exit 1
+            fi
+            sleep 15
+          done
+
+      - name: Reconcile and settle recent pitcher K results
+        run: |
+          if response=$(curl \
+            --retry 4 \
+            --retry-delay 15 \
+            --retry-max-time 240 \
+            --silent \
+            --show-error \
+            --fail \
+            --max-time 180 \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "$API_URL/api/mlb/cron/settle-pitcher-ks?lookback_days=3"); then
+            printf 'Response: %s\n' "$response"
+          else
+            curl_status=$?
+            printf 'Request failed:\n%s\n' "$response" >&2
+            exit "$curl_status"
+          fi
+
+          if ! jq -e '.success == true' >/dev/null <<<"$response"; then
+            printf 'Pitcher-K settlement failed:\n%s\n' "$response" >&2
+            exit 1
+          fi
+
+          jq -r '.dates[] | "\(.date): \(.result_rows) pitcher rows, \(.identity_pitchers.resolved)/\(.identity_pitchers.found) identities resolved"' <<<"$response"

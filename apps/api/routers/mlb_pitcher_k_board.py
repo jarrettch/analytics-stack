@@ -1,10 +1,9 @@
 """Read endpoints for Oh-K Corral, the MLB pitcher strikeout odds board.
 
-Serves the append-only `mlb_pitcher_k_odds` history back out as two views:
+Serves the append-only `mlb_pitcher_k_odds` history back out as three views:
 a current-state board (latest and first-observed main line per book, plus the
-latest alternate ladder) and a per-pitcher intraday line history. Both views
-are pure aggregations over one day of snapshots fetched with a short TTL
-cache; no settlement, flags, or identity resolution in v1.
+latest alternate ladder), a per-pitcher intraday line history, and settled
+game history backed by the identity/result views.
 """
 from __future__ import annotations
 
@@ -15,7 +14,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, HTTPException
 
 from . import utils as router_utils
-from .mlb import get_tricode_from_sgo_team_id
+from .mlb_team_ids import get_tricode_from_sgo_team_id
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +30,14 @@ ROW_COLUMNS = (
     "captured_at,collection_id,event_id,starts_at,home_team_id,away_team_id,"
     "player_id,player_name,player_team_id,side,bookmaker_id,is_alternate,"
     "market_phase,line,american_odds,open_line,open_american_odds"
+)
+SETTLEMENT_VIEW = "mlb_pitcher_k_settlements"
+SETTLEMENT_COLUMNS = (
+    "game_date,mlb_game_pk,sgo_event_id,sgo_player_id,pitcher_name,"
+    "away_team,home_team,bookmaker_id,side,is_alternate,line,american_odds,"
+    "captured_at,strikeouts,did_start,appeared,innings_pitched,outs_recorded,"
+    "batters_faced,pitches_thrown,result_fetched_at,settlement_status,grade,"
+    "void_reason,profit_units"
 )
 
 # Display order for the board's book columns; unknown books sort after, alphabetically.
@@ -235,13 +242,27 @@ def build_board(rows: list[dict]) -> list[dict]:
         home_tri = get_tricode_from_sgo_team_id(latest["home_team_id"] or "")
         away_tri = get_tricode_from_sgo_team_id(latest["away_team_id"] or "")
         player_tri = get_tricode_from_sgo_team_id(latest["player_team_id"] or "")
+        if player_tri == away_tri:
+            opponent_tri = home_tri
+        elif player_tri == home_tri:
+            opponent_tri = away_tri
+        else:
+            logger.warning(
+                "Pitcher-K board: player team %r is not in event %s (%s at %s)",
+                player_tri,
+                event_id,
+                away_tri,
+                home_tri,
+            )
+            player_tri = ""
+            opponent_tri = ""
         board.append(
             {
                 "eventId": event_id,
                 "playerId": player_id,
                 "playerName": latest["player_name"] or player_id,
                 "playerTeam": player_tri,
-                "opponentTeam": home_tri if player_tri == away_tri else away_tri,
+                "opponentTeam": opponent_tri,
                 "homeTeam": home_tri,
                 "awayTeam": away_tri,
                 "startsAt": latest["starts_at"],
@@ -283,6 +304,109 @@ def build_history(rows: list[dict], player_id: str, event_id: str) -> list[dict]
     ]
 
 
+def _side_summary(rows: list[dict], side: str) -> dict:
+    graded = [
+        row for row in rows
+        if row.get("side") == side and row.get("grade") in {"win", "loss", "push"}
+    ]
+    wins = sum(row["grade"] == "win" for row in graded)
+    losses = sum(row["grade"] == "loss" for row in graded)
+    pushes = sum(row["grade"] == "push" for row in graded)
+    decisions = wins + losses
+    profit = sum(float(row.get("profit_units") or 0) for row in graded)
+    return {
+        "bets": len(graded),
+        "wins": wins,
+        "losses": losses,
+        "pushes": pushes,
+        "hitRate": round(wins / decisions, 4) if decisions else None,
+        "roi": round(profit / len(graded), 4) if graded else None,
+        "profitUnits": round(profit, 3),
+    }
+
+
+def build_settlement_history(rows: list[dict], player_id: str) -> dict:
+    ordered = sorted(
+        rows,
+        key=lambda row: (row.get("game_date") or "", row.get("captured_at") or ""),
+        reverse=True,
+    )
+    player_name = next(
+        (row.get("pitcher_name") for row in ordered if row.get("pitcher_name")),
+        player_id,
+    )
+    return {
+        "playerId": player_id,
+        "playerName": player_name,
+        "asOf": max(
+            (row.get("result_fetched_at") for row in ordered if row.get("result_fetched_at")),
+            default=None,
+        ),
+        "summary": {
+            "over": _side_summary(ordered, "over"),
+            "under": _side_summary(ordered, "under"),
+            "voids": sum(row.get("settlement_status") == "void" for row in ordered),
+            "pending": sum(
+                row.get("settlement_status") in {
+                    "pending", "policy_pending", "unresolved_identity"
+                }
+                for row in ordered
+            ),
+        },
+        "settlements": [{
+            "date": row.get("game_date"),
+            "gamePk": row.get("mlb_game_pk"),
+            "eventId": row.get("sgo_event_id"),
+            "awayTeam": row.get("away_team"),
+            "homeTeam": row.get("home_team"),
+            "bookmakerId": row.get("bookmaker_id"),
+            "side": row.get("side"),
+            "isAlternate": bool(row.get("is_alternate")),
+            "line": row.get("line"),
+            "americanOdds": row.get("american_odds"),
+            "capturedAt": row.get("captured_at"),
+            "strikeouts": row.get("strikeouts"),
+            "didStart": row.get("did_start"),
+            "appeared": row.get("appeared"),
+            "inningsPitched": row.get("innings_pitched"),
+            "settlementStatus": row.get("settlement_status"),
+            "grade": row.get("grade"),
+            "voidReason": row.get("void_reason"),
+            "profitUnits": (
+                float(row["profit_units"])
+                if row.get("profit_units") is not None
+                else None
+            ),
+        } for row in ordered],
+    }
+
+
+def fetch_settlement_rows(player_id: str, include_alternates: bool) -> list[dict]:
+    if not router_utils.supabase:
+        raise HTTPException(status_code=503, detail="Settlement history is not configured")
+    try:
+        query = (
+            router_utils.supabase.table(SETTLEMENT_VIEW)
+            .select(SETTLEMENT_COLUMNS)
+            .eq("sgo_player_id", player_id)
+        )
+        if not include_alternates:
+            query = query.eq("is_alternate", False)
+        response = (
+            query.order("game_date", desc=True)
+            .order("captured_at", desc=True)
+            .limit(500)
+            .execute()
+        )
+        return response.data or []
+    except Exception as exc:
+        logger.exception("Pitcher-K settlement history failed for %s", player_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Settlement history is temporarily unavailable",
+        ) from exc
+
+
 # Sync (`def`) routes: FastAPI runs them in its threadpool, so the synchronous
 # Supabase pagination on a cold cache can't stall the event loop.
 @router.get("/board")
@@ -322,3 +446,11 @@ def pitcher_k_history(player_id: str, event_id: str, date: str | None = None):
         ),
         "books": books,
     }
+
+
+@router.get("/settlements/{player_id}")
+def pitcher_k_settlements(player_id: str, include_alternates: bool = False):
+    return build_settlement_history(
+        fetch_settlement_rows(player_id, include_alternates),
+        player_id,
+    )

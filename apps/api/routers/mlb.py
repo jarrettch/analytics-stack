@@ -14,6 +14,7 @@ from .utils import (
     CACHE_TTL_LIVE,
     CACHE_TTL_ODDS,
     ET,
+    UTC,
     Cache,
     de_vig_ml,
     fetch_sgo_odds,
@@ -29,11 +30,23 @@ from .mlb_pitcher_k_odds import (
     collection_id_for,
     collect_pitcher_k_snapshots,
 )
+from .mlb_pitcher_k_settlement import (
+    build_pitching_result_rows,
+    identity_sources_from_sgo_events,
+    load_snapshot_identity_sources,
+    persist_pitching_results,
+    reconcile_pitcher_k_identities,
+)
+from .mlb_team_ids import MLB_TEAM_ID_TO_TRI, get_tricode_from_sgo_team_id
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mlb", tags=["MLB"])
+SettlementLookback = Annotated[
+    int,
+    Query(ge=1, le=7, description="Completed ET dates to recheck."),
+]
 
 cache = Cache({
     "schedule":         CACHE_TTL_DEFAULT,
@@ -99,53 +112,6 @@ async def get_context_metrics(client: httpx.AsyncClient, game_pk: int):
     except Exception:
         pass
     return None
-
-MLB_TEAM_ID_TO_TRI = {
-    108: "LAA", 109: "AZ",  110: "BAL", 111: "BOS", 112: "CHC",
-    113: "CIN", 114: "CLE", 115: "COL", 116: "DET", 117: "HOU",
-    118: "KC",  119: "LAD", 120: "WSH", 121: "NYM", 133: "ATH",
-    134: "PIT", 135: "SD",  136: "SEA", 137: "SF",  138: "STL",
-    139: "TB",  140: "TEX", 141: "TOR", 142: "MIN", 143: "PHI",
-    144: "ATL", 145: "CWS", 146: "MIA", 147: "NYY", 158: "MIL",
-}
-
-def get_tricode_from_sgo_team_id(team_id: str) -> str:
-    """Map SportsGameOdds MLB teamID to tricode. All teams use full name + _MLB suffix."""
-    sgo_map = {
-        "LOS_ANGELES_ANGELS_MLB": "LAA",
-        "ARIZONA_DIAMONDBACKS_MLB": "AZ",
-        "BALTIMORE_ORIOLES_MLB": "BAL",
-        "BOSTON_RED_SOX_MLB": "BOS",
-        "CHICAGO_CUBS_MLB": "CHC",
-        "CINCINNATI_REDS_MLB": "CIN",
-        "CLEVELAND_GUARDIANS_MLB": "CLE",
-        "COLORADO_ROCKIES_MLB": "COL",
-        "DETROIT_TIGERS_MLB": "DET",
-        "HOUSTON_ASTROS_MLB": "HOU",
-        "KANSAS_CITY_ROYALS_MLB": "KC",
-        "LOS_ANGELES_DODGERS_MLB": "LAD",
-        "WASHINGTON_NATIONALS_MLB": "WSH",
-        "NEW_YORK_METS_MLB": "NYM",
-        "OAKLAND_ATHLETICS_MLB": "ATH",
-        "PITTSBURGH_PIRATES_MLB": "PIT",
-        "SAN_DIEGO_PADRES_MLB": "SD",
-        "SEATTLE_MARINERS_MLB": "SEA",
-        "SAN_FRANCISCO_GIANTS_MLB": "SF",
-        "ST_LOUIS_CARDINALS_MLB": "STL",
-        "STLOUIS_CARDINALS_MLB": "STL",  # SGO actually returns this variant (no underscore)
-        "TAMPA_BAY_RAYS_MLB": "TB",
-        "TEXAS_RANGERS_MLB": "TEX",
-        "TORONTO_BLUE_JAYS_MLB": "TOR",
-        "MINNESOTA_TWINS_MLB": "MIN",
-        "PHILADELPHIA_PHILLIES_MLB": "PHI",
-        "ATLANTA_BRAVES_MLB": "ATL",
-        "CHICAGO_WHITE_SOX_MLB": "CWS",
-        "MIAMI_MARLINS_MLB": "MIA",
-        "NEW_YORK_YANKEES_MLB": "NYY",
-        "MILWAUKEE_BREWERS_MLB": "MIL",
-    }
-    return sgo_map.get(team_id.upper(), "")
-
 
 def _detail_status(game_status: int) -> str:
     if game_status == 2:
@@ -310,7 +276,7 @@ def _mlb_win_probability(points: list[dict]) -> list[dict]:
         })
     return out
 
-async def get_schedule(date_str: str) -> list:
+async def get_schedule(date_str: str, *, raise_on_error: bool = False) -> list:
     """Fetch today's MLB schedule from the MLB Stats API."""
     try:
         url = "https://statsapi.mlb.com/api/v1/schedule"
@@ -378,6 +344,8 @@ async def get_schedule(date_str: str) -> list:
                 games.append({
                     "gamePk": str(game["gamePk"]),
                     "gameStatus": game_status,
+                    "abstractGameState": abstract_state,
+                    "detailedState": detailed_state,
                     "statusText": status_text,
                     "officialDate": official_date,
                     "localTimeHHMM": local_time_hhmm(starts_at),
@@ -403,7 +371,23 @@ async def get_schedule(date_str: str) -> list:
         return games
     except Exception as e:
         logger.error(f"MLB schedule fetch error: {e}", exc_info=True)
+        if raise_on_error:
+            raise
         return []
+
+
+async def get_mlb_game_feed(game_pk: int) -> dict | None:
+    try:
+        response = await get_http_client().get(
+            f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live",
+            timeout=20,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        logger.warning("MLB game feed failed for %s: %s", game_pk, exc)
+        return None
+
 
 async def get_standings_map() -> dict:
     """Fetch AL/NL standings from MLB Stats API. Returns dict keyed by team ID."""
@@ -520,12 +504,26 @@ async def get_odds_map(
 ):
     """Fetch MLB odds and append pitcher-K prices from the same SGO response."""
     async def collect_pitcher_ks(events: list[dict], captured_at: datetime) -> None:
+        identity_date = target_date or captured_at.astimezone(ET).date()
+        schedule = await get_schedule(identity_date.isoformat())
         collected = await asyncio.to_thread(
             collect_pitcher_k_snapshots,
             events,
             captured_at,
             pitcher_k_collection_id,
         )
+        identity_stats = await asyncio.to_thread(
+            reconcile_pitcher_k_identities,
+            identity_sources_from_sgo_events(events, captured_at),
+            schedule,
+            captured_at,
+        )
+        collected.identity_events_found = identity_stats.events_found
+        collected.identity_events_resolved = identity_stats.events_resolved
+        collected.identity_pitchers_found = identity_stats.pitchers_found
+        collected.identity_pitchers_resolved = identity_stats.pitchers_resolved
+        collected.identity_frozen_rows_skipped = identity_stats.frozen_rows_skipped
+        collected.identity_succeeded = identity_stats.succeeded
         if pitcher_k_stats is not None:
             pitcher_k_stats.copy_from(collected)
 
@@ -583,10 +581,114 @@ async def cron_fetch_odds(
             "pitcher_k_events_skipped": pitcher_k_stats.events_skipped,
             "pitcher_k_skipped": pitcher_k_stats.skipped,
             "pitcher_k_persisted_to": "supabase:mlb_pitcher_k_odds",
+            "pitcher_k_identity_success": pitcher_k_stats.identity_succeeded,
+            "pitcher_k_identity_events": {
+                "found": pitcher_k_stats.identity_events_found,
+                "resolved": pitcher_k_stats.identity_events_resolved,
+            },
+            "pitcher_k_identity_pitchers": {
+                "found": pitcher_k_stats.identity_pitchers_found,
+                "resolved": pitcher_k_stats.identity_pitchers_resolved,
+            },
+            "pitcher_k_identity_frozen_rows_skipped": (
+                pitcher_k_stats.identity_frozen_rows_skipped
+            ),
             "date": target.isoformat(),
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+async def _settle_pitcher_k_date(target: date) -> dict:
+    fetched_at = datetime.now(UTC)
+    schedule = await get_schedule(target.isoformat(), raise_on_error=True)
+    sources = await asyncio.to_thread(load_snapshot_identity_sources, target)
+    identity_stats = await asyncio.to_thread(
+        reconcile_pitcher_k_identities,
+        sources,
+        schedule,
+        fetched_at,
+    )
+
+    final_games = [
+        game for game in schedule if game.get("abstractGameState") == "Final"
+    ]
+    feeds = await asyncio.gather(
+        *(get_mlb_game_feed(int(game["gamePk"])) for game in final_games)
+    )
+    result_rows = []
+    feed_failures = []
+    for game, feed in zip(final_games, feeds):
+        game_pk = int(game["gamePk"])
+        if feed is None:
+            feed_failures.append(game_pk)
+            continue
+        result_rows.extend(
+            build_pitching_result_rows(game_pk, target, feed, fetched_at)
+        )
+    result_stats = await asyncio.to_thread(
+        persist_pitching_results,
+        result_rows,
+        schedule,
+        fetched_at,
+    )
+    return {
+        "date": target.isoformat(),
+        "scheduled_games": len(schedule),
+        "final_games": len(final_games),
+        "feed_failures": feed_failures,
+        "result_rows": result_stats.result_rows,
+        "identity_events": {
+            "found": identity_stats.events_found,
+            "resolved": identity_stats.events_resolved,
+        },
+        "identity_pitchers": {
+            "found": identity_stats.pitchers_found,
+            "resolved": identity_stats.pitchers_resolved,
+        },
+        "identity_succeeded": identity_stats.succeeded,
+        "results_succeeded": result_stats.succeeded,
+        "frozen_events": result_stats.frozen_events,
+        "success": (
+            identity_stats.succeeded
+            and result_stats.succeeded
+            and not feed_failures
+        ),
+    }
+
+
+@router.post(
+    "/cron/settle-pitcher-ks",
+    dependencies=[Depends(require_cron_auth)],
+)
+async def cron_settle_pitcher_ks(
+    game_date: Annotated[date | None, Query(alias="date")] = None,
+    lookback_days: SettlementLookback = 3,
+):
+    """Reconcile identities and upsert official results for completed games."""
+    try:
+        if game_date is not None:
+            targets = [game_date]
+        else:
+            yesterday = datetime.now(ET).date() - timedelta(days=1)
+            targets = [
+                yesterday - timedelta(days=offset)
+                for offset in reversed(range(lookback_days))
+            ]
+        dates = []
+        for target in targets:
+            dates.append(await _settle_pitcher_k_date(target))
+        return {
+            "success": all(result["success"] for result in dates),
+            "dates": dates,
+            "persisted_to": (
+                "supabase:mlb_sgo_event_map+mlb_sgo_pitcher_map+"
+                "mlb_pitcher_k_results"
+            ),
+        }
+    except Exception as exc:
+        logger.exception("MLB pitcher-K settlement cron failed")
+        return {"success": False, "error": str(exc)}
 
 @router.get("/today")
 async def get_todays_games():

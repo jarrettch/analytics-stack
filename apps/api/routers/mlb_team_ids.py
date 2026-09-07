@@ -1,0 +1,48 @@
+"""Shared MLB team identifiers used by schedule and SGO reconciliation."""
+
+MLB_TEAM_ID_TO_TRI = {
+    108: "LAA", 109: "AZ", 110: "BAL", 111: "BOS", 112: "CHC",
+    113: "CIN", 114: "CLE", 115: "COL", 116: "DET", 117: "HOU",
+    118: "KC", 119: "LAD", 120: "WSH", 121: "NYM", 133: "ATH",
+    134: "PIT", 135: "SD", 136: "SEA", 137: "SF", 138: "STL",
+    139: "TB", 140: "TEX", 141: "TOR", 142: "MIN", 143: "PHI",
+    144: "ATL", 145: "CWS", 146: "MIA", 147: "NYY", 158: "MIL",
+}
+
+SGO_MLB_TEAM_TO_TRI = {
+    "LOS_ANGELES_ANGELS_MLB": "LAA",
+    "ARIZONA_DIAMONDBACKS_MLB": "AZ",
+    "BALTIMORE_ORIOLES_MLB": "BAL",
+    "BOSTON_RED_SOX_MLB": "BOS",
+    "CHICAGO_CUBS_MLB": "CHC",
+    "CINCINNATI_REDS_MLB": "CIN",
+    "CLEVELAND_GUARDIANS_MLB": "CLE",
+    "COLORADO_ROCKIES_MLB": "COL",
+    "DETROIT_TIGERS_MLB": "DET",
+    "HOUSTON_ASTROS_MLB": "HOU",
+    "KANSAS_CITY_ROYALS_MLB": "KC",
+    "LOS_ANGELES_DODGERS_MLB": "LAD",
+    "WASHINGTON_NATIONALS_MLB": "WSH",
+    "NEW_YORK_METS_MLB": "NYM",
+    "OAKLAND_ATHLETICS_MLB": "ATH",
+    "PITTSBURGH_PIRATES_MLB": "PIT",
+    "SAN_DIEGO_PADRES_MLB": "SD",
+    "SEATTLE_MARINERS_MLB": "SEA",
+    "SAN_FRANCISCO_GIANTS_MLB": "SF",
+    "ST_LOUIS_CARDINALS_MLB": "STL",
+    "STLOUIS_CARDINALS_MLB": "STL",
+    "TAMPA_BAY_RAYS_MLB": "TB",
+    "TEXAS_RANGERS_MLB": "TEX",
+    "TORONTO_BLUE_JAYS_MLB": "TOR",
+    "MINNESOTA_TWINS_MLB": "MIN",
+    "PHILADELPHIA_PHILLIES_MLB": "PHI",
+    "ATLANTA_BRAVES_MLB": "ATL",
+    "CHICAGO_WHITE_SOX_MLB": "CWS",
+    "MIAMI_MARLINS_MLB": "MIA",
+    "NEW_YORK_YANKEES_MLB": "NYY",
+    "MILWAUKEE_BREWERS_MLB": "MIL",
+}
+
+
+def get_tricode_from_sgo_team_id(team_id: str) -> str:
+    return SGO_MLB_TEAM_TO_TRI.get((team_id or "").upper(), "")
