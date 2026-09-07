@@ -22,7 +22,9 @@ insert into public.mlb_sgo_event_map (
     ('TEST-UNFETCHED', 990003, '2026-08-17', 'resolved', 'Final', 'Final',
      null, '2026-08-18T05:00:00Z'),
     ('TEST-DATA', 990004, '2026-08-17', 'resolved', 'Final', 'Final',
-     '2026-08-18T05:00:00Z', '2026-08-18T05:00:00Z');
+     '2026-08-18T05:00:00Z', '2026-08-18T05:00:00Z'),
+    ('TEST-UNRESOLVED', null, '2026-08-17', 'unresolved', null, null,
+     null, '2026-08-18T05:00:00Z');
 
 insert into public.mlb_sgo_pitcher_map (
     sgo_event_id,
@@ -88,7 +90,10 @@ insert into public.mlb_pitcher_k_odds (
      'test-unfetched', 'over', 'book1', false, 'pregame', 5.5, -110),
     ('00000000-0000-0000-0000-000000000004', '2026-08-17T18:00:00Z',
      '2026-08-17', 'TEST-DATA', '2026-08-17T23:00:00Z', 'TEST-P4',
-     'test-data', 'under', 'book1', false, 'pregame', 5.5, -110);
+     'test-data', 'under', 'book1', false, 'pregame', 5.5, -110),
+    ('00000000-0000-0000-0000-000000000005', '2026-08-17T18:00:00Z',
+     '2026-08-17', 'TEST-UNRESOLVED', '2026-08-17T23:00:00Z', 'TEST-P5',
+     'test-unresolved', 'over', 'book1', false, 'pregame', 5.5, -110);
 
 select results_eq(
     $$
