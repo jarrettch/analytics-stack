@@ -19,6 +19,7 @@ from .utils import (
     de_vig_ml,
     fetch_sgo_odds,
     format_et_time,
+    grade_spread_result,
     get_http_client,
     load_persisted_odds,
     local_time_hhmm,
@@ -820,11 +821,12 @@ async def get_todays_games():
                 home_score = g.get("homeScore") or 0
 
                 if spread_value is not None:
-                    margin = away_score - home_score
-                    if favorite == "away":
-                        spread_result = margin > abs(spread_value)
-                    else:
-                        spread_result = (-margin) > abs(spread_value)
+                    spread_result = grade_spread_result(
+                        away_score,
+                        home_score,
+                        favorite,
+                        spread_value,
+                    )
 
                 if over_under is not None:
                     actual_total = away_score + home_score

@@ -21,17 +21,18 @@ deferred.
 ## Goal
 
 Let the researcher compose one paste-ready, multi-sport slate from today's games
-in Eastern Time, trim it to the work at hand, then copy that exact edited
-selection. The default action is `Copy formatted slate`, because triage,
-combining sports, and deciding batches happen before prompt selection.
+in Eastern Time plus the current NFL week, trim it to the work at hand, then
+copy that exact edited selection. The default action is `Copy formatted slate`,
+because triage, combining sports, and deciding batches happen before prompt
+selection.
 
 ## Scope: core v1
 
-- Today only, evaluated in Eastern Time. There is no date picker or arbitrary
-  date input in v1.
-- MLB, WNBA, NFL, NBA, and NHL only. Reuse each sport's existing
-  `/api/{sport}/today` route; do not add new data sources or a separate export
-  fetch path.
+- MLB, WNBA, NBA, and NHL use today's Eastern Time slate. NFL uses the current
+  ESPN season/week slate. There is no date picker or arbitrary date input.
+- MLB, WNBA, NFL, NBA, and NHL only. Reuse `/api/{sport}/today` for daily
+  sports and `/api/nfl/week` for NFL. Do not add new data sources or a separate
+  export fetch path.
 - The user can add any combination of those sports into one slate.
 - Render games grouped under clear sport headings. This is required for NFL so
   preseason games remain unmistakably labeled.
@@ -51,10 +52,11 @@ combining sports, and deciding batches happen before prompt selection.
 
 ## Data and formatting
 
-The composer fetches each selected sport's existing `/today` payload on demand,
+The composer fetches each selected sport's existing dashboard payload on demand,
 then normalizes the result into a client-side game model that retains the
 display-relevant fields (sport, game ID, teams, scheduled time/status, probable
-pitchers where available, and current line snapshot).
+pitchers where available, and current line snapshot). NFL uses `/week`; every
+other sport uses `/today`.
 
 Use the existing data assembly as-is; `/prep` is not a second odds pipeline.
 The formatted slate contains selected matchups plus the current line snapshot:
@@ -88,7 +90,7 @@ game metadata identifies preseason.
 - a monospace preview of the exact formatted slate to be copied; and
 - a primary `Copy formatted slate` action.
 
-Adding a sport fetches its `/today` route once for the current composition.
+Adding a sport fetches its configured route once for the current composition.
 Unchecking a game edits only local composer state. Removing and re-adding a
 sport may fetch its current route payload again; it must not disturb selections
 in the other sport groups.
@@ -123,8 +125,8 @@ into the public app.
 
 ## Build order
 
-1. Build the today-ET multi-sport composer over the five existing `/today`
-   routes, with sport groups, removable games, preview, and `Copy formatted slate`.
+1. Build the multi-sport composer over the daily routes and NFL weekly route,
+   with sport groups, removable games, preview, and `Copy formatted slate`.
 2. Verify that all exports derive from the same local edited selection; retain
    the slate through partial fetch failures and sport additions/removals.
 3. If prompt exposure is approved, add v2 and v3 wrapper actions over that same
@@ -142,5 +144,6 @@ into the public app.
 - `Copy formatted slate` is visually and behaviorally the primary/default action.
 - If enabled, v2 and v3 copies differ only by their wrapper/template; their slate
   body is byte-for-byte the current formatted slate.
-- No v1 path fetches tennis/UFC, accepts a non-today date, batches automatically,
-  or executes a model.
+- No v1 path fetches tennis/UFC, accepts an arbitrary date, batches
+  automatically, or executes a model. NFL week selection comes from the
+  backend's current-week logic.

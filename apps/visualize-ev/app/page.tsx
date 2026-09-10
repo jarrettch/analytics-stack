@@ -33,7 +33,8 @@ function hasGameStatus(matchup: MatchupData): matchup is MatchupData & { gameSta
 }
 
 async function fetchSportSlate(sport: Sport): Promise<MatchupData[]> {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/${sport}/today`);
+  const endpoint = sport === "nfl" ? "nfl/week" : `${sport}/today`;
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/${endpoint}`);
   if (!res.ok) {
     throw new Error(`${sport.toUpperCase()} feed returned ${res.status}`);
   }
@@ -121,7 +122,7 @@ export default function Home() {
       if (LIVE_SPORTS.includes(activeSport)) {
         if (isInitial) setLoading(true);
 
-        const endpoint = `${activeSport}/today`;
+        const endpoint = activeSport === "nfl" ? "nfl/week" : `${activeSport}/today`;
         try {
           const data = await fetchSportSlate(activeSport);
 
@@ -258,7 +259,9 @@ export default function Home() {
               />
             ) : (
               <div className="flex flex-col items-center justify-center py-20 font-mono text-xs text-muted-foreground">
-                <span className="uppercase">No {SPORT_LABELS[activeSport]} games scheduled today</span>
+                <span className="uppercase">
+                  No {SPORT_LABELS[activeSport]} games scheduled {activeSport === "nfl" ? "this week" : "today"}
+                </span>
                 {!LIVE_SPORTS.includes(activeSport) && (
                   <span className="mt-2 text-[10px] text-muted-foreground/60">
                     ({SPORT_LABELS[activeSport]} data coming soon)

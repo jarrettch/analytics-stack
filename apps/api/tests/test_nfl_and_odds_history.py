@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from routers.nfl import (
+    _assemble_slate,
     _early_window_count,
     _early_window_matchup_keys,
     _project_score,
@@ -15,9 +16,15 @@ from routers.nfl import (
     _to_float,
     _week_label,
     cron_fetch_odds,
+    get_game_detail,
     get_tricode_from_sgo_team_id,
 )
-from routers.utils import ET, odds_snapshot_hash, save_odds_snapshots
+from routers.utils import (
+    ET,
+    grade_spread_result,
+    odds_snapshot_hash,
+    save_odds_snapshots,
+)
 
 
 class _Query:
@@ -118,6 +125,11 @@ class OddsHistoryTest(unittest.TestCase):
 
 
 class NFLParsingTest(unittest.TestCase):
+    def test_spread_grading_distinguishes_push_from_half_point_loss(self):
+        self.assertEqual(grade_spread_result(10, 13, "home", -3), "push")
+        self.assertFalse(grade_spread_result(10, 13, "home", -3.5))
+        self.assertTrue(grade_spread_result(10, 14, "home", -3.5))
+
     def test_early_window_count_uses_eastern_start_time(self):
         starts = [
             "2026-09-13T16:30:00Z",
@@ -227,6 +239,134 @@ class NFLParsingTest(unittest.TestCase):
 
 
 class NFLVerificationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_dashboard_assembles_the_full_nfl_week(self):
+        thursday = date(2026, 9, 10)
+        sunday = thursday + timedelta(days=3)
+        monday = thursday + timedelta(days=4)
+
+        def event(
+            game_id,
+            starts_at,
+            away,
+            home,
+            week,
+            *,
+            away_score="0",
+            home_score="0",
+            state="pre",
+        ):
+            return {
+                "id": game_id,
+                "date": starts_at,
+                "season": {"year": 2026, "type": 2, "slug": "regular-season"},
+                "week": {"number": week},
+                "competitions": [{
+                    "status": {"type": {"state": state}},
+                    "competitors": [
+                        {
+                            "homeAway": "away",
+                            "team": {"abbreviation": away, "name": away},
+                            "score": away_score,
+                        },
+                        {
+                            "homeAway": "home",
+                            "team": {"abbreviation": home, "name": home},
+                            "score": home_score,
+                        },
+                    ],
+                }],
+            }
+
+        thursday_event = event(
+            "thu",
+            "2026-09-11T00:20:00Z",
+            "NE",
+            "SEA",
+            1,
+            away_score="10",
+            home_score="13",
+            state="post",
+        )
+        weekly_scoreboard = {"events": [
+            thursday_event,
+            event("sun", "2026-09-13T17:00:00Z", "BUF", "NYJ", 1),
+            event("mon", "2026-09-15T00:15:00Z", "BAL", "CLE", 1),
+        ]}
+        loaded_dates = []
+
+        async def fake_scoreboard(target):
+            if target == thursday:
+                return {"events": [thursday_event]}
+            return {"events": []}
+
+        def fake_load_odds(target, *, table_name):
+            loaded_dates.append(target)
+            matchup = {
+                thursday: "NE@SEA",
+                sunday: "BUF@NYJ",
+                monday: "BAL@CLE",
+            }.get(target)
+            if not matchup:
+                return {}
+            return {
+                (target.isoformat(), matchup): {
+                    "homeMoneyline": -110,
+                    "awayMoneyline": 100,
+                    "homeSpread": -3 if target == thursday else None,
+                    "awaySpread": 3 if target == thursday else None,
+                    "overUnder": 23 if target == thursday else None,
+                }
+            }
+
+        with (
+            patch("routers.nfl.slate_date_et", return_value=thursday),
+            patch("routers.nfl._scoreboard_for_date", new=fake_scoreboard),
+            patch(
+                "routers.nfl._scoreboard_for_week",
+                new=AsyncMock(return_value=weekly_scoreboard),
+            ),
+            patch(
+                "routers.nfl._standings_for_season",
+                new=AsyncMock(return_value={}),
+            ),
+            patch("routers.nfl.load_persisted_odds", new=fake_load_odds),
+        ):
+            result = await _assemble_slate(full_week=True)
+
+        self.assertEqual([game["gameId"] for game in result], ["thu", "sun", "mon"])
+        self.assertEqual(
+            loaded_dates,
+            [thursday, sunday, monday],
+        )
+        self.assertTrue(all(game["homeMoneyline"] == -110 for game in result))
+        self.assertEqual(result[0]["spreadResult"], "push")
+        self.assertEqual(result[0]["totalResult"], "push")
+
+    async def test_game_detail_can_open_any_game_on_the_weekly_dashboard(self):
+        sunday_matchup = {
+            "gameId": "sun",
+            "gameStatus": 1,
+            "status": "1:00 PM ET",
+            "away": {"abbreviation": "BUF"},
+            "home": {"abbreviation": "NYJ"},
+        }
+        response = SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {},
+        )
+        client = SimpleNamespace(get=AsyncMock(return_value=response))
+
+        with (
+            patch(
+                "routers.nfl.get_current_week_games",
+                new=AsyncMock(return_value=[sunday_matchup]),
+            ),
+            patch("routers.nfl.get_http_client", return_value=client),
+        ):
+            detail = await get_game_detail("sun")
+
+        self.assertEqual(detail["matchup"], sunday_matchup)
+
     async def test_lookahead_collects_only_dates_with_scheduled_games(self):
         fixed_now = datetime(2026, 9, 7, 12, tzinfo=ET)
         today = fixed_now.date()

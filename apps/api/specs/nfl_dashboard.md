@@ -17,12 +17,17 @@ proprietary ratings or prediction models.
 
 ## Slate behavior
 
-- `GET /api/nfl/today` returns today's ET games. If today is dark, look ahead
-  up to seven days and return the next populated date, matching the useful
-  behavior of the MLB/NHL dashboards.
+- `GET /api/nfl/week` returns every game in the current NFL week. The route
+  anchors on today's ET slate, looks ahead up to seven days when necessary,
+  and then requests the anchor event's full ESPN season/week slate.
+- `GET /api/nfl/today` remains the calendar-day feed used by Slate Prep. If
+  today is dark, it looks ahead up to seven days and returns the next populated
+  date. Game-detail lookup uses the weekly feed so every displayed card opens.
 - Preseason games are included and labeled `HOF` or `PRE W<n>`.
 - Regular-season and postseason games use `WK<n>` / the upstream week number.
 - Status normalizes to `gameStatus`: 1 preview, 2 live, 3 final.
+- Final spread results distinguish a cover, loss, and exact-margin push. The
+  card renders a push as a neutral `P`, matching total pushes.
 - Live status displays `Q<n> mm:ss`; overtime displays `OT`.
 
 ## Team context
@@ -50,6 +55,7 @@ is only a fallback. The model label is `MARKET + TEAM STATS`, not `DVOA`.
 
 ```text
 GET  /api/nfl/today
+GET  /api/nfl/week
 GET  /api/nfl/game/{game_id}
 POST /api/nfl/cron/fetch-odds?offset=0|1
 ```

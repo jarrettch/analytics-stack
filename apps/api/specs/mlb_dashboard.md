@@ -285,7 +285,7 @@ For each game in today's schedule:
     "model": "PECOTA v2.8",
     "gameNumber": game_number_or_none,
     "spreadLine": spread_text,          # "NYM +1.5" or "N/A"
-    "spreadResult": spread_result,      # True/False/None
+    "spreadResult": spread_result,      # True/False/"push"/None
     "pregameSpread": home_run_line,     # home perspective (+1.5 typical)
     "spreadOddsHome": ...,
     "spreadOddsAway": ...,

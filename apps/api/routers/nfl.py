@@ -17,6 +17,7 @@ from .utils import (
     Cache,
     fetch_sgo_odds,
     format_et_time,
+    grade_spread_result,
     get_http_client,
     load_persisted_odds,
     slate_date_et,
@@ -44,6 +45,7 @@ cache = Cache({
     "standings": 3600,
     "odds": CACHE_TTL_ODDS,
     "assembled": CACHE_TTL_DEFAULT,
+    "weekly": CACHE_TTL_DEFAULT,
 })
 
 NFL_TEAM_NAMES = {
@@ -114,6 +116,56 @@ async def _scoreboard_for_date_with_status(
 
 async def _scoreboard_for_date(target_date: date) -> dict:
     scoreboard, _ = await _scoreboard_for_date_with_status(target_date)
+    return scoreboard
+
+
+def _event_week_key(event: dict) -> tuple[int, int, int] | None:
+    try:
+        season = event.get("season") or {}
+        week = event.get("week") or {}
+        key = (
+            int(season.get("year")),
+            int(season.get("type")),
+            int(week.get("number")),
+        )
+    except (TypeError, ValueError):
+        return None
+    return key if all(key) else None
+
+
+async def _scoreboard_for_week(anchor_event: dict) -> dict:
+    week_key = _event_week_key(anchor_event)
+    if not week_key:
+        return {}
+
+    season_year, season_type, week_number = week_key
+    try:
+        response = await get_http_client().get(
+            ESPN_SCOREBOARD_URL,
+            params={
+                "dates": str(season_year),
+                "seasontype": season_type,
+                "week": week_number,
+                "limit": 100,
+            },
+        )
+        response.raise_for_status()
+        scoreboard = response.json()
+    except Exception as exc:
+        logger.warning(
+            "NFL weekly scoreboard fetch failed for %s/%s week %s: %s",
+            season_year,
+            season_type,
+            week_number,
+            exc,
+        )
+        return {}
+
+    scoreboard["events"] = [
+        event
+        for event in scoreboard.get("events", [])
+        if _event_week_key(event) == week_key
+    ]
     return scoreboard
 
 
@@ -360,20 +412,44 @@ def _team_payload(competitor: dict, stats: dict, predicted_score: int, win_proba
     }
 
 
-async def _assemble_slate() -> list[dict]:
+def _event_date_et(event: dict, fallback: date) -> date:
+    try:
+        return datetime.fromisoformat(
+            str(event.get("date", "")).replace("Z", "+00:00")
+        ).astimezone(ET).date()
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _load_persisted_odds_for_dates(game_dates: list[date]) -> dict:
+    odds = {}
+    for game_date in game_dates:
+        odds.update(load_persisted_odds(game_date, table_name="nfl_odds"))
+    return odds
+
+
+async def _assemble_slate(*, full_week: bool = False) -> list[dict]:
     today = slate_date_et()
     scoreboard, slate_date = await _next_scoreboard(today)
     events = scoreboard.get("events", [])
     if not events:
         return []
 
+    if full_week:
+        weekly_scoreboard = await _scoreboard_for_week(events[0])
+        weekly_events = weekly_scoreboard.get("events", [])
+        if weekly_events:
+            events = weekly_events
+
+    events = sorted(events, key=lambda event: str(event.get("date", "")))
     first_event = events[0]
     season_year = int(first_event.get("season", {}).get("year", today.year))
     season_type = int(first_event.get("season", {}).get("type", 2) or 2)
     context_season = season_year - 1 if season_type == 1 else season_year
 
     standings = await _standings_for_season(context_season)
-    odds_map = await asyncio.to_thread(load_persisted_odds, slate_date, table_name="nfl_odds")
+    game_dates = sorted({_event_date_et(event, slate_date) for event in events})
+    odds_map = await asyncio.to_thread(_load_persisted_odds_for_dates, game_dates)
 
     refined = []
     for event in events:
@@ -390,10 +466,7 @@ async def _assemble_slate() -> list[dict]:
             continue
 
         starts_at = event.get("date", "")
-        try:
-            game_date = datetime.fromisoformat(starts_at.replace("Z", "+00:00")).astimezone(ET).date()
-        except Exception:
-            game_date = slate_date
+        game_date = _event_date_et(event, slate_date)
         matchup_key = f"{away_tri}@{home_tri}"
         odds = odds_map.get((game_date.isoformat(), matchup_key), {})
         away_stats = standings.get(away_tri, {})
@@ -411,8 +484,12 @@ async def _assemble_slate() -> list[dict]:
         over_under = odds.get("overUnder")
         if game_status == 3:
             if spread_value is not None:
-                margin = away_score - home_score
-                spread_result = margin > abs(spread_value) if favorite == "away" else -margin > abs(spread_value)
+                spread_result = grade_spread_result(
+                    away_score,
+                    home_score,
+                    favorite,
+                    spread_value,
+                )
             if over_under is not None:
                 actual_total = away_score + home_score
                 total_result = "over" if actual_total > over_under else "under" if actual_total < over_under else "push"
@@ -502,6 +579,7 @@ async def cron_fetch_odds(
             )
         cache.set("odds", odds)
         cache.set("assembled", [])
+        cache.set("weekly", [])
         result = {
             "success": True,
             "fresh_from_api": fresh_count,
@@ -562,6 +640,22 @@ async def get_todays_games():
     except Exception as exc:
         logger.error("NFL /today failed: %s", exc, exc_info=True)
         return cache.get_stale("assembled") or []
+
+
+@router.get("/week")
+async def get_current_week_games():
+    cached = cache.get("weekly")
+    if cached:
+        return cached
+    try:
+        refined = await _assemble_slate(full_week=True)
+        has_live = any(game.get("gameStatus") == 2 for game in refined)
+        ttl = CACHE_TTL_LIVE if has_live else CACHE_TTL_DEFAULT
+        cache.set("weekly", refined, ttl=ttl)
+        return refined
+    except Exception as exc:
+        logger.error("NFL /week failed: %s", exc, exc_info=True)
+        return cache.get_stale("weekly") or []
 
 
 def _split_pair(value: str, separator: str) -> tuple[int, int]:
@@ -666,7 +760,7 @@ def _play_by_play(summary: dict) -> list[dict]:
 
 @router.get("/game/{game_id}")
 async def get_game_detail(game_id: str):
-    matchups = await get_todays_games()
+    matchups = await get_current_week_games()
     matchup = next((game for game in matchups if str(game.get("gameId")) == str(game_id)), None)
     if not matchup:
         raise HTTPException(status_code=404, detail="NFL game not found in the current slate")

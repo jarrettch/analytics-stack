@@ -197,7 +197,8 @@ async function copyToClipboard(text: string): Promise<void> {
 
 async function fetchSport(sport: Sport): Promise<PrepGame[]> {
   const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
-  const response = await fetch(`${baseUrl}/api/${sport}/today`);
+  const endpoint = sport === "nfl" ? "nfl/week" : `${sport}/today`;
+  const response = await fetch(`${baseUrl}/api/${endpoint}`);
   if (!response.ok)
     throw new Error(`${SPORT_LABELS[sport]} feed returned ${response.status}`);
 
@@ -208,11 +209,11 @@ async function fetchSport(sport: Sport): Promise<PrepGame[]> {
   const todayET = easternDateKey();
   return (
     (payload as MatchupData[])
-      // All five existing /today payloads normalize 1 = scheduled, 2 = live,
-      // and 3 = final. Keep live games available for an in-progress analysis.
+      // Every sport payload normalizes 1 = scheduled, 2 = live, and 3 = final.
+      // Keep live games available for an in-progress analysis.
       .filter((matchup) => matchup.gameStatus !== 3)
       .map(normalizeGame)
-      .filter((game) => game.date === todayET)
+      .filter((game) => sport === "nfl" || game.date === todayET)
   );
 }
 
@@ -325,8 +326,8 @@ export default function SlatePrepPage() {
               Slate Prep
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Compose today&apos;s Eastern Time slate, then copy exactly what
-              you selected.
+              Compose today&apos;s Eastern Time slate or the current NFL week,
+              then copy exactly what you selected.
             </p>
           </div>
           <Link
@@ -347,7 +348,7 @@ export default function SlatePrepPage() {
                 Add sports
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Only games dated {todayET} in Eastern Time are added.
+                Daily sports use {todayET} ET. NFL includes the current week.
               </p>
             </div>
             <span className="font-mono text-[11px] text-muted-foreground">
@@ -415,7 +416,7 @@ export default function SlatePrepPage() {
                         </h2>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {state.kind === "loading"
-                            ? "Loading today’s games…"
+                            ? `Loading ${sport === "nfl" ? "this week's" : "today's"} games...`
                             : `${selectedForSport.length} game${selectedForSport.length === 1 ? "" : "s"} selected`}
                         </p>
                       </div>
@@ -441,7 +442,7 @@ export default function SlatePrepPage() {
                     ) : state.games.length === 0 ? (
                       <div className="px-4 py-5 text-sm text-muted-foreground">
                         No scheduled or in-progress {SPORT_LABELS[sport]} games
-                        remain today.
+                        remain {sport === "nfl" ? "this week" : "today"}.
                       </div>
                     ) : (
                       <ul className="divide-y divide-border">

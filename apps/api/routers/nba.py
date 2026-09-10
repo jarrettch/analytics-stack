@@ -17,6 +17,7 @@ from .utils import (
     ET,
     Cache,
     fetch_sgo_odds,
+    grade_spread_result,
     load_persisted_odds,
     slate_date_et,
 )
@@ -631,7 +632,7 @@ async def get_todays_games():
                 spread_value = None
 
             # Calculate spread result for final games
-            spread_result = None  # None = not final or no spread, True = covered, False = not covered
+            spread_result = None  # True = covered, False = lost, "push" = exact margin
             total_result = None   # None = not final or no O/U, "over" = hit over, "under" = hit under
             over_under = odds.get("overUnder")
 
@@ -641,11 +642,12 @@ async def get_todays_games():
 
                 # Spread result
                 if spread_value is not None:
-                    margin = away_score - home_score  # positive = away won
-                    if favorite == "away":
-                        spread_result = margin > abs(spread_value)
-                    else:
-                        spread_result = (-margin) > abs(spread_value)
+                    spread_result = grade_spread_result(
+                        away_score,
+                        home_score,
+                        favorite,
+                        spread_value,
+                    )
 
                 # Total result (over/under)
                 if over_under is not None:
@@ -739,7 +741,7 @@ async def get_todays_games():
                 "series": series_text or None,
                 "seriesGameNumber": series_game_number or None,
                 "spreadLine": spread_line,
-                "spreadResult": spread_result,  # True = favorite covered, False = didn't cover, None = not final
+                "spreadResult": spread_result,
                 "pregameSpread": odds.get("homeSpread"),  # home perspective, negative = home favored
                 "spreadOddsHome": odds.get("homeSpreadOdds"),
                 "spreadOddsAway": odds.get("awaySpreadOdds"),

@@ -1191,6 +1191,9 @@ export function MatchupCard({
                 {matchup.spreadLine}
                 {matchup.spreadResult === true && <Check className="size-3 text-emerald-400" />}
                 {matchup.spreadResult === false && <X className="size-3 text-red-400" />}
+                {matchup.spreadResult === "push" && (
+                  <span className="text-[10px] text-muted-foreground">P</span>
+                )}
               </span>
             </>
           )}

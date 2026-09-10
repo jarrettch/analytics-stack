@@ -12,6 +12,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from datetime import date, datetime, timedelta
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -129,6 +130,27 @@ def implied_prob(odds: float) -> float:
     if odds == 0:
         return 0.0
     return -odds / (-odds + 100) if odds < 0 else 100 / (odds + 100)
+
+
+def grade_spread_result(
+    away_score: int | float,
+    home_score: int | float,
+    favorite: str | None,
+    spread_value: int | float | None,
+) -> bool | Literal["push"] | None:
+    """Grade the listed favorite against the spread."""
+    if favorite not in {"away", "home"} or spread_value is None:
+        return None
+
+    favorite_margin = (
+        away_score - home_score
+        if favorite == "away"
+        else home_score - away_score
+    )
+    required_margin = abs(spread_value)
+    if favorite_margin == required_margin:
+        return "push"
+    return favorite_margin > required_margin
 
 
 def de_vig_ml(home_ml: float, away_ml: float) -> tuple[float, float]:

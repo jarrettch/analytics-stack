@@ -68,7 +68,7 @@ export interface BaseMatchupData {
   broadcast: string
   series?: string
   spreadLine: string
-  spreadResult?: boolean | null  // True = favorite covered, False = didn't cover, null = not final
+  spreadResult?: boolean | "push" | null  // Result for the displayed favorite
   overUnder?: number | null      // Market total from odds API
   totalResult?: "over" | "under" | "push" | null  // Result vs O/U line
   projectedTotal?: number        // Model's projected total
