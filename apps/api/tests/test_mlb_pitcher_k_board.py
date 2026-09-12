@@ -300,9 +300,11 @@ class BuildSettlementHistoryTest(unittest.TestCase):
 
         self.assertEqual(history["playerName"], "Test Pitcher")
         main = history["summary"]["main"]
-        self.assertEqual(main["over"]["hitRate"], 0.5)
-        self.assertEqual(main["over"]["roi"], 0.1)
-        self.assertEqual(main["under"]["hitRate"], 0.0)
+        self.assertEqual(main["over"]["record"]["hitRate"], 0.5)
+        self.assertEqual(main["over"]["record"]["n"], 2)
+        self.assertEqual(main["over"]["perBookCloseRoi"]["roi"], 0.1)
+        self.assertEqual(main["over"]["bestPriceRoi"]["roi"], 0.1)
+        self.assertEqual(main["under"]["record"]["hitRate"], 0.0)
         self.assertEqual(history["settlements"][0]["date"], "2026-08-17")
 
     def test_alternates_do_not_change_main_line_summary(self):
@@ -325,21 +327,29 @@ class BuildSettlementHistoryTest(unittest.TestCase):
 
         summary = board.build_settlement_history(rows, "P1")["summary"]
 
-        self.assertEqual(summary["main"]["over"]["hitRate"], 1.0)
+        self.assertIsNone(summary["main"]["over"]["record"]["hitRate"])
         self.assertEqual(summary["alternates"]["over"]["hitRate"], 0.0)
 
     def test_push_is_excluded_from_hit_rate_and_included_in_roi_stake(self):
         rows = [
             {
+                "sgo_event_id": "EVT1",
                 "side": "over",
                 "is_alternate": False,
+                "line": 5,
+                "american_odds": 100,
+                "strikeouts": 6,
                 "settlement_status": "graded",
                 "grade": "win",
                 "profit_units": 1,
             },
             {
+                "sgo_event_id": "EVT2",
                 "side": "over",
                 "is_alternate": False,
+                "line": 5,
+                "american_odds": 100,
+                "strikeouts": 5,
                 "settlement_status": "graded",
                 "grade": "push",
                 "profit_units": 0,
@@ -348,8 +358,180 @@ class BuildSettlementHistoryTest(unittest.TestCase):
 
         over = board.build_settlement_history(rows, "P1")["summary"]["main"]["over"]
 
-        self.assertEqual(over["hitRate"], 1.0)
-        self.assertEqual(over["roi"], 0.5)
+        self.assertEqual(over["record"]["hitRate"], 1.0)
+        self.assertEqual(over["perBookCloseRoi"]["roi"], 0.5)
+        self.assertEqual(over["bestPriceRoi"]["roi"], 0.5)
+
+    def test_six_books_roll_up_to_one_start_and_one_record_decision(self):
+        rows = []
+        for book in ("fanduel", "draftkings", "betmgm", "caesars", "espnbet", "bovada"):
+            for side, grade, profit in (("over", "win", 1), ("under", "loss", -1)):
+                rows.append({
+                    "game_date": "2026-08-17",
+                    "mlb_game_pk": 123,
+                    "sgo_event_id": "EVT1",
+                    "bookmaker_id": book,
+                    "side": side,
+                    "is_alternate": False,
+                    "line": 5.5,
+                    "american_odds": 100,
+                    "strikeouts": 7,
+                    "settlement_status": "graded",
+                    "grade": grade,
+                    "profit_units": profit,
+                })
+
+        history = board.build_settlement_history(rows, "P1")
+
+        self.assertEqual(len(history["starts"]), 1)
+        self.assertEqual(len(history["starts"][0]["books"]), 12)
+        self.assertIsNone(history["starts"][0]["lineRange"])
+        self.assertEqual(history["starts"][0]["grade"]["over"], "win")
+        self.assertEqual(history["summary"]["main"]["over"]["record"], {
+            "n": 1,
+            "wins": 1,
+            "losses": 0,
+            "pushes": 0,
+            "hitRate": 1.0,
+        })
+        self.assertEqual(history["summary"]["main"]["over"]["perBookCloseRoi"]["bets"], 6)
+
+    def test_split_lines_grade_at_modal_line_and_report_range(self):
+        rows = []
+        for book, line in (("fanduel", 5.5), ("draftkings", 5.5), ("betmgm", 6.5)):
+            for side in ("over", "under"):
+                grade = "win" if (side == "over") == (6 > line) else "loss"
+                rows.append({
+                    "mlb_game_pk": 123,
+                    "sgo_event_id": "EVT1",
+                    "bookmaker_id": book,
+                    "side": side,
+                    "is_alternate": False,
+                    "line": line,
+                    "american_odds": -110,
+                    "strikeouts": 6,
+                    "settlement_status": "graded",
+                    "grade": grade,
+                    "profit_units": 100 / 110 if grade == "win" else -1,
+                })
+
+        start = board.build_settlement_history(rows, "P1")["starts"][0]
+
+        self.assertEqual(start["consensusLine"], 5.5)
+        self.assertEqual(start["lineRange"], [5.5, 6.5])
+        self.assertEqual(start["grade"], {"over": "win", "under": "loss"})
+
+    def test_modal_line_tie_uses_lower_line(self):
+        rows = [
+            {
+                "sgo_event_id": "EVT1",
+                "bookmaker_id": book,
+                "side": side,
+                "is_alternate": False,
+                "line": line,
+                "american_odds": -110,
+                "strikeouts": 6,
+                "settlement_status": "graded",
+                "grade": "win" if (side == "over") == (6 > line) else "loss",
+                "profit_units": 0,
+            }
+            for book, line in (("fanduel", 5.5), ("draftkings", 6.5))
+            for side in ("over", "under")
+        ]
+
+        start = board.build_settlement_history(rows, "P1")["starts"][0]
+
+        self.assertEqual(start["consensusLine"], 5.5)
+        self.assertEqual(start["grade"]["over"], "win")
+
+    def test_pending_row_blocks_the_whole_start_from_record_and_roi(self):
+        rows = [
+            {
+                "sgo_event_id": "EVT1",
+                "bookmaker_id": "fanduel",
+                "side": "over",
+                "is_alternate": False,
+                "line": 5.5,
+                "american_odds": 120,
+                "strikeouts": 7,
+                "settlement_status": "graded",
+                "grade": "win",
+                "profit_units": 1.2,
+            },
+            {
+                "sgo_event_id": "EVT1",
+                "bookmaker_id": "draftkings",
+                "side": "over",
+                "is_alternate": False,
+                "line": 5.5,
+                "american_odds": 110,
+                "strikeouts": 7,
+                "settlement_status": "pending",
+                "grade": None,
+                "profit_units": None,
+            },
+        ]
+
+        history = board.build_settlement_history(rows, "P1")
+        over = history["summary"]["main"]["over"]
+
+        self.assertEqual(history["starts"][0]["settlementStatus"], "pending")
+        self.assertIsNone(history["starts"][0]["grade"]["over"])
+        self.assertEqual(over["record"]["n"], 0)
+        self.assertEqual(over["perBookCloseRoi"]["bets"], 0)
+        self.assertEqual(over["bestPriceRoi"]["bets"], 0)
+
+    def test_best_price_uses_highest_price_at_consensus_line(self):
+        rows = [
+            {
+                "sgo_event_id": "EVT1",
+                "bookmaker_id": book,
+                "side": "over",
+                "is_alternate": False,
+                "line": line,
+                "american_odds": odds,
+                "strikeouts": 7,
+                "settlement_status": "graded",
+                "grade": "win",
+                "profit_units": odds / 100,
+            }
+            for book, line, odds in (
+                ("fanduel", 5.5, 110),
+                ("draftkings", 5.5, 125),
+                ("betmgm", 6.5, 200),
+            )
+        ]
+
+        over = board.build_settlement_history(rows, "P1")["summary"]["main"]["over"]
+
+        self.assertEqual(over["bestPriceRoi"], {
+            "bets": 1,
+            "roi": 1.25,
+            "profitUnits": 1.25,
+        })
+
+    def test_flat_settlement_payload_remains_available(self):
+        row = {
+            "game_date": "2026-08-17",
+            "mlb_game_pk": 123,
+            "sgo_event_id": "EVT1",
+            "bookmaker_id": "fanduel",
+            "side": "over",
+            "is_alternate": False,
+            "line": 5.5,
+            "american_odds": 120,
+            "captured_at": "2026-08-17T16:00:00Z",
+            "strikeouts": 7,
+            "settlement_status": "graded",
+            "grade": "win",
+            "profit_units": 1.2,
+        }
+
+        settlement = board.build_settlement_history([row], "P1")["settlements"][0]
+
+        self.assertEqual(settlement["eventId"], "EVT1")
+        self.assertEqual(settlement["bookmakerId"], "fanduel")
+        self.assertEqual(settlement["profitUnits"], 1.2)
 
     def test_counts_nonterminal_states_separately(self):
         rows = [

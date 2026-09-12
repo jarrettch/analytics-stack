@@ -68,20 +68,37 @@ type HistoryResponse = {
   books: HistoryBook[];
 };
 
-type SettlementSideSummary = {
-  bets: number;
+type SettlementRecord = {
+  n: number;
   wins: number;
   losses: number;
   pushes: number;
   hitRate: number | null;
+};
+
+type SettlementRoi = {
+  bets: number;
   roi: number | null;
   profitUnits: number;
+};
+
+type SettlementSideSummary = {
+  record: SettlementRecord;
+  perBookCloseRoi: SettlementRoi;
+  bestPriceRoi: SettlementRoi;
+};
+
+type SettlementBookSummary = SettlementRoi & {
+  wins: number;
+  losses: number;
+  pushes: number;
+  hitRate: number | null;
 };
 
 type SettlementRow = {
   date: string | null;
   gamePk: number | null;
-  eventId: string;
+  eventId: string | null;
   awayTeam: string | null;
   homeTeam: string | null;
   bookmakerId: string;
@@ -102,6 +119,24 @@ type SettlementRow = {
   profitUnits: number | null;
 };
 
+type SettlementStart = {
+  date: string | null;
+  gamePk: number | null;
+  eventId: string | null;
+  awayTeam: string | null;
+  homeTeam: string | null;
+  consensusLine: number | null;
+  lineRange: [number, number] | null;
+  strikeouts: number | null;
+  settlementStatus: SettlementRow["settlementStatus"];
+  grade: {
+    over: SettlementRow["grade"];
+    under: SettlementRow["grade"];
+  };
+  voidReason: string | null;
+  books: SettlementRow[];
+};
+
 type SettlementResponse = {
   playerId: string;
   playerName: string;
@@ -112,8 +147,8 @@ type SettlementResponse = {
       under: SettlementSideSummary;
     };
     alternates: {
-      over: SettlementSideSummary;
-      under: SettlementSideSummary;
+      over: SettlementBookSummary;
+      under: SettlementBookSummary;
     };
     statuses: {
       void: number;
@@ -123,6 +158,7 @@ type SettlementResponse = {
       unresolvedIdentity: number;
     };
   };
+  starts: SettlementStart[];
   settlements: SettlementRow[];
 };
 
@@ -456,23 +492,129 @@ function AlternatesTable({ books }: { books: BookView[] }) {
   );
 }
 
+function settlementStatusLabel(row: SettlementRow) {
+  if (row.grade) return row.grade;
+  if (row.voidReason === "did_not_start") return "void · did not start";
+  if (row.voidReason === "did_not_appear") return "void · did not appear";
+  if (row.settlementStatus === "unresolved_identity") return "identity pending";
+  if (row.settlementStatus === "policy_pending") return "review pending";
+  if (row.settlementStatus === "data_pending") return "stats pending";
+  return row.settlementStatus;
+}
+
+function gradeColor(grade: SettlementRow["grade"]) {
+  if (grade === "win") return "text-emerald-400";
+  if (grade === "loss") return "text-rose-300";
+  return "text-muted-foreground";
+}
+
+function startStatusLabel(start: SettlementStart) {
+  if (start.voidReason === "did_not_start") return "void · did not start";
+  if (start.voidReason === "did_not_appear") return "void · did not appear";
+  if (start.settlementStatus === "unresolved_identity")
+    return "identity pending";
+  if (start.settlementStatus === "policy_pending") return "review pending";
+  if (start.settlementStatus === "data_pending") return "stats pending";
+  return start.settlementStatus;
+}
+
+function SettlementStartRows({ start }: { start: SettlementStart }) {
+  const [expanded, setExpanded] = useState(false);
+  const books = [...start.books].sort((a, b) => {
+    const [aIndex, aId] = bookSortKey(a.bookmakerId);
+    const [bIndex, bId] = bookSortKey(b.bookmakerId);
+    return (
+      aIndex - bIndex || aId.localeCompare(bId) || a.side.localeCompare(b.side)
+    );
+  });
+  const line = start.lineRange
+    ? `${start.lineRange[0]} to ${start.lineRange[1]}`
+    : (start.consensusLine ?? "—");
+
+  return (
+    <>
+      <tr className="border-t border-border/60">
+        <td className="px-3 py-2 text-muted-foreground">
+          <button
+            type="button"
+            className="flex items-center gap-1.5 hover:text-foreground"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            <ChevronDown
+              className={`size-3 transition-transform ${expanded ? "rotate-180" : ""}`}
+            />
+            {fmtDate(start.date)}
+          </button>
+        </td>
+        <td className="px-3 py-2 text-foreground">
+          {start.awayTeam && start.homeTeam
+            ? `${start.awayTeam} @ ${start.homeTeam}`
+            : "—"}
+        </td>
+        <td className="px-3 py-2 text-foreground">{line}</td>
+        <td className="px-3 py-2 text-center text-foreground">
+          {start.strikeouts ?? "—"}
+        </td>
+        <td className="px-3 py-2 text-right uppercase">
+          {start.settlementStatus === "graded" ? (
+            <span className="inline-flex gap-3">
+              <span className={gradeColor(start.grade.over)}>
+                O {start.grade.over}
+              </span>
+              <span className={gradeColor(start.grade.under)}>
+                U {start.grade.under}
+              </span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">
+              {startStatusLabel(start)}
+            </span>
+          )}
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="border-t border-border/40 bg-background/35">
+          <td colSpan={5} className="px-3 py-2.5">
+            <table className="mx-auto w-full max-w-2xl border-collapse">
+              <thead>
+                <tr className="text-left text-[8px] uppercase tracking-wider text-muted-foreground">
+                  <th className="px-2 py-1 font-medium">Book</th>
+                  <th className="px-2 py-1 font-medium">Close</th>
+                  <th className="px-2 py-1 text-right font-medium">Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {books.map((row, index) => (
+                  <tr
+                    key={`${row.bookmakerId}:${row.side}:${row.line}:${index}`}
+                    className="border-t border-border/40"
+                  >
+                    <td className="px-2 py-1.5 text-muted-foreground">
+                      {bookMeta(row.bookmakerId).label}
+                    </td>
+                    <td className="px-2 py-1.5 uppercase text-foreground">
+                      {row.side.slice(0, 1)} {row.line} (
+                      {fmtOdds(row.americanOdds)})
+                    </td>
+                    <td
+                      className={`px-2 py-1.5 text-right uppercase ${gradeColor(row.grade)}`}
+                    >
+                      {settlementStatusLabel(row)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 function SettlementHistory({ history }: { history: SettlementResponse }) {
-  const recent = history.settlements.slice(0, 8);
-  const statusLabel = (row: SettlementRow) => {
-    if (row.grade) return row.grade;
-    if (row.voidReason === "did_not_start") return "void · did not start";
-    if (row.voidReason === "did_not_appear") return "void · did not appear";
-    if (row.settlementStatus === "unresolved_identity")
-      return "identity pending";
-    if (row.settlementStatus === "policy_pending") return "review pending";
-    if (row.settlementStatus === "data_pending") return "stats pending";
-    return row.settlementStatus;
-  };
-  const statusColor = (row: SettlementRow) => {
-    if (row.grade === "win") return "text-emerald-400";
-    if (row.grade === "loss") return "text-rose-300";
-    return "text-muted-foreground";
-  };
+  const recent = history.starts.slice(0, 8);
 
   return (
     <div className="mt-5 border-t border-border/60 pt-4">
@@ -488,6 +630,9 @@ function SettlementHistory({ history }: { history: SettlementResponse }) {
       <div className="mb-4 grid gap-2 sm:grid-cols-2">
         {(["over", "under"] as const).map((side) => {
           const summary = history.summary.main[side];
+          const record = summary.record;
+          const bookRoi = summary.perBookCloseRoi;
+          const bestRoi = summary.bestPriceRoi;
           return (
             <div
               key={side}
@@ -498,17 +643,31 @@ function SettlementHistory({ history }: { history: SettlementResponse }) {
                   {side}
                 </span>
                 <span className="font-mono text-xs text-foreground">
-                  {summary.wins}-{summary.losses}
-                  {summary.pushes ? `-${summary.pushes}` : ""}
+                  {record.wins}-{record.losses}
+                  {record.pushes ? `-${record.pushes}` : ""}
                 </span>
               </div>
               <div className="mt-1 flex gap-4 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-                <span>Hit {fmtPercent(summary.hitRate)}</span>
-                <span>ROI {fmtPercent(summary.roi)}</span>
-                <span>
-                  {summary.profitUnits > 0 ? "+" : ""}
-                  {summary.profitUnits.toFixed(2)}u
-                </span>
+                <span>Hit {fmtPercent(record.hitRate)}</span>
+                <span>n={record.n} starts</span>
+              </div>
+              <div className="mt-2 space-y-1 border-t border-border/50 pt-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+                <div className="flex flex-wrap justify-between gap-x-3">
+                  <span>Per-book close ROI</span>
+                  <span>
+                    {fmtPercent(bookRoi.roi)} · {bookRoi.bets} bets ·{" "}
+                    {bookRoi.profitUnits > 0 ? "+" : ""}
+                    {bookRoi.profitUnits.toFixed(2)}u
+                  </span>
+                </div>
+                <div className="flex flex-wrap justify-between gap-x-3">
+                  <span>Best-price ROI</span>
+                  <span>
+                    {fmtPercent(bestRoi.roi)} · {bestRoi.bets} bets ·{" "}
+                    {bestRoi.profitUnits > 0 ? "+" : ""}
+                    {bestRoi.profitUnits.toFixed(2)}u
+                  </span>
+                </div>
               </div>
             </div>
           );
@@ -525,42 +684,17 @@ function SettlementHistory({ history }: { history: SettlementResponse }) {
               <tr className="bg-secondary/40 text-left text-[9px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-3 py-2 font-medium">Date</th>
                 <th className="px-3 py-2 font-medium">Matchup</th>
-                <th className="px-3 py-2 font-medium">Book</th>
-                <th className="px-3 py-2 font-medium">Close</th>
+                <th className="px-3 py-2 font-medium">Line</th>
                 <th className="px-3 py-2 text-center font-medium">Ks</th>
                 <th className="px-3 py-2 text-right font-medium">Result</th>
               </tr>
             </thead>
             <tbody>
-              {recent.map((row, index) => (
-                <tr
-                  key={`${row.eventId}:${row.bookmakerId}:${row.side}:${index}`}
-                  className="border-t border-border/60"
-                >
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {fmtDate(row.date)}
-                  </td>
-                  <td className="px-3 py-2 text-foreground">
-                    {row.awayTeam && row.homeTeam
-                      ? `${row.awayTeam} @ ${row.homeTeam}`
-                      : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {bookMeta(row.bookmakerId).label}
-                  </td>
-                  <td className="px-3 py-2 uppercase text-foreground">
-                    {row.side.slice(0, 1)} {row.line} (
-                    {fmtOdds(row.americanOdds)})
-                  </td>
-                  <td className="px-3 py-2 text-center text-foreground">
-                    {row.strikeouts ?? "—"}
-                  </td>
-                  <td
-                    className={`px-3 py-2 text-right uppercase ${statusColor(row)}`}
-                  >
-                    {statusLabel(row)}
-                  </td>
-                </tr>
+              {recent.map((start, index) => (
+                <SettlementStartRows
+                  key={`${start.gamePk ?? start.eventId ?? "unknown"}:${index}`}
+                  start={start}
+                />
               ))}
             </tbody>
           </table>

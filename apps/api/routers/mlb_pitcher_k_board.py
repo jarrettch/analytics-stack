@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import Counter
 from datetime import date, datetime
 
 from fastapi import APIRouter, HTTPException
@@ -306,7 +307,7 @@ def build_history(rows: list[dict], player_id: str, event_id: str) -> list[dict]
     ]
 
 
-def _side_summary(rows: list[dict], side: str) -> dict:
+def _book_close_summary(rows: list[dict], side: str) -> dict:
     graded = [
         row for row in rows
         if row.get("side") == side and row.get("grade") in {"win", "loss", "push"}
@@ -315,7 +316,14 @@ def _side_summary(rows: list[dict], side: str) -> dict:
     losses = sum(row["grade"] == "loss" for row in graded)
     pushes = sum(row["grade"] == "push" for row in graded)
     decisions = wins + losses
-    profit = sum(float(row.get("profit_units") or 0) for row in graded)
+    profit = sum(
+        float(
+            row.get("profit_units")
+            if row.get("profit_units") is not None
+            else row.get("profitUnits") or 0
+        )
+        for row in graded
+    )
     # Hit rate treats pushes as no decision. ROI counts every settled wager,
     # including a push with zero profit, in its amount-staked denominator.
     return {
@@ -326,6 +334,204 @@ def _side_summary(rows: list[dict], side: str) -> dict:
         "hitRate": round(wins / decisions, 4) if decisions else None,
         "roi": round(profit / len(graded), 4) if graded else None,
         "profitUnits": round(profit, 3),
+    }
+
+
+def _modal_line(rows: list[dict], side: str) -> float | None:
+    lines = [row.get("line") for row in rows if row.get("side") == side]
+    lines = [line for line in lines if line is not None]
+    if not lines:
+        return None
+    counts = Counter(lines)
+    highest_count = max(counts.values())
+    return min(line for line, count in counts.items() if count == highest_count)
+
+
+def _grade_at_line(strikeouts: int | None, line: float | None, side: str) -> str | None:
+    if strikeouts is None or line is None:
+        return None
+    if strikeouts == line:
+        return "push"
+    over_won = strikeouts > line
+    return "win" if over_won == (side == "over") else "loss"
+
+
+def _start_status(rows: list[dict]) -> str:
+    statuses = {row.get("settlement_status") for row in rows}
+    for status in (
+        "unresolved_identity",
+        "pending",
+        "data_pending",
+        "policy_pending",
+    ):
+        if status in statuses:
+            return status
+    if statuses == {"graded"}:
+        return "graded"
+    if "void" in statuses:
+        return "void"
+    return next((status for status in statuses if status), "pending")
+
+
+def _settlement_payload(row: dict) -> dict:
+    return {
+        "date": row.get("game_date"),
+        "gamePk": row.get("mlb_game_pk"),
+        "eventId": row.get("sgo_event_id"),
+        "awayTeam": row.get("away_team"),
+        "homeTeam": row.get("home_team"),
+        "bookmakerId": row.get("bookmaker_id"),
+        "side": row.get("side"),
+        "isAlternate": bool(row.get("is_alternate")),
+        "line": row.get("line"),
+        "americanOdds": row.get("american_odds"),
+        "capturedAt": row.get("captured_at"),
+        "strikeouts": row.get("strikeouts"),
+        "didStart": row.get("did_start"),
+        "appeared": row.get("appeared"),
+        "inningsPitched": row.get("innings_pitched"),
+        "settlementStatus": row.get("settlement_status"),
+        "grade": row.get("grade"),
+        "voidReason": row.get("void_reason"),
+        "profitUnits": (
+            float(row["profit_units"])
+            if row.get("profit_units") is not None
+            else None
+        ),
+    }
+
+
+def _start_groups(rows: list[dict]) -> list[list[dict]]:
+    groups: dict[tuple[str, object], list[dict]] = {}
+    for row in rows:
+        if row.get("mlb_game_pk") is not None:
+            key = ("game", row["mlb_game_pk"])
+        elif row.get("sgo_event_id") is not None:
+            key = ("event", row["sgo_event_id"])
+        else:
+            # Settlement rows should always have one of the identifiers. Keep
+            # malformed rows separated by date instead of merging all of them.
+            key = ("date", row.get("game_date"))
+        groups.setdefault(key, []).append(row)
+    return list(groups.values())
+
+
+def _build_start(rows: list[dict]) -> dict:
+    first = rows[0]
+    status = _start_status(rows)
+    strikeouts = next(
+        (row.get("strikeouts") for row in rows if row.get("strikeouts") is not None),
+        None,
+    )
+    consensus_by_side = {
+        side: _modal_line(rows, side) for side in ("over", "under")
+    }
+    consensus_line = (
+        consensus_by_side["over"]
+        if consensus_by_side["over"] is not None
+        else consensus_by_side["under"]
+    )
+    lines = sorted({row["line"] for row in rows if row.get("line") is not None})
+    grades = {
+        side: (
+            _grade_at_line(strikeouts, consensus_by_side[side], side)
+            if status == "graded"
+            else None
+        )
+        for side in ("over", "under")
+    }
+    return {
+        "date": first.get("game_date"),
+        "gamePk": first.get("mlb_game_pk"),
+        "eventId": first.get("sgo_event_id"),
+        "awayTeam": first.get("away_team"),
+        "homeTeam": first.get("home_team"),
+        "consensusLine": consensus_line,
+        "lineRange": [lines[0], lines[-1]] if len(lines) > 1 else None,
+        "strikeouts": strikeouts,
+        "settlementStatus": status,
+        "grade": grades,
+        "voidReason": next(
+            (row.get("void_reason") for row in rows if row.get("void_reason")),
+            None,
+        ),
+        "books": [_settlement_payload(row) for row in rows],
+    }
+
+
+def _record_summary(starts: list[dict], side: str) -> dict:
+    grades = [
+        start["grade"][side]
+        for start in starts
+        if start["settlementStatus"] == "graded"
+        and start["grade"][side] in {"win", "loss", "push"}
+    ]
+    wins = grades.count("win")
+    losses = grades.count("loss")
+    pushes = grades.count("push")
+    decisions = wins + losses
+    return {
+        "n": len(grades),
+        "wins": wins,
+        "losses": losses,
+        "pushes": pushes,
+        "hitRate": round(wins / decisions, 4) if decisions else None,
+    }
+
+
+def _profit_for_price(american_odds: int | float, grade: str) -> float:
+    if grade == "loss":
+        return -1.0
+    if grade == "push":
+        return 0.0
+    return (
+        float(american_odds) / 100
+        if american_odds > 0
+        else 100 / abs(float(american_odds))
+    )
+
+
+def _best_price_summary(starts: list[dict], side: str) -> dict:
+    profits = []
+    for start in starts:
+        grade = start["grade"][side]
+        consensus_line = _modal_line(start["books"], side)
+        if start["settlementStatus"] != "graded" or grade is None:
+            continue
+        candidates = [
+            row for row in start["books"]
+            if row["side"] == side
+            and row["line"] == consensus_line
+            and row["americanOdds"] is not None
+        ]
+        if not candidates:
+            continue
+        best = max(candidates, key=lambda row: row["americanOdds"])
+        profits.append(_profit_for_price(best["americanOdds"], grade))
+    profit = sum(profits)
+    return {
+        "bets": len(profits),
+        "roi": round(profit / len(profits), 4) if profits else None,
+        "profitUnits": round(profit, 3),
+    }
+
+
+def _main_side_summary(starts: list[dict], side: str) -> dict:
+    graded_rows = [
+        row
+        for start in starts
+        if start["settlementStatus"] == "graded"
+        for row in start["books"]
+    ]
+    book_close = _book_close_summary(graded_rows, side)
+    return {
+        "record": _record_summary(starts, side),
+        "perBookCloseRoi": {
+            "bets": book_close["bets"],
+            "roi": book_close["roi"],
+            "profitUnits": book_close["profitUnits"],
+        },
+        "bestPriceRoi": _best_price_summary(starts, side),
     }
 
 
@@ -341,6 +547,7 @@ def build_settlement_history(rows: list[dict], player_id: str) -> dict:
     )
     main_rows = [row for row in ordered if not row.get("is_alternate")]
     alternate_rows = [row for row in ordered if row.get("is_alternate")]
+    starts = [_build_start(group) for group in _start_groups(main_rows)]
     return {
         "playerId": player_id,
         "playerName": player_name,
@@ -354,12 +561,12 @@ def build_settlement_history(rows: list[dict], player_id: str) -> dict:
         ),
         "summary": {
             "main": {
-                "over": _side_summary(main_rows, "over"),
-                "under": _side_summary(main_rows, "under"),
+                "over": _main_side_summary(starts, "over"),
+                "under": _main_side_summary(starts, "under"),
             },
             "alternates": {
-                "over": _side_summary(alternate_rows, "over"),
-                "under": _side_summary(alternate_rows, "under"),
+                "over": _book_close_summary(alternate_rows, "over"),
+                "under": _book_close_summary(alternate_rows, "under"),
             },
             "statuses": {
                 "void": sum(
@@ -382,31 +589,8 @@ def build_settlement_history(rows: list[dict], player_id: str) -> dict:
                 ),
             },
         },
-        "settlements": [{
-            "date": row.get("game_date"),
-            "gamePk": row.get("mlb_game_pk"),
-            "eventId": row.get("sgo_event_id"),
-            "awayTeam": row.get("away_team"),
-            "homeTeam": row.get("home_team"),
-            "bookmakerId": row.get("bookmaker_id"),
-            "side": row.get("side"),
-            "isAlternate": bool(row.get("is_alternate")),
-            "line": row.get("line"),
-            "americanOdds": row.get("american_odds"),
-            "capturedAt": row.get("captured_at"),
-            "strikeouts": row.get("strikeouts"),
-            "didStart": row.get("did_start"),
-            "appeared": row.get("appeared"),
-            "inningsPitched": row.get("innings_pitched"),
-            "settlementStatus": row.get("settlement_status"),
-            "grade": row.get("grade"),
-            "voidReason": row.get("void_reason"),
-            "profitUnits": (
-                float(row["profit_units"])
-                if row.get("profit_units") is not None
-                else None
-            ),
-        } for row in ordered],
+        "starts": starts,
+        "settlements": [_settlement_payload(row) for row in ordered],
     }
 
 
