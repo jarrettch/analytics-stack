@@ -528,7 +528,7 @@ function SettlementStartRows({ start }: { start: SettlementStart }) {
     );
   });
   const line = start.lineRange
-    ? `${start.lineRange[0]} to ${start.lineRange[1]}`
+    ? `${start.consensusLine ?? "—"} (range ${start.lineRange[0]} to ${start.lineRange[1]})`
     : (start.consensusLine ?? "—");
 
   return (
@@ -615,6 +615,25 @@ function SettlementStartRows({ start }: { start: SettlementStart }) {
 
 function SettlementHistory({ history }: { history: SettlementResponse }) {
   const recent = history.starts.slice(0, 8);
+  const statuses = history.summary.statuses;
+  const pendingStarts =
+    statuses.pending +
+    statuses.policyPending +
+    statuses.dataPending +
+    statuses.unresolvedIdentity;
+  const statusParts = [
+    ...(statuses.void
+      ? [`${statuses.void} void ${statuses.void === 1 ? "start" : "starts"}`]
+      : []),
+    ...(pendingStarts
+      ? [`${pendingStarts} pending ${pendingStarts === 1 ? "start" : "starts"}`]
+      : []),
+    ...(statuses.policyPending
+      ? [
+          `${statuses.policyPending} ${statuses.policyPending === 1 ? "start needs" : "starts need"} rule review`,
+        ]
+      : []),
+  ];
 
   return (
     <div className="mt-5 border-t border-border/60 pt-4">
@@ -673,6 +692,10 @@ function SettlementHistory({ history }: { history: SettlementResponse }) {
           );
         })}
       </div>
+      <p className="mb-3 font-mono text-[9px] text-muted-foreground">
+        Record and best-price ROI use each side&apos;s most common line.
+        Per-book ROI uses each book&apos;s line, so split-line results can differ.
+      </p>
       {recent.length === 0 ? (
         <p className="py-5 text-center font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
           No observed closing-line results yet
@@ -700,18 +723,9 @@ function SettlementHistory({ history }: { history: SettlementResponse }) {
           </table>
         </div>
       )}
-      {Object.values(history.summary.statuses).some((count) => count > 0) && (
+      {statusParts.length > 0 && (
         <p className="mt-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-          {history.summary.statuses.void} void ·{" "}
-          {history.summary.statuses.pending +
-            history.summary.statuses.policyPending +
-            history.summary.statuses.dataPending +
-            history.summary.statuses.unresolvedIdentity}{" "}
-          pending
-          {history.summary.statuses.policyPending > 0
-            ? ` · ${history.summary.statuses.policyPending} need rule review`
-            : ""}{" "}
-          · across observed books/sides
+          {statusParts.join(" · ")}
         </p>
       )}
     </div>

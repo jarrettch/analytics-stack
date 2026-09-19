@@ -477,6 +477,7 @@ class BuildSettlementHistoryTest(unittest.TestCase):
 
         self.assertEqual(history["starts"][0]["settlementStatus"], "pending")
         self.assertIsNone(history["starts"][0]["grade"]["over"])
+        self.assertEqual(history["summary"]["statuses"]["pending"], 1)
         self.assertEqual(over["record"]["n"], 0)
         self.assertEqual(over["perBookCloseRoi"]["bets"], 0)
         self.assertEqual(over["bestPriceRoi"]["bets"], 0)
@@ -536,24 +537,28 @@ class BuildSettlementHistoryTest(unittest.TestCase):
     def test_counts_nonterminal_states_separately(self):
         rows = [
             {
+                "sgo_event_id": "EVT_VOID",
                 "side": "over",
                 "is_alternate": False,
                 "settlement_status": "void",
                 "grade": None,
             },
             {
+                "sgo_event_id": "EVT_IDENTITY",
                 "side": "over",
                 "is_alternate": False,
                 "settlement_status": "unresolved_identity",
                 "grade": None,
             },
             {
+                "sgo_event_id": "EVT_POLICY",
                 "side": "under",
                 "is_alternate": False,
                 "settlement_status": "policy_pending",
                 "grade": None,
             },
             {
+                "sgo_event_id": "EVT_DATA",
                 "side": "under",
                 "is_alternate": False,
                 "settlement_status": "data_pending",
@@ -568,6 +573,25 @@ class BuildSettlementHistoryTest(unittest.TestCase):
         self.assertEqual(statuses["unresolvedIdentity"], 1)
         self.assertEqual(statuses["policyPending"], 1)
         self.assertEqual(statuses["dataPending"], 1)
+
+    def test_statuses_count_one_start_across_books_and_sides(self):
+        rows = [
+            {
+                "sgo_event_id": "EVT_PENDING",
+                "bookmaker_id": book,
+                "side": side,
+                "is_alternate": False,
+                "settlement_status": "pending",
+                "grade": None,
+            }
+            for book in ("fanduel", "draftkings", "betmgm", "caesars", "espnbet", "bovada")
+            for side in ("over", "under")
+        ]
+
+        history = board.build_settlement_history(rows, "P1")
+
+        self.assertEqual(len(history["starts"]), 1)
+        self.assertEqual(history["summary"]["statuses"]["pending"], 1)
 
 
 class _SelectQuery:

@@ -548,6 +548,9 @@ def build_settlement_history(rows: list[dict], player_id: str) -> dict:
     main_rows = [row for row in ordered if not row.get("is_alternate")]
     alternate_rows = [row for row in ordered if row.get("is_alternate")]
     starts = [_build_start(group) for group in _start_groups(main_rows)]
+    status_by_start = Counter(
+        _start_status(group) for group in _start_groups(ordered)
+    )
     return {
         "playerId": player_id,
         "playerName": player_name,
@@ -569,24 +572,11 @@ def build_settlement_history(rows: list[dict], player_id: str) -> dict:
                 "under": _book_close_summary(alternate_rows, "under"),
             },
             "statuses": {
-                "void": sum(
-                    row.get("settlement_status") == "void" for row in ordered
-                ),
-                "pending": sum(
-                    row.get("settlement_status") == "pending" for row in ordered
-                ),
-                "policyPending": sum(
-                    row.get("settlement_status") == "policy_pending"
-                    for row in ordered
-                ),
-                "dataPending": sum(
-                    row.get("settlement_status") == "data_pending"
-                    for row in ordered
-                ),
-                "unresolvedIdentity": sum(
-                    row.get("settlement_status") == "unresolved_identity"
-                    for row in ordered
-                ),
+                "void": status_by_start["void"],
+                "pending": status_by_start["pending"],
+                "policyPending": status_by_start["policy_pending"],
+                "dataPending": status_by_start["data_pending"],
+                "unresolvedIdentity": status_by_start["unresolved_identity"],
             },
         },
         "starts": starts,
