@@ -82,6 +82,13 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
     return _SGO_TEAM_TO_TRI.get(key, "")
 
 
+def get_tricode_from_team_name(team_name: str) -> str:
+    """Map provider display names without changing the SGO main-line mapper."""
+    key = (team_name or "").strip().upper().removesuffix("_NFL")
+    key = "_".join(key.split())
+    return {"ARI_CARDINALS": "ARI"}.get(key) or _SGO_TEAM_TO_TRI.get(key, "")
+
+
 async def get_odds_map(
     target_date: date | None = None,
     collection_stats: dict | None = None,

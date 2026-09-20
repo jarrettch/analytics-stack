@@ -3,8 +3,16 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-from routers import mlb, mlb_pitcher_k_board, nba, nfl, nhl, usage, wnba
+from routers import (
+    mlb,
+    mlb_pitcher_k_board,
+    nba,
+    nfl,
+    nfl_player_props,
+    nhl,
+    usage,
+    wnba,
+)
 from routers.utils import close_http_client, get_http_client
 
 
@@ -34,6 +42,7 @@ app.include_router(mlb_pitcher_k_board.router)
 app.include_router(nhl.router)
 app.include_router(wnba.router)
 app.include_router(nfl.router)
+app.include_router(nfl_player_props.router)
 app.include_router(usage.router)
 
 

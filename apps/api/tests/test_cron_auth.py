@@ -23,6 +23,7 @@ CRON_ROUTES = [
 ]
 PROTECTED_CRON_ROUTES = [
     *CRON_ROUTES,
+    pytest.param("/api/nfl/cron/fetch-player-props", nfl, id="nfl-player-props"),
     pytest.param("/api/mlb/cron/settle-pitcher-ks", mlb, id="mlb-pitcher-k-settlement"),
 ]
 
@@ -64,7 +65,7 @@ def test_get_is_no_longer_allowed(client, cron_secret, path, module):
     assert client.get(path).status_code == 405
 
 
-@pytest.mark.parametrize("path,module", CRON_ROUTES)
+@pytest.mark.parametrize("path,module", PROTECTED_CRON_ROUTES)
 @pytest.mark.parametrize(
     "configured_value",
     [None, "", "   "],

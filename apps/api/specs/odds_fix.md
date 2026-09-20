@@ -48,7 +48,7 @@ These were the original ideas. Most aren't needed once #2 ships, but keep them o
 ## Stopgap for the rest of this billing cycle
 
 - Second free SGO key obtained and in `.env`. Bridges until cycle resets.
-- **Before relying on The Odds API as backup**, check that quota too — free tier is 500 requests/month and `nba.py:33` comment suggests it's been getting hit in parallel.
+- **Before relying on The Odds API as backup**, check that quota too — free tier is 500 credits/month (a call costs markets × regions, so a request is not one credit) and `nba.py:33` comment suggests it's been getting hit in parallel.
 - Confirm SGO billing cycle reset date from dashboard (calendar month vs signup anniversary).
 
 ## Validation after fix #2 ships
@@ -57,15 +57,3 @@ These were the original ideas. Most aren't needed once #2 ships, but keep them o
 - [ ] Track daily entity usage from the SGO account endpoint for 2-3 days
 - [ ] Add a periodic log line that prints SGO entity usage so this never sneaks up again
 - [ ] Optional kill-switch: if monthly entities cross 80% with >5 days left, stop fetching SGO and serve persisted only
-
-## Stopgap for the rest of this billing cycle
-
-- Grab a second free SGO key to bridge until the cycle resets. (User is doing this.)
-- **Before relying on The Odds API as backup**, check that quota too — free tier is 500 requests/month and the comment at `nba.py:33` suggests it's been getting hit in parallel. Don't blow through a second budget by accident.
-- Confirm when the SGO billing cycle actually resets — calendar month (May 1) or signup anniversary. Dashboard will say.
-
-## Validation after fixes ship
-
-- [ ] Track daily entity usage manually for a few days to confirm the burn rate dropped below ~80/day
-- [ ] Add a periodic log line that prints SGO entity usage from the `/account` or equivalent endpoint so this never sneaks up again
-- [ ] Consider a hard kill-switch: if monthly entities cross 80% with >5 days left in the cycle, stop fetching SGO and serve only persisted odds until reset

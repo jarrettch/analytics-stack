@@ -1,0 +1,66 @@
+name: Fetch NFL Player Props
+
+on:
+  schedule:
+    # Every day covers international games, holiday games, and the playoffs.
+    # The runner checks ESPN first; empty windows never wake Render.
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+# Future UFC collectors must use this same group because the API key is shared.
+concurrency:
+  group: sharpapi-odds
+  cancel-in-progress: false
+
+jobs:
+  fetch-nfl-player-props:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    env:
+      API_URL: ${{ secrets.API_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      COLLECTION_KEY: ${{ github.run_id }}-nfl-props
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check kickoff window on runner
+        id: schedule
+        run: python3 scripts/nfl_props_schedule_gate.py
+      - name: Collect NFL pregame props
+        if: steps.schedule.outputs.eligible == 'true'
+        env:
+          WINDOW_AT: ${{ steps.schedule.outputs.window_at }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..6}; do
+            if curl --fail --silent --show-error --max-time 20 "$API_URL/health" >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 6 ]; then
+              echo "Server did not become ready" >&2
+              exit 1
+            fi
+            sleep 15
+          done
+
+          # The server limits each sweep to eight minutes, within the ten-minute
+          # kickoff guard. Replays reuse the run id, including workflow reruns.
+          response=$(curl \
+            --retry 2 --retry-delay 15 --retry-max-time 1200 \
+            --silent --show-error --fail-with-body --max-time 600 \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "$API_URL/api/nfl/cron/fetch-player-props?collection_key=${COLLECTION_KEY}&window_at=${WINDOW_AT}")
+          printf 'NFL props response: %s\n' "$response"
+
+          # Collector failures use HTTP 200. Missing fields must also fail closed.
+          jq -e '
+            .success == true and
+            .schedule_ok == true and
+            .sweep_complete == true and
+            .persistence_ok == true and
+            .markets_completed == .markets_requested and
+            .unmapped_teams == [] and
+            .rows_rejected == 0
+          ' <<<"$response" >/dev/null
