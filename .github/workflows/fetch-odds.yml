@@ -115,39 +115,6 @@ jobs:
             echo "WARNING: MLB slate returned games but no pitcher-K outcomes"
           fi
 
-      - name: Fetch NHL odds
-        run: |
-          echo "Fetching NHL odds..."
-          if response=$(curl \
-            --retry 4 \
-            --retry-delay 15 \
-            --retry-max-time 180 \
-            --silent \
-            --show-error \
-            --fail \
-            --max-time 120 \
-            --request POST \
-            --header "Authorization: Bearer ${CRON_SECRET}" \
-            "$API_URL/api/nhl/cron/fetch-odds"); then
-            printf 'Response: %s\n' "$response"
-          else
-            curl_status=$?
-            printf 'Request failed:\n%s\n' "$response" >&2
-            exit "$curl_status"
-          fi
-
-          if ! jq -e '.success == true' >/dev/null <<<"$response"; then
-            printf 'Failed to fetch NHL odds:\n%s\n' "$response" >&2
-            exit 1
-          fi
-
-          fresh=$(jq -r '.fresh_from_api // 0' <<<"$response")
-          persisted=$(jq -r '.persisted_loaded // 0' <<<"$response")
-          echo "NHL odds fetched: fresh=${fresh} persisted=${persisted}"
-          if [ "$fresh" -eq 0 ]; then
-            echo "WARNING: No fresh NHL odds from API — dark day or lines not yet posted"
-          fi
-
       - name: Fetch WNBA odds
         run: |
           echo "Fetching WNBA odds..."
