@@ -1,6 +1,7 @@
 # UFC Page
 
-_Created: 2026-09-18_
+_Created: 2026-09-18_ · _Revised: 2026-09-25 — SharpAPI client now shipped; see
+"The SharpAPI client already exists"_
 
 UFC is the first non-team sport to enter the app proper. It gets **its own route
 at `/ufc`, not a tab in `SportsDashboard`.**
@@ -105,62 +106,73 @@ returned row where `is_live` is true**, because SharpAPI silently ignores
 unrecognized query parameters rather than erroring — a typo in a filter name
 degrades to no filter at all, with no signal.
 
-## `fetch_sharp_odds(league, market)`
+## The SharpAPI client already exists
 
-A thin helper in `utils.py`, alongside `fetch_sgo_odds` and `fetch_espn_odds`.
+**Do not write this.** `fetch_sharp_odds` shipped on 2026-09-20 in
+`apps/api/routers/sharp_odds.py` as part of the NFL player-props work
+(`49f173f`), which reached implementation before UFC did.
 
-- **Auth:** `X-API-Key` header.
-- **ETag:** store the ETag per `(league, market)` and send `If-None-Match`.
-  Verified: a replayed request returns **304 with 0 bytes.** A 304 means skip
-  before parsing, which composes with the consecutive-value dedup that
-  `save_odds_snapshots` already does.
-- **Pagination:** while `pagination.has_more` is true, request the next page
-  using `pagination.next_cursor`. **Treat a missing cursor while `has_more` is
-  true as an invalid response and stop with an error.** Never fall back to
-  `next_offset`: offset results shift as live prices refresh, so a row can be
-  skipped or returned twice between pages, and a silently-dropped row written to
-  an append-only history table is the expensive kind of bug.
+```python
+async def fetch_sharp_odds(league: str, market: str, *, sweep: SharpSweep) -> list[dict]
+```
 
-  Verified across three leagues — every response with `has_more: true` carried a
-  `next_cursor`, and cursor paging returned zero overlapping rows between pages.
-  (An earlier draft of this spec claimed the cursor was conditional. That was
-  inferred from a response where `has_more` was **false** — no next page, so no
-  cursor. The rule above is correct.)
-- **No `total` field.** The docs list one; the free tier does not return it. The
-  loop terminates on `has_more` and nothing else, which is why the page cap
-  matters.
-- **Page cap** with a log line if it is ever hit. Silent truncation at a
-  hardcoded limit is precisely the bug `odds_fix.md` records at `limit: 20`,
-  which cost most of a billing cycle before anyone noticed.
-- **Empty responses are not automatically an empty board.** A 200 with zero rows
-  carries `meta.store.reason`:
+It returns every cursor page as a flat row list, or raises `SharpOddsError`
+rather than exposing a partial market. UFC calls it and adds nothing.
 
-  | `reason` | Meaning | Action |
-  |---|---|---|
-  | `warming` | instance has not finished its first refresh | **retry** |
-  | `store_empty` | instance ready but holding zero rows, mid-swap | **retry** |
-  | `no_match` | instance populated, filters matched nothing | **authoritative** |
+An earlier draft of this spec placed the helper in `utils.py` and described the
+props track as extending it. The order ran the other way: UFC ended the night
+before the NFL season opened, props took precedence, and props built the client.
+`routers/sharp_odds.py` is the better home regardless — it is a provider client,
+not a sport helper.
 
-  Retry `warming` and `store_empty` with bounded backoff. **Never** treat either
-  as an empty card — doing so would write a fight out of existence for that
-  capture and, worse, persist nothing during the window before an event when
-  lines matter most.
+### What it already does
 
-  `no_match` is authoritative **about the request** — retrying will not change
-  it. That is not the same as "this market no longer exists," and it does not
-  license discarding persisted values. See Retention below, which gives
-  `no_match` its own rule distinct from a 304.
+Everything this spec asked for, and in several places more:
 
-  `meta.store` also carries `ready`, `generation`, `books`, and `rows`; log them
-  alongside the rate-limit headers when a retry fires.
-- **Rate-limit headers:** log `X-Ratelimit-Limit`, `-Remaining`, `-Reset`, the
-  same way `fetch_sgo_odds` logs SGO usage headers. **No rate-limiting logic** —
-  three requests twice a day against 12/min needs none.
+| Requirement | Implementation |
+|---|---|
+| `X-API-Key` auth | `_request_page`, with `SHARP_API_KEY` / `SHARPAPI_KEY` fallback |
+| cursor-only pagination | rejects a missing cursor **and a repeated one**, and empty data alongside `has_more` |
+| validates `has_more` | raises unless it is strictly a `bool` |
+| page cap | `MAX_PAGES = 40`; logs **and raises**, so a truncated sweep can never look complete |
+| `is_live=false&is_main_line=true` | baked into the default params |
+| `limit` 200 | default |
+| `meta.store.reason` | retries `warming` / `store_empty`; raises on empty without an authoritative `no_match` |
+| rate-limit headers | logged, **and** used for pacing |
 
-Built minimal and scoped to what UFC needs. The NFL player-props track — a
-separate project, in its own thread — extends this rather than duplicating it.
-Props will genuinely need deep pagination and may need real rate limiting; those
-get added there, against a function that already works.
+It also pins `sportsbook=draftkings,fanduel`, which this spec never specified and
+which correctly scopes the free tier.
+
+### Pacing, which this spec did not anticipate
+
+The spec said no rate-limiting logic was needed, since UFC is three requests
+twice a day against 12/min. Props needed it, so it exists and is **process-wide**:
+a module-level lock, a `REQUEST_INTERVAL` floor of 5 seconds, and a delay that
+spreads `X-RateLimit-Remaining` across the reset window.
+
+Consequences for UFC:
+
+- a three-market sweep takes **at least 15 seconds**. Budget for it in the cron
+  and in the Render wake-up, rather than treating collection as instant.
+- UFC and props **share the pacing lock**. A UFC sweep running while a props
+  sweep is mid-flight will wait. Do not schedule them at the same minute.
+
+### Conditional requests were deliberately dropped
+
+This spec previously required storing an ETag per `(league, market)` and sending
+`If-None-Match`. **The shipped client does the opposite**: its docstring opens
+"No conditional requests or cached rows," and a 304 raises
+`SharpOddsError("Unexpected 304: archive sweeps require full responses")`.
+
+That is correct, not an oversight. An archive sweep needs the complete current
+state on every run, and a 304 returns no rows at all — there is nothing to
+append.
+
+**Keep it that way for UFC.** The ETag rationale here was bandwidth, which is
+meaningless at three small requests twice a day, and dropping it makes UFC
+simpler: every capture returns full rows for every market, so there is no
+partial-refresh hole to defend against. The retention rules below are written
+for a world with no 304s.
 
 ## Page behavior
 
@@ -469,7 +481,10 @@ market's data and the other book along with it.**
 The collector must therefore:
 
 1. **Start from the persisted bundle.** Load `ufc_odds` via
-   `load_persisted_odds` before issuing any request.
+   `load_persisted_odds` before issuing any request. Note that this **raises**
+   after three failed attempts rather than returning a partial map, so a failed
+   seed must abort the sweep — assembling a bundle without the persisted base
+   would overwrite good data with whatever a single market happened to return.
 2. **Fetch all three markets**, accumulating into an in-memory structure keyed
    by **ESPN fight id → book → market fields**, layering fresh values over the
    persisted ones.
@@ -483,32 +498,33 @@ Writing snapshots per market response would also defeat the consecutive-value
 dedup in `save_odds_snapshots`, since each partial bundle would hash
 differently from the last and every market request would append a row.
 
-### Partial refreshes and 304s
+### Retention: three distinct cases
 
-A **304 is not an empty market** — it means "unchanged since your last capture,"
-so the persisted value is the current value.
+The shipped client sends no conditional requests, so **a 304 cannot occur** and
+`fetch_sharp_odds` raises if one ever arrives. Every successful market request
+returns complete current rows.
 
-Because step 1 seeds the bundle from persisted data, a 304 on `moneyline`
-naturally leaves the persisted moneyline in place while fresh `total_rounds`
-merges in around it. This only holds if the seed-then-layer order is followed.
-Building the bundle from fresh responses alone would silently drop every market
-that returned 304 — the failure being **worst on quiet days**, when the most
-markets are unchanged and the fewest people would notice.
-
-### Retention: four distinct cases, not two
-
-`no_match` and a 304 are **not** the same state, and an earlier draft of this
-spec conflated them. Each case below gets its own rule.
+That removes the partial-refresh hazard an earlier draft of this spec spent a
+section defending against, and with it the fourth retention case. Three remain,
+and they are still genuinely different from each other:
 
 | Case | Meaning | Rule |
 |---|---|---|
-| **304 on a market request** | unchanged since last capture | Persisted value **is** current. Keep, no staleness marking. |
-| **`no_match` on a market request** | the whole query matched no rows | Keep persisted, but mark **every** fight's market from that request stale. Do not treat as a board-wide withdrawal. |
+| **`no_match` on a market request** | the whole query matched no rows | Keep persisted, but mark **every** fight's market from that request stale. Not a board-wide withdrawal. |
 | **Fight absent from an otherwise populated response** | that fight's market specifically is gone | Mark **that** market stale. The books likely pulled it. |
 | **Fight started, so it left the pregame feed** | expected, not a withdrawal | Freeze the last pregame value as final. Never mark stale. |
 
 Distinguish the last two by the fight's start time against the capture time.
 That check is already needed for the pregame-only rule, so it costs nothing.
+
+Seeding the bundle from persisted values (step 1 above) is still required — not
+for 304s any more, but because `no_match` and an absent fight both leave a market
+with no fresh row, and the persisted value has to survive.
+
+A raised `SharpOddsError` is a **failed sweep, not an empty board.** The client
+refuses to return a partial market, so the collector must treat the exception as
+"write nothing for this capture" rather than assembling a bundle from whichever
+markets happened to succeed. Persisted values carry forward untouched.
 
 ### Stale prices are "last observed", never current
 
@@ -612,7 +628,8 @@ store state — see `meta.store.reason` above. Do not conflate them.
   should say. Copying from the UFC page by hand is a weekly, low-effort
   stopgap.
 - `method_of_victory` and `round_betting` — both paginate, and neither has a
-  display design yet
+  display design yet. Pagination itself is no longer a blocker: the shipped
+  client handles it, so adding a market is a fourth call plus a render.
 - fighter records, reach/stance/camp context, images
 - multiple upcoming cards, and any date picker
 - live/in-fight updates

@@ -368,8 +368,10 @@ selection alone loses real changes. Record this contract in the table comment.
 
 ## Conditional requests are disabled
 
-`fetch_sharp_odds` supports ETag / `If-None-Match`, and **props must not use
-it.**
+`fetch_sharp_odds` **does not** send `If-None-Match` and treats a 304 as an
+error — `SharpOddsError("Unexpected 304: archive sweeps require full
+responses")`. Conditional requests were specced for UFC and deliberately left
+unbuilt; this section is the reason.
 
 A 304 returns no rows. This collector deliberately keeps no latest-value cache,
 so there is nothing to replay under the new `collection_id`. A closing sweep
@@ -381,8 +383,12 @@ The alternative is durable response caching plus replaying cached rows under the
 new collection id, which contradicts the no-cache design. Revisit only if
 request volume ever becomes a real constraint, which at 12/min it is not.
 
-This is a props-specific deviation. UFC keeps its ETag behavior, which is
-correct there because it has a latest-value cache to fall back on.
+This is **not** a props-specific deviation — it is client-wide, because
+`fetch_sharp_odds` is shared. UFC has no ETag behavior to keep, and
+`ufc_page.md` was updated to match: UFC has a latest-value cache and could have
+tolerated conditional requests, but the only benefit there was bandwidth at
+three small requests twice a day, and dropping them removed a whole class of
+partial-refresh handling from its collector.
 
 ## Rate limiting
 

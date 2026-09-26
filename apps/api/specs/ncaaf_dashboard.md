@@ -200,6 +200,14 @@ pricing is a real caveat for anyone reading the number.
   uses. A game that was priced pregame stays on the board through its final
   whistle, showing the last line captured before kickoff.
 
+  **`load_persisted_odds` raises on failure.** It retries three times with
+  backoff and then raises `RuntimeError` rather than returning a partial map —
+  previously it swallowed per-date errors, so a Supabase outage was
+  indistinguishable from "no odds today." `/api/ncaaf/today` must therefore
+  return **503** when that load fails, matching what `mlb.py` and `wnba.py` now
+  do, rather than assembling a board that silently drops every game for failing
+  the has-a-line filter.
+
   Coverage is ~70/71 on game day, so the filter drops very little, and "has a
   market" is a better relevance cut than "has a ranking" for a board built
   around market prices.
@@ -330,8 +338,18 @@ cost to argue against it.
 
 ## Shared extraction
 
-`fetch_espn_odds()` lives in `utils.py` alongside `fetch_sgo_odds`, with a
-matching signature, but is **wired only to NCAAF**.
+`fetch_espn_odds()` lives in its **own module, `routers/espn_odds.py`** — not in
+`utils.py` — and is **wired only to NCAAF**.
+
+An earlier draft put it in `utils.py` alongside `fetch_sgo_odds`. The
+provider-client-per-module pattern is the one that actually emerged: SharpAPI
+shipped as `routers/sharp_odds.py` (`49f173f`), and it reads better than a fourth
+provider crammed into an 800-line shared module. It also keeps NCAAF's new code
+off the file every other sport touches, which matters when unrelated odds-feed
+work is in flight.
+
+Keep the signature parallel to `fetch_sgo_odds` regardless — the point of a
+generic extractor is that switching a sport's provider stays a small change.
 
 Written generic because the extractor is the same code either way, and because
 ESPN carries DraftKings odds for MLB too — verified 15/15 games on a future

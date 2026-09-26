@@ -13,8 +13,8 @@ rediscovery.
 |---|---|---|---|---|
 | SportsGameOdds | BetOnline + de-vigged `fairOdds` | **2500 entities/month**, billed per event returned | Yes | `fetch_sgo_odds` |
 | The Odds API | Pinnacle, BetOnline, Betfair Exchange, Matchbook (`eu`); DK/FD/MGM (`us`) | **500 credits/month** — one request costs markets × regions, so a request is **not** one credit | **Yes — the only sharp source not billed per event** | `fetch_odds_api_odds` |
-| SharpAPI | DraftKings, FanDuel (free tier) | 12 req/min, **no monthly cap** | No — recreational only | `fetch_sharp_odds` (planned) |
-| ESPN | DraftKings | **None** | No — recreational only | `fetch_espn_odds` (planned) |
+| SharpAPI | DraftKings, FanDuel (free tier) | 12 req/min, **no monthly cap** | No — recreational only | `fetch_sharp_odds` (`routers/sharp_odds.py`) |
+| ESPN | DraftKings | **None** | No — recreational only | `fetch_espn_odds` (planned — `routers/espn_odds.py`) |
 
 ## What each is uniquely for
 
