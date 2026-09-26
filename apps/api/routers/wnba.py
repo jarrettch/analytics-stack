@@ -446,13 +446,23 @@ async def get_todays_games():
             tasks.append(loop.run_in_executor(None, lambda: load_persisted_odds(table_name="wnba_odds")))
             fetch_keys.append("odds")
 
+        odds_load_failed = False
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for key, result in zip(fetch_keys, results):
                 if isinstance(result, Exception):
-                    logger.warning(f"Failed to fetch {key}: {result}, using cached data")
+                    if key == "odds":
+                        logger.warning(f"Failed to fetch odds: {result}")
+                        odds_load_failed = True
+                    else:
+                        logger.warning(
+                            f"Failed to fetch {key}: {result}, using cached data"
+                        )
                 else:
                     cache.set(key, result)
+
+        if odds_load_failed:
+            raise HTTPException(status_code=503, detail="WNBA odds feed unavailable")
 
         sb = cache.get("scoreboard") or cache.get_stale("scoreboard")
         standings_map = cache.get("standings") or cache.get_stale("standings") or {}
@@ -651,6 +661,8 @@ async def get_todays_games():
         cache.set("assembled", refined_games, ttl=assembled_ttl)
         logger.info(f"WNBA response assembled with TTL={assembled_ttl}s (live games: {has_live_games})")
         return refined_games
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"WNBA API Fetch Error: {str(e)}", exc_info=True)
         cached = cache.get_stale("assembled")

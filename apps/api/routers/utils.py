@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 CACHE_TTL_LIVE = 20
 CACHE_TTL_DEFAULT = 60
 CACHE_TTL_ODDS = 1800
+PERSISTED_ODDS_READ_ATTEMPTS = 3
+PERSISTED_ODDS_RETRY_DELAYS = (0.25, 0.75)
 
 # A slate day runs until 6am ET, not midnight. A 7:10pm PT first pitch is
 # 10:10pm ET and can run past 1am ET; rolling at midnight dropped those games
@@ -249,21 +251,50 @@ def load_persisted_odds(game_date: date | None = None, *, table_name: str) -> di
         today_et = datetime.now(ET).date()
         dates_to_query = [today_et - timedelta(days=1), today_et, today_et + timedelta(days=1)]
 
-    odds_map = {}
-    for d in dates_to_query:
+    date_values = [d.isoformat() for d in dates_to_query]
+    last_error: Exception | None = None
+
+    for attempt in range(1, PERSISTED_ODDS_READ_ATTEMPTS + 1):
         try:
-            response = (
-                supabase.table(table_name)
-                .select("matchup_key, odds_data")
-                .eq("game_date", d.isoformat())
-                .execute()
+            query = supabase.table(table_name).select(
+                "game_date,matchup_key,odds_data"
             )
+            query = (
+                query.eq("game_date", date_values[0])
+                if len(date_values) == 1
+                else query.in_("game_date", date_values)
+            )
+            response = query.execute()
+            odds_map = {}
             for row in response.data:
-                odds_map[(d.isoformat(), row["matchup_key"])] = row["odds_data"]
-        except Exception as e:
-            logger.warning(f"Failed to load persisted odds for {d}: {e}")
-    logger.info(f"Loaded {len(odds_map)} odds from {table_name} for {[d.isoformat() for d in dates_to_query]}")
-    return odds_map
+                odds_map[(row["game_date"], row["matchup_key"])] = row["odds_data"]
+            logger.info(
+                "Loaded %s odds from %s for %s",
+                len(odds_map),
+                table_name,
+                date_values,
+            )
+            return odds_map
+        except Exception as exc:
+            last_error = exc
+            if attempt < PERSISTED_ODDS_READ_ATTEMPTS:
+                delay = PERSISTED_ODDS_RETRY_DELAYS[attempt - 1]
+                logger.warning(
+                    "Persisted odds read failed for %s on attempt %s/%s: %s; retrying in %.2fs",
+                    date_values,
+                    attempt,
+                    PERSISTED_ODDS_READ_ATTEMPTS,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
+
+    message = (
+        f"Failed to load persisted odds from {table_name} for {date_values} "
+        f"after {PERSISTED_ODDS_READ_ATTEMPTS} attempts"
+    )
+    logger.error("%s: %s", message, last_error)
+    raise RuntimeError(message) from last_error
 
 
 def save_persisted_odds(odds_map: dict, game_date: date | None = None, *, table_name: str):

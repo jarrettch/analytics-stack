@@ -745,13 +745,19 @@ async def get_todays_games():
             tasks.append(asyncio.get_event_loop().run_in_executor(None, lambda: load_persisted_odds(table_name="mlb_odds")))
             keys.append("odds")
 
+        odds_load_failed = False
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for key, result in zip(keys, results):
                 if isinstance(result, Exception):
                     logger.warning(f"Failed to fetch {key}: {result}")
+                    if key == "odds":
+                        odds_load_failed = True
                 else:
                     cache.set(key, result)
+
+        if odds_load_failed:
+            raise HTTPException(status_code=503, detail="MLB odds feed unavailable")
 
         schedule  = cache.get("schedule")  or cache.get_stale("schedule")  or []
         standings = cache.get("standings") or cache.get_stale("standings") or {}
@@ -963,6 +969,8 @@ async def get_todays_games():
         logger.info(f"MLB response assembled: {len(refined_games)} games")
         return refined_games
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"MLB API error: {e}", exc_info=True)
         cached = cache.get_stale("assembled")

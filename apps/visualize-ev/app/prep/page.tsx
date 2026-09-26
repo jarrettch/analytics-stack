@@ -149,6 +149,30 @@ function formatGame(game: PrepGame): string {
   return `${matchup}${formatLine(game)}`;
 }
 
+function hasMarketOdds(game: PrepGame): boolean {
+  return [
+    game.awayMoneyline,
+    game.homeMoneyline,
+    game.homeSpread,
+    game.spreadOddsAway,
+    game.spreadOddsHome,
+    game.overUnder,
+    game.overOdds,
+    game.underOdds,
+  ].some((value) => typeof value === "number" && Number.isFinite(value));
+}
+
+function oddsCoverageWarning(games: PrepGame[]): string | null {
+  if (games.length === 0) return null;
+
+  const gamesWithOdds = games.filter(hasMarketOdds).length;
+  if (gamesWithOdds === games.length) return null;
+  if (gamesWithOdds === 0) {
+    return `No market odds were returned for ${games.length} game${games.length === 1 ? "" : "s"}.`;
+  }
+  return `Market odds were returned for ${gamesWithOdds} of ${games.length} games.`;
+}
+
 function groupHeading(sport: Sport, games: PrepGame[]): string {
   if (
     sport === "nfl" &&
@@ -170,9 +194,18 @@ function toSlateText(
       const games = states[sport].games.filter((game) =>
         selectedGames.has(game.key),
       );
-      return games.length
-        ? [`${groupHeading(sport, games)}\n${games.map(formatGame).join("\n")}`]
-        : [];
+      if (!games.length) return [];
+
+      const oddsWarning = oddsCoverageWarning(games);
+      return [
+        [
+          groupHeading(sport, games),
+          oddsWarning ? `ODDS WARNING: ${oddsWarning}` : null,
+          games.map(formatGame).join("\n"),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      ];
     })
     .join("\n\n");
 }
@@ -400,6 +433,10 @@ export default function SlatePrepPage() {
                 const selectedForSport = state.games.filter((game) =>
                   selectedGames.has(game.key),
                 );
+                const oddsWarning =
+                  state.kind === "ready"
+                    ? oddsCoverageWarning(state.games)
+                    : null;
                 return (
                   <section
                     key={sport}
@@ -445,40 +482,47 @@ export default function SlatePrepPage() {
                         remain {sport === "nfl" ? "this week" : "today"}.
                       </div>
                     ) : (
-                      <ul className="divide-y divide-border">
-                        {state.games.map((game) => {
-                          const selected = selectedGames.has(game.key);
-                          return (
-                            <li key={game.key} className="px-4 py-3">
-                              <label className="flex cursor-pointer items-start gap-3">
-                                <input
-                                  type="checkbox"
-                                  checked={selected}
-                                  onChange={(event) =>
-                                    setGameSelected(
-                                      game.key,
-                                      event.target.checked,
-                                    )
-                                  }
-                                  className="mt-1 size-4 shrink-0 accent-primary"
-                                />
-                                <span className="min-w-0">
-                                  <span
-                                    className={`block font-mono text-xs leading-5 ${selected ? "text-foreground" : "text-muted-foreground line-through"}`}
-                                  >
-                                    {formatGame(game)}
+                      <>
+                        {oddsWarning ? (
+                          <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+                            {oddsWarning} Verify the feed before analysis.
+                          </div>
+                        ) : null}
+                        <ul className="divide-y divide-border">
+                          {state.games.map((game) => {
+                            const selected = selectedGames.has(game.key);
+                            return (
+                              <li key={game.key} className="px-4 py-3">
+                                <label className="flex cursor-pointer items-start gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected}
+                                    onChange={(event) =>
+                                      setGameSelected(
+                                        game.key,
+                                        event.target.checked,
+                                      )
+                                    }
+                                    className="mt-1 size-4 shrink-0 accent-primary"
+                                  />
+                                  <span className="min-w-0">
+                                    <span
+                                      className={`block font-mono text-xs leading-5 ${selected ? "text-foreground" : "text-muted-foreground line-through"}`}
+                                    >
+                                      {formatGame(game)}
+                                    </span>
+                                    <span className="mt-1 block text-[11px] text-muted-foreground">
+                                      {game.isPreseason ? "PRESEASON · " : ""}
+                                      {game.status || game.time || "Scheduled"}
+                                      {!selected ? " · EXCLUDED" : ""}
+                                    </span>
                                   </span>
-                                  <span className="mt-1 block text-[11px] text-muted-foreground">
-                                    {game.isPreseason ? "PRESEASON · " : ""}
-                                    {game.status || game.time || "Scheduled"}
-                                    {!selected ? " · EXCLUDED" : ""}
-                                  </span>
-                                </span>
-                              </label>
-                            </li>
-                          );
-                        })}
-                      </ul>
+                                </label>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </>
                     )}
                   </section>
                 );
