@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Clipboard, ClipboardCheck, Plus, X } from "lucide-react";
 import { type MatchupData, type Sport, SPORT_LABELS } from "@repo/ui";
 
-const SUPPORTED_SPORTS: Sport[] = ["mlb", "wnba", "nfl", "nba", "nhl"];
+const SUPPORTED_SPORTS: Sport[] = ["mlb", "wnba", "nfl", "ncaaf", "nba", "nhl"];
 
 type LoadState =
   | { kind: "idle"; games: PrepGame[] }
@@ -60,6 +60,7 @@ function emptyLoadStates(): Record<Sport, LoadState> {
     mlb: { kind: "idle", games: [] },
     wnba: { kind: "idle", games: [] },
     nfl: { kind: "idle", games: [] },
+    ncaaf: { kind: "idle", games: [] },
     nba: { kind: "idle", games: [] },
     nhl: { kind: "idle", games: [] },
   };

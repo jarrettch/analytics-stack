@@ -1,4 +1,4 @@
-export type Sport = "nba" | "nfl" | "mlb" | "nhl" | "wnba"
+export type Sport = "nba" | "nfl" | "mlb" | "nhl" | "wnba" | "ncaaf"
 
 export interface BaseTeamData {
   name: string
@@ -34,6 +34,18 @@ export interface NFLTeamData extends BaseTeamData {
   yardsPG: number | null
   yardsAllowedPG: number | null
   turnoverDiff: number | null
+}
+
+// NCAAF adds the two fields the conference and ranked filters key on.
+export interface NCAAFTeamData extends BaseTeamData {
+  score: number
+  pointsFor: number | null
+  pointsAgainst: number | null
+  yardsPG: number | null
+  yardsAllowedPG: number | null
+  turnoverDiff: number | null
+  rank: number | null        // curatedRank.current, normalized: 99 -> null
+  conferenceId: string       // ESPN team.conferenceId
 }
 
 // MLB-specific team data
@@ -129,6 +141,28 @@ export interface NFLMatchupData extends BaseMatchupData {
   awayMoneyline?: number | null
 }
 
+// Declared outright: NFLMatchupData pins sport to "nfl" and its teams to
+// NFLTeamData, and an extends clause can't narrow either.
+export interface NCAAFMatchupData extends BaseMatchupData {
+  sport: "ncaaf"
+  gameStatus: number
+  period: number
+  gameClock: string | null
+  away: NCAAFTeamData
+  home: NCAAFTeamData
+  week: number
+  weekLabel: string
+  seasonType: string
+  statsSeason: number
+  pregameSpread?: number | null
+  spreadOddsHome?: number | null
+  spreadOddsAway?: number | null
+  overOdds?: number | null
+  underOdds?: number | null
+  homeMoneyline?: number | null
+  awayMoneyline?: number | null
+}
+
 export interface MLBMatchupData extends BaseMatchupData {
   sport: "mlb"
   gameNumber?: number
@@ -163,7 +197,9 @@ export interface NHLMatchupData extends BaseMatchupData {
   home: NHLTeamData
 }
 
-export type MatchupData = NBAMatchupData | NFLMatchupData | MLBMatchupData | NHLMatchupData | WNBAMatchupData
+export type MatchupData =
+  | NBAMatchupData | NFLMatchupData | MLBMatchupData
+  | NHLMatchupData | WNBAMatchupData | NCAAFMatchupData
 
 export const SPORT_LABELS: Record<Sport, string> = {
   nba: "NBA",
@@ -171,6 +207,7 @@ export const SPORT_LABELS: Record<Sport, string> = {
   mlb: "MLB",
   nhl: "NHL",
   wnba: "WNBA",
+  ncaaf: "NCAAF",
 }
 
 export const SPORT_MODELS: Record<Sport, string> = {
@@ -179,4 +216,5 @@ export const SPORT_MODELS: Record<Sport, string> = {
   mlb: "PECOTA v2.8",
   nhl: "xG v5.0",
   wnba: "EV-MODEL-V1",
+  ncaaf: "MARKET (DK)",
 }

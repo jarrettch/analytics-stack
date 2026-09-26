@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import { SportsDashboard, type Sport, type MatchupData, SPORT_LABELS, SPORT_MODELS } from "@repo/ui";
 import { Activity, ClipboardList, Crosshair } from "lucide-react";
@@ -8,7 +8,7 @@ import { Activity, ClipboardList, Crosshair } from "lucide-react";
 const FALLBACK_VISIBLE_SPORTS: Sport[] = ["mlb", "wnba"];
 
 // Sports with a live backend endpoint (others fall through to "coming soon").
-const LIVE_SPORTS: Sport[] = ["nba", "wnba", "nfl", "mlb", "nhl"];
+const LIVE_SPORTS: Sport[] = ["nba", "wnba", "nfl", "mlb", "nhl", "ncaaf"];
 const LAST_SELECTED_SPORT_KEY = "sports-dashboard:last-selected-sport";
 
 function storedSport(): Sport | null {
@@ -30,6 +30,37 @@ function rememberSport(sport: Sport) {
 
 function hasGameStatus(matchup: MatchupData): matchup is MatchupData & { gameStatus: number } {
   return "gameStatus" in matchup && typeof matchup.gameStatus === "number";
+}
+
+type NCAAFMatchup = Extract<MatchupData, { sport: "ncaaf" }>;
+
+function isNcaaf(matchup: MatchupData): matchup is NCAAFMatchup {
+  return matchup.sport === "ncaaf";
+}
+
+// Conference and ranked filters only narrow what's already loaded; there's no
+// endpoint behind them.
+function conferenceOptions(matchups: MatchupData[]): [string, string][] {
+  const options = new Map<string, string>();
+  for (const matchup of matchups.filter(isNcaaf)) {
+    for (const team of [matchup.away, matchup.home]) {
+      if (team.conferenceId && team.conference !== "N/A") {
+        options.set(team.conferenceId, team.conference);
+      }
+    }
+  }
+  return [...options].sort((a, b) => a[1].localeCompare(b[1]));
+}
+
+function passesNcaafFilters(
+  matchup: MatchupData,
+  conferenceId: string,
+  rankedOnly: boolean,
+): boolean {
+  if (!isNcaaf(matchup)) return true;
+  const teams = [matchup.away, matchup.home];
+  if (rankedOnly && !teams.some((team) => team.rank != null)) return false;
+  return !conferenceId || teams.some((team) => team.conferenceId === conferenceId);
 }
 
 async function fetchSportSlate(sport: Sport): Promise<MatchupData[]> {
@@ -54,6 +85,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [preferenceReady, setPreferenceReady] = useState(false);
   const [now, setNow] = useState<Date | null>(null);
+  const [ncaafConference, setNcaafConference] = useState("");
+  const [ncaafRankedOnly, setNcaafRankedOnly] = useState(false);
   const lastDataRef = useRef<string>("");
   const preferredSportRef = useRef<Sport | null>(null);
   const userSelectedSportRef = useRef(false);
@@ -162,8 +195,22 @@ export default function Home() {
     };
   }, [activeSport, preferenceReady]);
 
-  const gameCount = matchups.length;
-  const hasLiveGames = matchups.some(m => hasGameStatus(m) && m.gameStatus === 2);
+  const conferences = useMemo(() => conferenceOptions(matchups), [matchups]);
+  // A remembered conference that isn't on today's slate would filter
+  // invisibly: the select can't show it. Only apply one it can show.
+  const activeConference = conferences.some(([id]) => id === ncaafConference)
+    ? ncaafConference
+    : "";
+  const displayedMatchups = useMemo(
+    () => matchups.filter((matchup) =>
+      passesNcaafFilters(matchup, activeConference, ncaafRankedOnly),
+    ),
+    [matchups, activeConference, ncaafRankedOnly],
+  );
+  const gameCount = displayedMatchups.length;
+  // Reads the filtered view, like the game count beside it: LIVE means a live
+  // game is on screen, not merely somewhere on the unfiltered slate.
+  const hasLiveGames = displayedMatchups.some(m => hasGameStatus(m) && m.gameStatus === 2);
 
   return (
     <main className="min-h-screen bg-background px-4 py-6">
@@ -211,7 +258,9 @@ export default function Home() {
         <div className="w-full">
           <div className="flex items-center justify-between">
             {/* Tabs */}
-            <div className="flex h-8 min-w-52 bg-secondary rounded-md">
+            {/* Scrolls rather than wraps or collapsing into a dropdown: the tabs
+                show which sports have games. Revisit at seven tabs. */}
+            <div className="flex h-8 min-w-52 max-w-full overflow-x-auto whitespace-nowrap bg-secondary rounded-md">
               {(visibleSports ?? []).map((sport) => (
                 <button
                   key={sport}
@@ -221,7 +270,7 @@ export default function Home() {
                     rememberSport(sport);
                     setActiveSport(sport);
                   }}
-                  className={`px-4 font-mono text-xs uppercase tracking-wider transition-colors ${
+                  className={`shrink-0 px-4 font-mono text-xs uppercase tracking-wider transition-colors ${
                     activeSport === sport
                       ? "bg-primary text-primary-foreground rounded-md"
                       : "text-muted-foreground hover:text-foreground"
@@ -243,6 +292,32 @@ export default function Home() {
 
           <div className="mt-4 h-px w-full bg-border" />
 
+          {activeSport === "ncaaf" && matchups.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              <label className="flex items-center gap-1.5">
+                Conf
+                <select
+                  value={activeConference}
+                  onChange={(event) => setNcaafConference(event.target.value)}
+                  className="rounded-sm border border-border bg-secondary px-1.5 py-0.5 text-foreground"
+                >
+                  <option value="">All</option>
+                  {conferences.map(([id, label]) => (
+                    <option key={id} value={id}>{label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={ncaafRankedOnly}
+                  onChange={(event) => setNcaafRankedOnly(event.target.checked)}
+                />
+                Ranked involved
+              </label>
+            </div>
+          )}
+
           {/* Content */}
           {/* Reserve the grid's rough height so the footer doesn't jump when
               the spinner is replaced by cards. */}
@@ -252,15 +327,17 @@ export default function Home() {
                 <div className="mb-2 h-4 w-4 animate-spin border-2 border-primary border-t-transparent rounded-full" />
                 INITIALIZING DATA FEED...
               </div>
-            ) : matchups.length > 0 ? (
+            ) : displayedMatchups.length > 0 ? (
               <SportsDashboard
-                matchups={matchups}
+                matchups={displayedMatchups}
                 apiBaseUrl={process.env.NEXT_PUBLIC_API_URL}
               />
             ) : (
               <div className="flex flex-col items-center justify-center py-20 font-mono text-xs text-muted-foreground">
                 <span className="uppercase">
-                  No {SPORT_LABELS[activeSport]} games scheduled {activeSport === "nfl" ? "this week" : "today"}
+                  {matchups.length > 0
+                    ? `No ${SPORT_LABELS[activeSport]} games match these filters`
+                    : `No ${SPORT_LABELS[activeSport]} games scheduled ${activeSport === "nfl" ? "this week" : "today"}`}
                 </span>
                 {!LIVE_SPORTS.includes(activeSport) && (
                   <span className="mt-2 text-[10px] text-muted-foreground/60">
@@ -284,7 +361,7 @@ export default function Home() {
         <div className="h-px w-full bg-border" />
         <div className="flex items-center justify-between pt-2">
           <span className="font-mono text-[10px] text-muted-foreground">
-            Models: EV-MODEL-V1 (NBA/WNBA) &bull; Market + team stats (NFL) &bull; PECOTA v2.8 (MLB) &bull; xG v5.0 (NHL)
+            Models: EV-MODEL-V1 (NBA/WNBA) &bull; Market + team stats (NFL) &bull; Market, DraftKings only (NCAAF) &bull; PECOTA v2.8 (MLB) &bull; xG v5.0 (NHL)
           </span>
           <span className="min-w-64 text-right font-mono text-[10px] tabular-nums text-muted-foreground">
             {now

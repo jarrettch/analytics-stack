@@ -43,7 +43,7 @@ existing `de_vig_ml`.
 | PF / PA / streak | ESPN college-football standings JSON | Provides `pointsFor`, `pointsAgainst`, `pointDifferential`, `streak`, `overall`. |
 | Rankings | ESPN scoreboard competitor | `curatedRank.current`; **99 means unranked.** |
 | Conference | ESPN scoreboard competitor | `team.conferenceId`. |
-| Logos | ESPN CDN | `team.abbreviation.toLowerCase()` as the slug, matching the NFL pattern. |
+| Logos | ESPN CDN | `teamlogos/ncaa/500/{team.id}.png`. Unlike NFL, the abbreviation slug 404s (verified 2026-09-25), so `espnSlug` carries the numeric id and `TeamLogo` maps `ncaaf` to the `ncaa` path. |
 
 ### Never trust the odds array's index or the provider name
 
@@ -207,6 +207,11 @@ pricing is a real caveat for anyone reading the number.
   return **503** when that load fails, matching what `mlb.py` and `wnba.py` now
   do, rather than assembling a board that silently drops every game for failing
   the has-a-line filter.
+
+  Missing Supabase configuration is treated the same way. The shared loader
+  returns an empty map when no client is configured, so NCAAF loads through a
+  strict wrapper that raises instead; an unconfigured environment gets 503,
+  not a fresh-only board that empties at kickoff.
 
   Coverage is ~70/71 on game day, so the filter drops very little, and "has a
   market" is a better relevance cut than "has a ranking" for a board built

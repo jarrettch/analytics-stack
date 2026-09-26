@@ -297,10 +297,20 @@ def load_persisted_odds(game_date: date | None = None, *, table_name: str) -> di
     raise RuntimeError(message) from last_error
 
 
-def save_persisted_odds(odds_map: dict, game_date: date | None = None, *, table_name: str):
-    """Upsert odds to Supabase (keyed by game_date + matchup_key)."""
+def save_persisted_odds(
+    odds_map: dict, game_date: date | None = None, *, table_name: str
+) -> bool:
+    """Upsert odds to Supabase (keyed by game_date + matchup_key).
+
+    Returns whether the rows were written. Failures are logged rather than
+    raised; callers that must not report success without a write check the
+    result. An empty map is a successful no-op even without Supabase.
+    """
+    if not odds_map:
+        return True
     if not supabase:
-        return
+        logger.warning("Supabase not configured, %s odds not persisted", table_name)
+        return False
 
     target_date = game_date or datetime.now(ET).date()
     try:
@@ -314,8 +324,10 @@ def save_persisted_odds(odds_map: dict, game_date: date | None = None, *, table_
         ]
         supabase.table(table_name).upsert(rows, on_conflict="game_date,matchup_key").execute()
         logger.info(f"Persisted {len(rows)} matchup odds to {table_name} for {target_date}")
+        return True
     except Exception as e:
         logger.warning(f"Failed to persist odds: {e}")
+        return False
 
 
 def odds_snapshot_hash(odds_data: dict) -> str:

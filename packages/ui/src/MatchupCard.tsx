@@ -30,11 +30,13 @@ import type {
   MatchupData,
   NBAMatchupData,
   NFLMatchupData,
+  NCAAFMatchupData,
   MLBMatchupData,
   NHLMatchupData,
   WNBAMatchupData,
   NBATeamData,
   NFLTeamData,
+  NCAAFTeamData,
   MLBTeamData,
   NHLTeamData,
   BaseTeamData,
@@ -94,10 +96,12 @@ function TeamLogo({
   // Prefer the slug the server picked (NHL emits this; NHL/MLB/NBA all eventually
   // should). Falls back to legacy logic so MLB's "AZ" → "ari" keeps working.
   const slug = espnSlug ?? (abbreviation === "AZ" ? "ari" : abbreviation.toLowerCase())
+  // College logos live under "ncaa", keyed by numeric team id (the server's espnSlug).
+  const cdnSport = sport === "ncaaf" ? "ncaa" : sport
 
   return (
     <img
-      src={`https://a.espncdn.com/i/teamlogos/${sport}/500/${slug}.png`}
+      src={`https://a.espncdn.com/i/teamlogos/${cdnSport}/500/${slug}.png`}
       alt={`${abbreviation} logo`}
       className={`${sizeClasses[size]} mr-1 inline-block`}
       onError={(e) => (e.currentTarget.style.display = "none")}
@@ -106,15 +110,18 @@ function TeamLogo({
 }
 
 function TeamRow({ team, side, sport }: { team: BaseTeamData; side: "away" | "home"; sport: string }) {
+  // College shows the poll rank, not a seed: CFP seeds deliberately differ
+  // from rank (top conference champions take seeds 1-5).
+  const marker = sport === "ncaaf" ? (team as NCAAFTeamData).rank : team.seed
   return (
     <div className="flex items-center gap-3">
       <TeamLogo abbreviation={team.abbreviation} espnSlug={team.espnSlug} sport={sport} />
       <div className="flex min-w-0 flex-1 items-baseline gap-2">
-        {team.seed && (
+        {marker ? (
           <span className="font-mono text-[10px] text-muted-foreground">
-            {team.seed}
+            {marker}
           </span>
-        )}
+        ) : null}
         <span className="truncate font-sans text-sm font-semibold text-foreground">
           {team.name}
         </span>
@@ -132,11 +139,29 @@ function TeamRow({ team, side, sport }: { team: BaseTeamData; side: "away" | "ho
   )
 }
 
+// Only a W or L streak gets an arrow. Anything else ("N/A", "", "-") is
+// missing data, not a losing streak.
+function StreakIndicator({ streak }: { streak?: string }) {
+  const value = streak?.trim() ?? ""
+  const kind = value.startsWith("W") ? "win" : value.startsWith("L") ? "loss" : null
+  if (!kind) return <>--</>
+
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {kind === "win" ? (
+        <ArrowUp className="size-2.5 text-emerald-400" />
+      ) : (
+        <ArrowDown className="size-2.5 text-red-400" />
+      )}
+      {value}
+    </span>
+  )
+}
+
 // NBA Stats Row
 function NBATeamStats({ team }: { team: NBATeamData }) {
   const last10 = team.last10 || "0-0"
   const conference = team.conference || "NBA"
-  const streak = team.streak || "N/A"
   const winPct = team.winPct ?? 0.5
 
   return (
@@ -156,14 +181,7 @@ function NBATeamStats({ team }: { team: NBATeamData }) {
       <div className="flex flex-col">
         <StatLabel>Streak</StatLabel>
         <StatValue>
-          <span className="inline-flex items-center gap-0.5">
-            {streak.startsWith("W") ? (
-              <ArrowUp className="size-2.5 text-emerald-400" />
-            ) : (
-              <ArrowDown className="size-2.5 text-red-400" />
-            )}
-            {streak}
-          </span>
+          <StreakIndicator streak={team.streak} />
         </StatValue>
       </div>
       <div className="flex flex-col">
@@ -176,7 +194,6 @@ function NBATeamStats({ team }: { team: NBATeamData }) {
 
 // NFL Stats Row
 function NFLTeamStats({ team }: { team: NFLTeamData }) {
-  const streak = team.streak || "N/A"
   const fmt = (value: number | null, digits = 1) => value == null ? "--" : value.toFixed(digits)
 
   return (
@@ -196,14 +213,7 @@ function NFLTeamStats({ team }: { team: NFLTeamData }) {
       <div className="flex flex-col">
         <StatLabel>Streak</StatLabel>
         <StatValue>
-          <span className="inline-flex items-center gap-0.5">
-            {streak.startsWith("W") ? (
-              <ArrowUp className="size-2.5 text-emerald-400" />
-            ) : (
-              <ArrowDown className="size-2.5 text-red-400" />
-            )}
-            {streak}
-          </span>
+          <StreakIndicator streak={team.streak} />
         </StatValue>
       </div>
       <div className="flex flex-col">
@@ -417,6 +427,7 @@ function TeamStats({ team, sport }: { team: NBATeamData | NFLTeamData | MLBTeamD
     case "wnba":
       return <NBATeamStats team={team as NBATeamData} />
     case "nfl":
+    case "ncaaf":
       return <NFLTeamStats team={team as NFLTeamData} />
     case "mlb":
       return <MLBTeamStats team={team as MLBTeamData} />
@@ -938,9 +949,9 @@ export function MatchupCard({
           <span className="font-mono text-[10px] text-muted-foreground">
             {matchup.broadcast}
           </span>
-          {matchup.sport === "nfl" && (
+          {(matchup.sport === "nfl" || matchup.sport === "ncaaf") && (
             <span className="font-mono text-[10px] text-primary">
-              {(matchup as NFLMatchupData).weekLabel}
+              {(matchup as NFLMatchupData | NCAAFMatchupData).weekLabel}
             </span>
           )}
           <span className="font-mono text-[10px] text-muted-foreground">
@@ -1039,14 +1050,14 @@ export function MatchupCard({
 
       {/* Score Section - Dynamic based on game status */}
       <div className="px-3 py-2">
-        {(matchup.sport === "nba" || matchup.sport === "wnba" || matchup.sport === "nfl" || matchup.sport === "mlb" || matchup.sport === "nhl") && (matchup as NBAMatchupData | WNBAMatchupData | NFLMatchupData | MLBMatchupData | NHLMatchupData).gameStatus >= 2 ? (
+        {(matchup.sport === "nba" || matchup.sport === "wnba" || matchup.sport === "nfl" || matchup.sport === "ncaaf" || matchup.sport === "mlb" || matchup.sport === "nhl") && (matchup as NBAMatchupData | WNBAMatchupData | NFLMatchupData | NCAAFMatchupData | MLBMatchupData | NHLMatchupData).gameStatus >= 2 ? (
           // Live or Final game - show actual score
           <>
             <div className="mb-1 flex items-center justify-between">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                {(matchup as NBAMatchupData | WNBAMatchupData | NFLMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 3 ? "Final" : "Live"}
+                {(matchup as NBAMatchupData | WNBAMatchupData | NFLMatchupData | NCAAFMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 3 ? "Final" : "Live"}
               </span>
-              {(matchup as NBAMatchupData | WNBAMatchupData | NFLMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 2 && (
+              {(matchup as NBAMatchupData | WNBAMatchupData | NFLMatchupData | NCAAFMatchupData | MLBMatchupData | NHLMatchupData).gameStatus === 2 && (
                 <span className="font-mono text-[10px] text-emerald-400 animate-pulse rounded-sm bg-emerald-500/10 px-0.5 py-0.5 [filter:drop-shadow(0_0_6px_#34d399)]">
                   {matchup.sport === "nba" || matchup.sport === "wnba"
                     ? `Q${(matchup as NBAMatchupData | WNBAMatchupData).period} ${parseGameClock((matchup as NBAMatchupData | WNBAMatchupData).gameClock)}`
@@ -1167,6 +1178,7 @@ export function MatchupCard({
       {matchup.sport === "nba" && <NBARatings away={(matchup as NBAMatchupData).away} home={(matchup as NBAMatchupData).home} />}
       {matchup.sport === "wnba" && <NBARatings away={(matchup as WNBAMatchupData).away} home={(matchup as WNBAMatchupData).home} />}
       {matchup.sport === "nfl" && <NFLRatings away={(matchup as NFLMatchupData).away} home={(matchup as NFLMatchupData).home} />}
+      {matchup.sport === "ncaaf" && <NFLRatings away={(matchup as NCAAFMatchupData).away} home={(matchup as NCAAFMatchupData).home} />}
       {matchup.sport === "mlb" && <MLBRatings away={(matchup as MLBMatchupData).away} home={(matchup as MLBMatchupData).home} />}
       {matchup.sport === "nhl" && <NHLRatings away={(matchup as NHLMatchupData).away} home={(matchup as NHLMatchupData).home} />}
 

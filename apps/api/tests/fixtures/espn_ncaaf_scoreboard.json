@@ -1,0 +1,589 @@
+{
+ "events": [
+  {
+   "id": "401856704",
+   "date": "2026-09-26T16:00Z",
+   "name": "Texas Longhorns at Tennessee Volunteers",
+   "shortName": "TEX @ TENN",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "week": {
+    "number": 4
+   },
+   "competitions": [
+    {
+     "id": "401856704",
+     "date": "2026-09-26T16:00Z",
+     "attendance": 0,
+     "type": {
+      "id": "1",
+      "abbreviation": "STD"
+     },
+     "timeValid": true,
+     "dateValid": true,
+     "neutralSite": false,
+     "conferenceCompetition": true,
+     "playByPlayAvailable": false,
+     "recent": false,
+     "competitors": [
+      {
+       "id": "2633",
+       "type": "team",
+       "order": 0,
+       "homeAway": "home",
+       "team": {
+        "id": "2633",
+        "location": "Tennessee",
+        "name": "Volunteers",
+        "abbreviation": "TENN",
+        "displayName": "Tennessee Volunteers",
+        "shortDisplayName": "Tennessee",
+        "isActive": true,
+        "logo": "https://a.espncdn.com/i/teamlogos/ncaa/500/2633.png",
+        "conferenceId": "8"
+       },
+       "score": "0",
+       "curatedRank": {
+        "current": 14
+       },
+       "statistics": [],
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "3-0"
+        },
+        {
+         "name": "Home",
+         "abbreviation": "Home",
+         "type": "homerecord",
+         "summary": "2-0"
+        },
+        {
+         "name": "Away",
+         "abbreviation": "Away",
+         "type": "awayrecord",
+         "summary": "1-0"
+        },
+        {
+         "name": "vs. Conf.",
+         "abbreviation": "CONF",
+         "type": "vsconf",
+         "summary": "0-0"
+        }
+       ]
+      },
+      {
+       "id": "251",
+       "type": "team",
+       "order": 1,
+       "homeAway": "away",
+       "team": {
+        "id": "251",
+        "location": "Texas",
+        "name": "Longhorns",
+        "abbreviation": "TEX",
+        "displayName": "Texas Longhorns",
+        "shortDisplayName": "Texas",
+        "isActive": true,
+        "logo": "https://a.espncdn.com/i/teamlogos/ncaa/500/251.png",
+        "conferenceId": "8"
+       },
+       "score": "0",
+       "curatedRank": {
+        "current": 1
+       },
+       "statistics": [],
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "3-0"
+        },
+        {
+         "name": "Home",
+         "abbreviation": "Home",
+         "type": "homerecord",
+         "summary": "3-0"
+        },
+        {
+         "name": "Away",
+         "abbreviation": "Away",
+         "type": "awayrecord",
+         "summary": "0-0"
+        },
+        {
+         "name": "vs. Conf.",
+         "abbreviation": "CONF",
+         "type": "vsconf",
+         "summary": "0-0"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 0,
+      "type": {
+       "id": "1",
+       "name": "STATUS_SCHEDULED",
+       "state": "pre",
+       "completed": false,
+       "description": "Scheduled",
+       "detail": "Sat, September 26th at 12:00 PM EDT",
+       "shortDetail": "9/26 - 12:00 PM EDT"
+      }
+     },
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "ABC"
+       ]
+      }
+     ],
+     "groups": {
+      "id": "8",
+      "name": "Southeastern Conference",
+      "shortName": "SEC",
+      "isConference": true
+     },
+     "format": {
+      "regulation": {
+       "periods": 4
+      }
+     },
+     "startDate": "2026-09-26T16:00Z",
+     "broadcast": "ABC",
+     "odds": [
+      {
+       "provider": {
+        "id": "100",
+        "name": "Draft Kings",
+        "priority": 1,
+        "displayName": "Draft Kings"
+       },
+       "details": "TEX -5.5",
+       "overUnder": 54.5,
+       "spread": 5.5,
+       "awayTeamOdds": {
+        "favorite": true,
+        "underdog": false,
+        "team": {
+         "id": "251",
+         "abbreviation": "TEX",
+         "name": "Longhorns",
+         "displayName": "Texas Longhorns",
+         "logo": "https://a.espncdn.com/i/teamlogos/ncaa/500/251.png"
+        },
+        "favoriteAtOpen": true
+       },
+       "homeTeamOdds": {
+        "favorite": false,
+        "underdog": true,
+        "team": {
+         "id": "2633",
+         "abbreviation": "TENN",
+         "name": "Volunteers",
+         "displayName": "Tennessee Volunteers",
+         "logo": "https://a.espncdn.com/i/teamlogos/ncaa/500/2633.png"
+        },
+        "favoriteAtOpen": false
+       },
+       "moneyline": {
+        "displayName": "Moneyline",
+        "shortDisplayName": "ML",
+        "home": {
+         "close": {
+          "odds": "+164"
+         },
+         "open": {
+          "odds": "+210"
+         }
+        },
+        "away": {
+         "close": {
+          "odds": "-198"
+         },
+         "open": {
+          "odds": "-258"
+         }
+        }
+       },
+       "pointSpread": {
+        "displayName": "Spread",
+        "shortDisplayName": "Spread",
+        "home": {
+         "close": {
+          "line": "+5.5",
+          "odds": "-115"
+         },
+         "open": {
+          "line": "+7",
+          "odds": "-110"
+         }
+        },
+        "away": {
+         "close": {
+          "line": "-5.5",
+          "odds": "-105"
+         },
+         "open": {
+          "line": "-7",
+          "odds": "-110"
+         }
+        }
+       },
+       "total": {
+        "displayName": "Total",
+        "shortDisplayName": "Total",
+        "over": {
+         "close": {
+          "line": "o54.5",
+          "odds": "-112"
+         },
+         "open": {
+          "line": "o56.5",
+          "odds": "-112"
+         }
+        },
+        "under": {
+         "close": {
+          "line": "u54.5",
+          "odds": "-108"
+         },
+         "open": {
+          "line": "u56.5",
+          "odds": "-108"
+         }
+        }
+       }
+      }
+     ],
+     "highlights": [],
+     "venue": {
+      "fullName": "Test Stadium"
+     }
+    }
+   ],
+   "weather": {
+    "displayValue": "Sunny",
+    "temperature": 67,
+    "highTemperature": 67,
+    "conditionId": "1"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0:00",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Sat, September 26th at 12:00 PM EDT",
+     "shortDetail": "9/26 - 12:00 PM EDT"
+    }
+   }
+  },
+  {
+   "id": "401858465",
+   "date": "2026-09-26T16:00Z",
+   "name": "Illinois Fighting Illini at Ohio State Buckeyes",
+   "shortName": "ILL @ OSU",
+   "season": {
+    "year": 2026,
+    "type": 2,
+    "slug": "regular-season"
+   },
+   "week": {
+    "number": 4
+   },
+   "competitions": [
+    {
+     "id": "401858465",
+     "date": "2026-09-26T16:00Z",
+     "attendance": 0,
+     "type": {
+      "id": "1",
+      "abbreviation": "STD"
+     },
+     "timeValid": true,
+     "dateValid": true,
+     "neutralSite": false,
+     "conferenceCompetition": true,
+     "playByPlayAvailable": false,
+     "recent": false,
+     "competitors": [
+      {
+       "id": "194",
+       "type": "team",
+       "order": 0,
+       "homeAway": "home",
+       "team": {
+        "id": "194",
+        "location": "Ohio State",
+        "name": "Buckeyes",
+        "abbreviation": "OSU",
+        "displayName": "Ohio State Buckeyes",
+        "shortDisplayName": "Ohio State",
+        "isActive": true,
+        "logo": "https://a.espncdn.com/i/teamlogos/ncaa/500/194.png",
+        "conferenceId": "5"
+       },
+       "score": "0",
+       "curatedRank": {
+        "current": 7
+       },
+       "statistics": [],
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "2-1"
+        },
+        {
+         "name": "Home",
+         "abbreviation": "Home",
+         "type": "homerecord",
+         "summary": "2-0"
+        },
+        {
+         "name": "Away",
+         "abbreviation": "Away",
+         "type": "awayrecord",
+         "summary": "0-1"
+        },
+        {
+         "name": "vs. Conf.",
+         "abbreviation": "CONF",
+         "type": "vsconf",
+         "summary": "0-0"
+        }
+       ]
+      },
+      {
+       "id": "356",
+       "type": "team",
+       "order": 1,
+       "homeAway": "away",
+       "team": {
+        "id": "356",
+        "location": "Illinois",
+        "name": "Fighting Illini",
+        "abbreviation": "ILL",
+        "displayName": "Illinois Fighting Illini",
+        "shortDisplayName": "Illinois",
+        "isActive": true,
+        "logo": "https://a.espncdn.com/i/teamlogos/ncaa/500/356.png",
+        "conferenceId": "5"
+       },
+       "score": "0",
+       "curatedRank": {
+        "current": 99
+       },
+       "statistics": [],
+       "records": [
+        {
+         "name": "overall",
+         "abbreviation": "overall",
+         "type": "total",
+         "summary": "2-1"
+        },
+        {
+         "name": "Home",
+         "abbreviation": "Home",
+         "type": "homerecord",
+         "summary": "2-1"
+        },
+        {
+         "name": "Away",
+         "abbreviation": "Away",
+         "type": "awayrecord",
+         "summary": "0-0"
+        },
+        {
+         "name": "vs. Conf.",
+         "abbreviation": "CONF",
+         "type": "vsconf",
+         "summary": "0-0"
+        }
+       ]
+      }
+     ],
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0:00",
+      "period": 0,
+      "type": {
+       "id": "1",
+       "name": "STATUS_SCHEDULED",
+       "state": "pre",
+       "completed": false,
+       "description": "Scheduled",
+       "detail": "Sat, September 26th at 12:00 PM EDT",
+       "shortDetail": "9/26 - 12:00 PM EDT"
+      }
+     },
+     "broadcasts": [
+      {
+       "market": "national",
+       "names": [
+        "FOX"
+       ]
+      }
+     ],
+     "groups": {
+      "id": "5",
+      "name": "Big Ten Conference",
+      "shortName": "Big Ten",
+      "isConference": true
+     },
+     "format": {
+      "regulation": {
+       "periods": 4
+      }
+     },
+     "startDate": "2026-09-26T16:00Z",
+     "broadcast": "FOX",
+     "odds": [
+      {
+       "provider": {
+        "id": "100",
+        "name": "Draft Kings",
+        "priority": 1
+       },
+       "details": "OSU -26.5",
+       "overUnder": 53.5,
+       "spread": -26.5,
+       "awayTeamOdds": {
+        "favorite": false,
+        "underdog": true,
+        "team": {
+         "id": "356",
+         "abbreviation": "ILL",
+         "name": "Fighting Illini",
+         "displayName": "Illinois Fighting Illini",
+         "logo": "https://a.espncdn.com/i/teamlogos/ncaa/500/356.png"
+        },
+        "favoriteAtOpen": false
+       },
+       "homeTeamOdds": {
+        "favorite": true,
+        "underdog": false,
+        "team": {
+         "id": "194",
+         "abbreviation": "OSU",
+         "name": "Buckeyes",
+         "displayName": "Ohio State Buckeyes",
+         "logo": "https://a.espncdn.com/i/teamlogos/ncaa/500/194.png"
+        },
+        "favoriteAtOpen": true
+       },
+       "moneyline": {
+        "displayName": "Moneyline",
+        "shortDisplayName": "ML",
+        "home": {
+         "close": {
+          "odds": "-4000"
+         },
+         "open": {
+          "odds": "-6500"
+         }
+        },
+        "away": {
+         "close": {
+          "odds": "+1600"
+         },
+         "open": {
+          "odds": "+2000"
+         }
+        }
+       },
+       "pointSpread": {
+        "displayName": "Spread",
+        "shortDisplayName": "Spread",
+        "home": {
+         "close": {
+          "line": "-26.5",
+          "odds": "-110"
+         },
+         "open": {
+          "line": "-27.5",
+          "odds": "-110"
+         }
+        },
+        "away": {
+         "close": {
+          "line": "+26.5",
+          "odds": "-110"
+         },
+         "open": {
+          "line": "+27.5",
+          "odds": "-110"
+         }
+        }
+       },
+       "total": {
+        "displayName": "Total",
+        "shortDisplayName": "Total",
+        "over": {
+         "close": {
+          "line": "o53.5",
+          "odds": "-115"
+         },
+         "open": {
+          "line": "o54.5",
+          "odds": "-110"
+         }
+        },
+        "under": {
+         "close": {
+          "line": "u53.5",
+          "odds": "-105"
+         },
+         "open": {
+          "line": "u54.5",
+          "odds": "-110"
+         }
+        }
+       }
+      }
+     ],
+     "highlights": [],
+     "venue": {
+      "fullName": "Test Stadium"
+     }
+    }
+   ],
+   "weather": {
+    "displayValue": "Sunny",
+    "temperature": 64,
+    "highTemperature": 64,
+    "conditionId": "1"
+   },
+   "status": {
+    "clock": 0.0,
+    "displayClock": "0:00",
+    "period": 0,
+    "type": {
+     "id": "1",
+     "name": "STATUS_SCHEDULED",
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "detail": "Sat, September 26th at 12:00 PM EDT",
+     "shortDetail": "9/26 - 12:00 PM EDT"
+    }
+   }
+  }
+ ]
+}

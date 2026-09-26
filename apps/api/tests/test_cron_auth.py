@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from main import app
-from routers import auth, mlb, nba, nfl, nhl, wnba
+from routers import auth, mlb, nba, ncaaf, nfl, nhl, wnba
 
 SECRET = "test-cron-secret"
 
@@ -20,6 +20,7 @@ CRON_ROUTES = [
     pytest.param("/api/nhl/cron/fetch-odds", nhl, id="nhl"),
     pytest.param("/api/wnba/cron/fetch-odds", wnba, id="wnba"),
     pytest.param("/api/nfl/cron/fetch-odds", nfl, id="nfl"),
+    pytest.param("/api/ncaaf/cron/fetch-odds", ncaaf, id="ncaaf"),
 ]
 PROTECTED_CRON_ROUTES = [
     *CRON_ROUTES,
@@ -169,6 +170,10 @@ def test_valid_token_reaches_the_collector(
 
     async def fake_get_odds_map(**kwargs):
         calls.append(kwargs)
+        # Collectors that gate success on a completed latest-value write
+        # (NCAAF) read this; the rest ignore the extra key.
+        if kwargs.get("collection_stats") is not None:
+            kwargs["collection_stats"]["latest_persistence_ok"] = True
         return {}, 0
 
     monkeypatch.setattr(module, "get_odds_map", fake_get_odds_map)
