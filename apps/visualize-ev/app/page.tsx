@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import { SportsDashboard, type Sport, type MatchupData, SPORT_LABELS, SPORT_MODELS } from "@repo/ui";
-import { Activity, ClipboardList, Crosshair } from "lucide-react";
+import { Activity, ClipboardList, Crosshair, Swords } from "lucide-react";
 
 const FALLBACK_VISIBLE_SPORTS: Sport[] = ["mlb", "wnba"];
 
@@ -242,6 +242,13 @@ export default function Home() {
             >
               <Crosshair className="size-3" />
               Oh-K Corral
+            </Link>
+            <Link
+              href="/ufc"
+              className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Swords className="size-3" />
+              UFC
             </Link>
             <span className="hidden min-w-36 text-right font-mono text-[11px] tabular-nums text-muted-foreground sm:inline">
               {now

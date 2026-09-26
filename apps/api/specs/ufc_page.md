@@ -190,11 +190,31 @@ Contender Series events are **excluded** from this page. They are a development
 showcase with different stakes, thin and late markets, and they would displace
 the actual next card whenever one falls on the nearer Tuesday.
 
-The rule: include an event whose calendar label starts with `UFC ` (numbered
-cards), or contains `UFC Fight Night`, or is a branded special such as
-`Noche UFC`. Exclude anything matching `Contender Series`. Log any event that
-matches neither rule rather than silently dropping it — the UFC's branding
-changes, and a new format should surface as a warning, not as a missing card.
+The rule: include a **numbered** card, matching `^UFC\s+(?:\w+\s+)?\d`
+(`UFC 332`, and branded numbered cards such as `UFC Freedom 250`), a label
+containing `UFC Fight Night`, or a recognized branded special (`Noche UFC`,
+`UFC on ESPN`, `UFC on ABC`). Specials are listed by name rather than by
+widening the regex, which would also admit `UFC BJJ Invitational 2`.
+Exclude anything matching `Contender Series` or `UFC BJJ`, before any positive
+rule. `UFC BJJ` is a numbered grappling series (`UFC BJJ 2` through at least
+`UFC BJJ 8`) that the numbered-card pattern would otherwise admit; excluding it
+by name also covers unnumbered forms like `UFC BJJ Invitational`.
+
+A bare `UFC ` prefix is **not** enough: UFC-branded events that are not fight
+cards must never displace the next one. Do not loosen the rule back to a
+prefix match.
+
+**An announced card with no bouts is valid**, not malformed: ESPN lists cards
+before their fights (the 2026-11-21 Qatar card had no `competitions` at all).
+It renders as card metadata with `fights: []`, and collection returns a
+zero-count success without reading Supabase or calling SharpAPI. A card that
+**does** list bouts is rejected whole unless every bout has a unique,
+nonempty competition id and exactly two named fighters with distinct ids.
+
+Log any upcoming event that matches neither rule rather than silently dropping
+it — the UFC's branding changes, and a new format should surface as a warning,
+not as a missing card. Past entries are skipped before the check, so the
+warning fires only when it can matter.
 
 ### Finding the next card
 
@@ -208,6 +228,11 @@ in weeks, not days, so a bounded day-by-day lookahead is the wrong shape here.
 The calendar is a published list; use it.
 - **The full ESPN card renders**, in ESPN's fight order, with weight class from
   `competition.type.abbreviation`.
+
+  A competitor's `order` is its corner within the bout (1 or 2), **not** the
+  bout's place on the card. Fight order comes from position in
+  `competitions[]`, which ESPN lists earliest prelim first; `order` 1 is the
+  main event, matching the example response below.
 - **Fights with no matching line render "no line", not omitted.** On a measured
   13-fight card, six fighters had no counterpart in the odds feed at all —
   prelims are not all priced. A UFC card reads as an ordered event; dropping
@@ -226,7 +251,22 @@ The normalizer handles, in order: accent stripping, case folding, hyphen-to-spac
 (`Waldo Cortes-Acosta` / `Waldo Cortes Acosta`), and token-subset matching
 (`Jose Delgado` / `Jose Miguel Delgado`).
 
-Reversed name order (`Rongzhu` / `Zhu Rong`) is a **known, accepted miss.** It
+Two steps were added during implementation (2026-09-26), both from the live
+card: punctuation is dropped (`Raul Rosas Jr.` / `Raul Rosas Jr`), and names
+compare equal with spaces removed (ESPN and FanDuel `Alatengheili`, DraftKings
+`Alateng Heili`). Neither loosens the ambiguity rules below.
+
+Subset matching requires **at least two tokens on the shorter side**, so a
+bare surname never matches: `Silva` as the only candidate would otherwise bind
+to `Jean Silva` with nothing to flag it. Mononyms still match by equality.
+
+Token order is **ignored**. Books disagree on it for East Asian names — UFC
+332's headliner is `Wang Cong` on ESPN and FanDuel but `Cong Wang` on
+DraftKings — and a reversed-name false positive would still have to satisfy
+every rule below.
+
+Differently tokenized reversals (`Rongzhu` / `Zhu Rong`) remain a **known,
+accepted miss.** It
 degrades to "no line", which is the designed failure mode.
 
 ### The match is fight-level, one-to-one, and rejects ambiguity
@@ -351,8 +391,9 @@ The absence of a market is never filled from the other book.
 ### Example stored `odds_data`
 
 The per-book market bundle. `odds_snapshots` stores one row per fight **per
-book** holding exactly this object; `ufc_odds` stores one row **per fight** with
-this object nested under each book key. See Persistence below.
+book** holding this object plus `staleMarkets`; `ufc_odds` stores one row **per
+fight** with this object nested under each book key, plus per-market
+`observed` metadata. See Persistence below.
 
 ```json
 {
@@ -369,9 +410,17 @@ this object nested under each book key. See Persistence below.
   "underOdds": 120,
   "goesDistanceYes": 200,
   "goesDistanceNo": -260,
-  "sharpEventUuid": "3d42aeaaaf8f3a7f"
+  "sharpEventUuid": "3d42aeaaaf8f3a7f",
+  "staleMarkets": []
 }
 ```
+
+`staleMarkets` (history only) lists the markets carried forward rather than
+observed at that capture, e.g. `["total_rounds"]`. It records withdrawal state
+**without timestamps**: a timestamp changes every capture and would defeat
+consecutive-value dedup, while this list changes only when a market's state
+does. Without it, a row written because one market moved would present another
+market's withdrawn price as observed at that `captured_at`.
 
 This is the **per-book bundle**, keyed by `matchup_key` = the ESPN competition
 id (`"401897736"`) with the ESPN card date. The two tables nest it differently:
@@ -515,6 +564,10 @@ and they are still genuinely different from each other:
 | **Fight started, so it left the pregame feed** | expected, not a withdrawal | Freeze the last pregame value as final. Never mark stale. |
 
 Distinguish the last two by the fight's start time against the capture time.
+ESPN dates each fight at its **segment** start (every prelim shares one time),
+so a fight counts as started when its ESPN status leaves `pre` or its segment
+start has passed. Later prelims freeze a little early; that errs toward never
+recording an in-fight price.
 That check is already needed for the pregame-only rule, so it costs nothing.
 
 Seeding the bundle from persisted values (step 1 above) is still required — not
@@ -541,7 +594,10 @@ than showing no line, because it looks like information.
 
 The display rules follow:
 
-- a stale market renders with a staleness indicator, not as a live price;
+- a stale market renders with a staleness indicator, not as a live price.
+  `totalRounds` and `goesTheDistance` carry `isStale` and `lastObservedAt`
+  for this; the bundle keeps them under `observed`, per market, and they are
+  left out of `odds_snapshots` so a timestamp change can't defeat dedup;
 - **a stale moneyline does not qualify a book** in the selection rule. If the
   only complete moneyline pair is stale, the fight falls through to
   `bookmaker: null` and renders unpriced.

@@ -5,6 +5,7 @@ export * from "./MatchupCard";
 export * from "./GameDetailView";
 export * from "./types/sports-types";
 export * from "./types/game-detail-types";
+export * from "./types/ufc-types";
 export * from "./lib/utils"; // Highly recommended to export this too
 export * from "./lib/winProb";
 export * from "./lib/usageWindow";

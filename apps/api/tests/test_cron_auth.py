@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from main import app
-from routers import auth, mlb, nba, ncaaf, nfl, nhl, wnba
+from routers import auth, mlb, nba, ncaaf, nfl, nhl, ufc, wnba
 
 SECRET = "test-cron-secret"
 
@@ -26,6 +26,7 @@ PROTECTED_CRON_ROUTES = [
     *CRON_ROUTES,
     pytest.param("/api/nfl/cron/fetch-player-props", nfl, id="nfl-player-props"),
     pytest.param("/api/mlb/cron/settle-pitcher-ks", mlb, id="mlb-pitcher-k-settlement"),
+    pytest.param("/api/ufc/cron/fetch-odds", ufc, id="ufc"),
 ]
 
 
@@ -183,3 +184,21 @@ def test_valid_token_reaches_the_collector(
     assert response.status_code == 200
     assert response.json()["success"] is True
     assert len(calls) == 1
+
+
+def test_valid_token_reaches_ufc_collector(client, cron_secret, monkeypatch):
+    found = []
+
+    async def fake_next_card(today):
+        found.append(today)
+        return None
+
+    monkeypatch.setattr(ufc, "next_card", fake_next_card)
+
+    response = client.post(
+        "/api/ufc/cron/fetch-odds", headers={"Authorization": f"Bearer {SECRET}"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert len(found) == 1
