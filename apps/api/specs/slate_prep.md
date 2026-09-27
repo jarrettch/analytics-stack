@@ -1,6 +1,6 @@
 # Slate Prep — Spec
 
-_Revised: 2026-08-18_
+_Revised: 2026-09-26 — NCAAF added; bulk select/deselect controls_
 
 A `/prep` page in `visualize-ev` whose primary object is an **editable slate**:
 
@@ -28,15 +28,19 @@ selection.
 
 ## Scope: core v1
 
-- MLB, WNBA, NBA, and NHL use today's Eastern Time slate. NFL uses the current
-  ESPN season/week slate. There is no date picker or arbitrary date input.
-- MLB, WNBA, NFL, NBA, and NHL only. Reuse `/api/{sport}/today` for daily
-  sports and `/api/nfl/week` for NFL. Do not add new data sources or a separate
+- MLB, WNBA, NCAAF, NBA, and NHL use today's Eastern Time slate. NFL uses the
+  current ESPN season/week slate. There is no date picker or arbitrary date
+  input.
+- MLB, WNBA, NFL, NCAAF, NBA, and NHL only. Reuse `/api/{sport}/today` for
+  daily sports and `/api/nfl/week` for NFL. Do not add new data sources or a separate
   export fetch path.
 - The user can add any combination of those sports into one slate.
 - Render games grouped under clear sport headings. This is required for NFL so
   preseason games remain unmistakably labeled.
-- Every game can be unchecked and rechecked before copying.
+- Every game can be unchecked and rechecked before copying, individually or in
+  bulk: each sport group has a Select all / Deselect all toggle, and a page-wide
+  Deselect all clears every group. Deselecting never removes a sport; its games
+  stay listed as excluded so any of them can be rechecked.
 - Final games are excluded; scheduled and in-progress games remain available.
 - One in-memory edited selection is the source for every export. Switching
   export actions does not reload sport data, reformat a fresh raw slate, or
@@ -44,7 +48,10 @@ selection.
 
 ### Explicitly deferred
 
-- Tennis and UFC.
+- Tennis and UFC. UFC has its own page (`/ufc`); its fight rows have no
+  away/home or spread, so it needs a separate prep format (see `ufc_page.md`).
+- NCAAF conference and ranked filters on this page. They exist on the dashboard
+  only.
 - Arbitrary dates and date selection.
 - Automatic batching or a “split into N” control.
 - Running v2/v3 prompts or any other model execution in the stack.
@@ -82,11 +89,13 @@ game metadata identifies preseason.
 
 `/prep` is a dedicated page in `visualize-ev` with:
 
-- a multi-select sport control for MLB, WNBA, NFL, NBA, and NHL;
+- a multi-select sport control for MLB, WNBA, NFL, NCAAF, NBA, and NHL;
 - loading, empty, and per-sport error states that do not discard already loaded
   selections from other sports;
 - grouped game rows with selection checkboxes, including excluded games so they
   can be restored individually;
+- a per-group Select all / Deselect all toggle, shown once that group has
+  loaded games, and a page-wide Deselect all beside the selected count;
 - a monospace preview of the exact formatted slate to be copied; and
 - a primary `Copy formatted slate` action.
 
@@ -141,6 +150,9 @@ into the public app.
 - An NFL preseason game appears under an explicitly NFL/preseason-labeled group.
 - Unchecking a game removes it from the preview and from every copy action;
   rechecking it restores it without altering other selections.
+- A group's Select all / Deselect all changes only that group's games. The
+  page-wide Deselect all empties the preview but keeps every added sport and its
+  games listed for rechecking.
 - `Copy formatted slate` is visually and behaviorally the primary/default action.
 - If enabled, v2 and v3 copies differ only by their wrapper/template; their slate
   body is byte-for-byte the current formatted slate.

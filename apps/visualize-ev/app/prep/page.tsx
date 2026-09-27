@@ -338,6 +338,20 @@ export default function SlatePrepPage() {
     setCopyState("idle");
   }
 
+  function setGamesSelected(keys: string[], selected: boolean) {
+    setSelectedGames((previous) => {
+      const next = new Set(previous);
+      keys.forEach((key) => (selected ? next.add(key) : next.delete(key)));
+      return next;
+    });
+    setCopyState("idle");
+  }
+
+  function deselectAll() {
+    setSelectedGames(new Set());
+    setCopyState("idle");
+  }
+
   async function handleCopy() {
     if (!slateText) return;
     try {
@@ -385,9 +399,20 @@ export default function SlatePrepPage() {
                 Daily sports use {todayET} ET. NFL includes the current week.
               </p>
             </div>
-            <span className="font-mono text-[11px] text-muted-foreground">
-              {selectedCount} SELECTED
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {selectedCount} SELECTED
+              </span>
+              {selectedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={deselectAll}
+                  className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+                >
+                  Deselect all
+                </button>
+              )}
+            </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             {SUPPORTED_SPORTS.map((sport) => {
@@ -438,6 +463,9 @@ export default function SlatePrepPage() {
                   state.kind === "ready"
                     ? oddsCoverageWarning(state.games)
                     : null;
+                const allSelected =
+                  state.games.length > 0 &&
+                  selectedForSport.length === state.games.length;
                 return (
                   <section
                     key={sport}
@@ -458,14 +486,30 @@ export default function SlatePrepPage() {
                             : `${selectedForSport.length} game${selectedForSport.length === 1 ? "" : "s"} selected`}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => removeSport(sport)}
-                        className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                        aria-label={`Remove ${SPORT_LABELS[sport]} from slate`}
-                      >
-                        <X className="size-4" />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {state.kind === "ready" && state.games.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setGamesSelected(
+                                state.games.map((game) => game.key),
+                                !allSelected,
+                              )
+                            }
+                            className="rounded px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                          >
+                            {allSelected ? "Deselect all" : "Select all"}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeSport(sport)}
+                          className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                          aria-label={`Remove ${SPORT_LABELS[sport]} from slate`}
+                        >
+                          <X className="size-4" />
+                        </button>
+                      </div>
                     </div>
 
                     {state.kind === "error" ? (
