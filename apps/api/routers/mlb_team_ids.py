@@ -46,3 +46,12 @@ SGO_MLB_TEAM_TO_TRI = {
 
 def get_tricode_from_sgo_team_id(team_id: str) -> str:
     return SGO_MLB_TEAM_TO_TRI.get((team_id or "").upper(), "")
+
+
+def get_tricode_from_team_name(team_name: str) -> str:
+    key = "_".join((team_name or "").strip().upper().split())
+    if key in set(MLB_TEAM_ID_TO_TRI.values()):
+        return key
+    return {
+        "ATHLETICS": "ATH",
+    }.get(key) or SGO_MLB_TEAM_TO_TRI.get(f"{key}_MLB", "")

@@ -40,7 +40,11 @@ from .mlb_pitcher_k_settlement import (
     persist_pitching_results,
     reconcile_pitcher_k_identities,
 )
-from .mlb_team_ids import MLB_TEAM_ID_TO_TRI, get_tricode_from_sgo_team_id
+from .mlb_team_ids import (
+    MLB_TEAM_ID_TO_TRI,
+    get_tricode_from_sgo_team_id,
+    get_tricode_from_team_name,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -536,6 +540,7 @@ async def get_odds_map(
         league_id="MLB",
         table_name="mlb_odds",
         tricode_for=get_tricode_from_sgo_team_id,
+        fallback_tricode_for=get_tricode_from_team_name,
         target_date=target_date,
         request_time=request_time,
         extra_odd_ids=PITCHER_K_ODD_IDS,

@@ -463,6 +463,7 @@ async def fetch_sgo_odds(
     league_id: str,
     table_name: str,
     tricode_for: Callable[[str], str],
+    fallback_tricode_for: Callable[[str], str] | None = None,
     target_date: date | None = None,
     request_time: datetime | None = None,
     extra_odd_ids: Iterable[str] = (),
@@ -474,9 +475,9 @@ async def fetch_sgo_odds(
     optional_market_fallback_consumer: Callable[[], None] | None = None,
     collection_stats: dict | None = None,
 ) -> tuple[dict, int]:
-    """Fetch a league's odds from SportsGameOdds, merge with persisted rows, persist fresh.
+    """Fetch and persist SGO odds, using SharpAPI if the SGO request fails.
 
-    Identical for every SGO-backed sport (NBA/WNBA/NFL/MLB/NHL); the only per-sport inputs are
+    Identical for every SGO-backed sport (NBA/NFL/MLB/NHL); the only per-sport inputs are
     the league ID, the Supabase table, and `tricode_for`, which maps an SGO teamID to
     that sport's tricode. Returns (merged_odds_map, fresh_count).
 
@@ -485,8 +486,11 @@ async def fetch_sgo_odds(
     from the primary matchup-odds persistence path.
 
     Callers that need collection observability may pass `collection_stats`; it is
-    populated with eligible pregame candidates, changed inserts, deduplications,
-    candidate matchup keys, and snapshot-persistence health.
+    populated with the selected provider, eligible pregame candidates, changed
+    inserts, deduplications, candidate matchup keys, and persistence health.
+
+    SharpAPI is not used for a successful empty SGO response. Empty slates are
+    valid, and probing three fallback markets would waste requests on dark days.
 
     Prefers PREFERRED_BOOK lines, falling back to consensus bookOdds. Spreads and totals
     often go null early in the day or temporarily off-board, so for those we fall back to
@@ -496,6 +500,7 @@ async def fetch_sgo_odds(
     if collection_stats is not None:
         collection_stats.clear()
         collection_stats.update({
+            "provider": None,
             "pregame_snapshot_candidates": 0,
             "pregame_snapshot_matchups": [],
             "snapshots_inserted": 0,
@@ -503,27 +508,60 @@ async def fetch_sgo_odds(
             "snapshot_persistence_ok": False,
         })
 
+    current = (request_time or datetime.now(ET)).astimezone(ET)
+    target = target_date or current.date()
+    try:
+        starts_after_utc, starts_before_utc = sgo_event_window(target, current)
+    except ValueError:
+        logger.warning(
+            "Skipping odds provider request for past ET date %s (%s)",
+            target,
+            league_id,
+        )
+        return odds_map, 0
+
+    async def sharp_fallback(reason: str) -> tuple[dict, int]:
+        if optional_market_fallback_consumer:
+            try:
+                optional_market_fallback_consumer()
+            except Exception:
+                logger.exception("%s optional-market fallback consumer failed", league_id)
+        if not (os.getenv("SHARP_API_KEY") or os.getenv("SHARPAPI_KEY")):
+            logger.warning(
+                "SportsGameOdds %s unavailable (%s); SharpAPI is not configured",
+                league_id,
+                reason,
+            )
+            return odds_map, 0
+        try:
+            from .sharp_game_odds import fetch_sharp_game_odds
+
+            logger.warning(
+                "SportsGameOdds %s unavailable (%s); using SharpAPI DK/FD fallback",
+                league_id,
+                reason,
+            )
+            return await fetch_sharp_game_odds(
+                sport=sport,
+                league=league_id.lower(),
+                table_name=table_name,
+                tricode_for=fallback_tricode_for or tricode_for,
+                target_date=target,
+                persisted_odds=odds_map,
+                collection_stats=collection_stats,
+            )
+        except Exception as exc:
+            logger.error("SharpAPI %s fallback failed: %s", league_id, exc)
+            return odds_map, 0
+
     api_key = os.getenv("SPORTS_GAME_ODDS_KEY")
     if not api_key:
-        logger.warning(f"SPORTS_GAME_ODDS_KEY not set, returning persisted {league_id} odds only")
-        return odds_map, 0
+        return await sharp_fallback("SPORTS_GAME_ODDS_KEY is not configured")
 
     try:
         # Scope to a single ET day's window so SGO only returns that day's slate.
         # Without these filters, SGO returns up to `limit` upcoming events spanning
         # multiple days, billing entities for games we don't need.
-        current = (request_time or datetime.now(ET)).astimezone(ET)
-        target = target_date or current.date()
-        try:
-            starts_after_utc, starts_before_utc = sgo_event_window(target, current)
-        except ValueError:
-            logger.warning(
-                "Skipping SportsGameOdds %s request for past ET date %s",
-                league_id,
-                target,
-            )
-            return odds_map, 0
-
         optional_odd_ids = list(extra_odd_ids)
         requested_odd_ids = list(dict.fromkeys([*SGO_ODD_IDS, *optional_odd_ids]))
         params = {
@@ -577,7 +615,12 @@ async def fetch_sgo_odds(
             else:
                 raise
 
-        games = r.json().get("data", [])
+        payload = r.json()
+        if not isinstance(payload, dict) or payload.get("success") is False:
+            raise ValueError("SportsGameOdds returned an error response")
+        games = payload.get("data", [])
+        if not isinstance(games, list):
+            raise ValueError("SportsGameOdds returned an invalid data envelope")
         captured_at = datetime.now(UTC)
         usage_headers = {
             key: value
@@ -706,6 +749,7 @@ async def fetch_sgo_odds(
         save_odds_snapshots(snapshots, stats=snapshot_stats)
         if collection_stats is not None:
             collection_stats.update({
+                "provider": "sportsgameodds",
                 "pregame_snapshot_candidates": len(snapshots),
                 "pregame_snapshot_matchups": [
                     snapshot["matchup_key"]
@@ -724,10 +768,10 @@ async def fetch_sgo_odds(
         return odds_map, len(fresh_odds)
     except httpx.HTTPStatusError as e:
         logger.error(f"SportsGameOdds {league_id} HTTP error: {e.response.status_code} - {e.response.text}")
-        return odds_map, 0
+        return await sharp_fallback(f"HTTP {e.response.status_code}")
     except Exception as e:
         logger.error(f"SportsGameOdds {league_id} fetch error: {e}")
-        return odds_map, 0
+        return await sharp_fallback(type(e).__name__)
 
 
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"

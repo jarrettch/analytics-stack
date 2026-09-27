@@ -101,9 +101,13 @@ Its league list is far wider than the others — `ufc`, `ncaab`, `atp`, `wta`,
 **first-class**, which matters for sports where the alternative is inferring a
 promotion from clustered start times.
 
-Backs **UFC** (see `ufc_page.md`), and is the intended answer for NCAAB when
-college basketball starts in November — the sport that would otherwise force a
-paid tier, since it runs ~100 games a night with no cheap alternative.
+Backs **UFC** (see `ufc_page.md`) and is the automatic main-line fallback for
+SGO-backed team sports when SGO is unconfigured or its request fails. The
+fallback requests `moneyline`, `point_spread`, and `total_points`, then uses one
+book per matchup with DraftKings preferred over FanDuel. A valid empty SGO
+slate does not trigger the fallback. SharpAPI is also the intended answer for
+NCAAB when college basketball starts in November, the sport that would
+otherwise force a paid tier since it runs roughly 100 games a night.
 
 Its weakness is books: two recreational US books, no sharp reference, no
 de-vigged price.

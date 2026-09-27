@@ -442,6 +442,10 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
     }
     return sgo_map.get(team_id.upper(), "")
 
+
+def get_tricode_from_team_name(team_name: str) -> str:
+    return get_tricode_from_sgo_team_id("_".join((team_name or "").split()))
+
 async def get_odds_map(
     target_date: date | None = None,
     *,
@@ -453,6 +457,7 @@ async def get_odds_map(
         league_id="NBA",
         table_name="nba_odds",
         tricode_for=get_tricode_from_sgo_team_id,
+        fallback_tricode_for=get_tricode_from_team_name,
         target_date=target_date,
         request_time=request_time,
     )

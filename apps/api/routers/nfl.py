@@ -100,6 +100,7 @@ async def get_odds_map(
         league_id="NFL",
         table_name="nfl_odds",
         tricode_for=get_tricode_from_sgo_team_id,
+        fallback_tricode_for=get_tricode_from_team_name,
         target_date=target_date,
         request_time=request_time,
         collection_stats=collection_stats,

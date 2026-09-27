@@ -388,6 +388,15 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
     return SGO_TEAM_ID_TO_TRI.get(team_id.upper(), "")
 
 
+def get_tricode_from_team_name(team_name: str) -> str:
+    key = (team_name or "").strip()
+    if key.upper() in NHL_TRI_TO_FULL_NAME:
+        return key.upper()
+    return NHL_FULL_NAME_TO_TRI.get(key) or {
+        "Montreal Canadiens": "MTL",
+    }.get(key)
+
+
 # --- Game state composer ----------------------------------------------------
 
 def _ordinal(n: int) -> str:
@@ -569,6 +578,7 @@ async def get_odds_map(
         league_id="NHL",
         table_name="nhl_odds",
         tricode_for=get_tricode_from_sgo_team_id,
+        fallback_tricode_for=get_tricode_from_team_name,
         target_date=target_date,
         request_time=request_time,
     )
