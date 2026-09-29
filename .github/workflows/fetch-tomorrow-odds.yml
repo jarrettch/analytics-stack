@@ -112,6 +112,36 @@ jobs:
             exit 1
           fi
 
+      - name: Fetch tomorrow's NHL odds
+        run: |
+          echo "Fetching tomorrow's NHL odds..."
+          if response=$(curl \
+            --retry 4 \
+            --retry-delay 15 \
+            --retry-max-time 180 \
+            --silent \
+            --show-error \
+            --fail \
+            --max-time 120 \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            "$API_URL/api/nhl/cron/fetch-odds?offset=1"); then
+            printf 'Response: %s\n' "$response"
+          else
+            curl_status=$?
+            printf 'Request failed:\n%s\n' "$response" >&2
+            exit "$curl_status"
+          fi
+
+          if ! jq -e '.success == true' >/dev/null <<<"$response"; then
+            printf "Failed to fetch tomorrow's NHL odds:\n%s\n" "$response" >&2
+            exit 1
+          fi
+
+          fresh=$(jq -r '.fresh_from_api // 0' <<<"$response")
+          echo "Tomorrow NHL odds fetched: fresh=${fresh}"
+          # fresh=0 is acceptable — off-day or lines not yet posted.
+
       - name: Fetch tomorrow's WNBA odds
         run: |
           echo "Fetching tomorrow's WNBA odds..."
