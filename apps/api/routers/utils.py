@@ -475,6 +475,7 @@ async def fetch_sgo_odds(
     optional_market_fallback_consumer: Callable[
         [], Awaitable[None] | None
     ] | None = None,
+    sharp_market_cache: dict[str, list[dict]] | None = None,
     collection_stats: dict | None = None,
 ) -> tuple[dict, int]:
     """Fetch and persist SGO odds, using SharpAPI if the SGO request fails.
@@ -556,6 +557,7 @@ async def fetch_sgo_odds(
                 target_date=target,
                 persisted_odds=odds_map,
                 collection_stats=collection_stats,
+                market_rows=sharp_market_cache,
             )
         except Exception as exc:
             logger.error("SharpAPI %s fallback failed: %s", league_id, exc)

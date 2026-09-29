@@ -91,14 +91,25 @@ async def fetch_sharp_game_odds(
     target_date: date,
     persisted_odds: dict,
     collection_stats: dict | None = None,
+    market_rows: dict[str, list[dict]] | None = None,
 ) -> tuple[dict, int]:
-    """Fetch one league's pregame DK/FD lines and persist normalized matchups."""
+    """Fetch one league's pregame DK/FD lines and persist normalized matchups.
+
+    Sharp returns league-wide market rows, so a multi-date caller may pass a
+    request-local cache and reuse one complete sweep while filtering each date.
+    """
     sweep = SharpSweep()
-    rows_by_market: dict[str, list[dict]] = {}
+    rows_by_market = dict(market_rows or {})
+    fetched_rows: dict[str, list[dict]] = {}
     for market in SHARP_GAME_MARKETS:
-        rows_by_market[market] = await fetch_sharp_odds(
-            league, market, sweep=sweep
-        )
+        if market in rows_by_market:
+            continue
+        fetched_rows[market] = await fetch_sharp_odds(league, market, sweep=sweep)
+    rows_by_market.update(fetched_rows)
+    if market_rows is not None:
+        # Publish only after every missing market completed. A failed partial
+        # sweep must not become the source for later dates in the same job.
+        market_rows.update(fetched_rows)
 
     captured_at = datetime.now(UTC)
     groups: dict[tuple[str, str, str], dict] = {}

@@ -5,6 +5,9 @@ from datetime import date, datetime, time, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
+
+from routers import sharp_game_odds
 from routers.nfl import (
     _assemble_slate,
     _early_window_count,
@@ -378,7 +381,9 @@ class NFLVerificationTest(unittest.IsolatedAsyncioTestCase):
             events = [{}] if target in {thursday, monday} else []
             return {"events": events}, True
 
-        async def fake_get_odds_map(*, target_date, collection_stats, request_time):
+        async def fake_get_odds_map(
+            *, target_date, collection_stats, request_time, sharp_market_cache
+        ):
             collected_dates.append(target_date)
             collection_stats.update({
                 "pregame_snapshot_candidates": 0,
@@ -407,6 +412,62 @@ class NFLVerificationTest(unittest.IsolatedAsyncioTestCase):
             [thursday.isoformat(), monday.isoformat()],
         )
 
+    async def test_lookahead_reuses_one_sharp_market_sweep_across_dates(self):
+        fixed_now = datetime(2026, 9, 28, 12, tzinfo=ET)
+        targets = [
+            fixed_now.date() + timedelta(days=offset)
+            for offset in (0, 3, 6, 7)
+        ]
+        response = httpx.Response(
+            429,
+            json={"error": "rate limit exceeded"},
+            request=httpx.Request(
+                "GET", "https://api.sportsgameodds.com/v2/events"
+            ),
+        )
+        client = SimpleNamespace(get=AsyncMock(return_value=response))
+        sharp_markets = []
+
+        async def fetch_sharp(_league, market, *, sweep):
+            sweep.requests_made += 1
+            sharp_markets.append(market)
+            return []
+
+        def save_snapshots(_snapshots, *, stats):
+            stats.update(inserted=0, deduplicated=0, persistence_ok=True)
+            return 0
+
+        with (
+            patch("routers.nfl.datetime") as datetime_mock,
+            patch(
+                "routers.nfl._scheduled_collection_dates",
+                new=AsyncMock(return_value=(targets, [])),
+            ),
+            patch("routers.utils.load_persisted_odds", return_value={}),
+            patch("routers.utils.get_http_client", return_value=client),
+            patch.object(
+                sharp_game_odds,
+                "fetch_sharp_odds",
+                side_effect=fetch_sharp,
+            ),
+            patch.object(sharp_game_odds, "save_persisted_odds"),
+            patch.object(
+                sharp_game_odds,
+                "save_odds_snapshots",
+                side_effect=save_snapshots,
+            ),
+            patch.dict(
+                "routers.utils.os.environ",
+                {"SPORTS_GAME_ODDS_KEY": "sgo", "SHARP_API_KEY": "sharp"},
+                clear=True,
+            ),
+        ):
+            datetime_mock.now.return_value = fixed_now
+            result = await cron_fetch_odds(lookahead_days=7)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(sharp_markets, list(sharp_game_odds.SHARP_GAME_MARKETS))
+
     async def test_verification_intersects_expected_and_candidate_matchups(self):
         target = datetime.now(ET).date()
         early_start = datetime.combine(target, time(13), ET).isoformat()
@@ -420,7 +481,9 @@ class NFLVerificationTest(unittest.IsolatedAsyncioTestCase):
                 ]}],
             }
 
-        async def fake_get_odds_map(*, target_date, collection_stats, request_time):
+        async def fake_get_odds_map(
+            *, target_date, collection_stats, request_time, sharp_market_cache
+        ):
             self.assertEqual(target_date, target)
             self.assertEqual(request_time.date(), target)
             collection_stats.update({

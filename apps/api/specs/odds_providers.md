@@ -115,6 +115,10 @@ table as SGO, tagged by provider. Provider event and player identifiers remain
 auditable, while the board and settlement history join through official MLB
 game and player IDs.
 
+Sharp game-market responses are league-wide. The NFL lookahead job therefore
+reuses one complete moneyline/spread/total sweep across its scheduled dates;
+fetching the same sweep once per date can exceed the cron's request timeout.
+
 Its weakness is books: two recreational US books, no sharp reference, no
 de-vigged price.
 

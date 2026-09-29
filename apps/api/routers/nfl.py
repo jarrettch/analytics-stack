@@ -94,6 +94,7 @@ async def get_odds_map(
     collection_stats: dict | None = None,
     *,
     request_time: datetime | None = None,
+    sharp_market_cache: dict[str, list[dict]] | None = None,
 ):
     return await fetch_sgo_odds(
         sport="nfl",
@@ -103,6 +104,7 @@ async def get_odds_map(
         fallback_tricode_for=get_tricode_from_team_name,
         target_date=target_date,
         request_time=request_time,
+        sharp_market_cache=sharp_market_cache,
         collection_stats=collection_stats,
     )
 
@@ -560,12 +562,14 @@ async def cron_fetch_odds(
             "snapshots_deduplicated": 0,
             "snapshot_persistence_ok": True,
         }
+        sharp_market_cache: dict[str, list[dict]] = {}
         for target in collection_dates:
             target_stats: dict = {}
             target_odds, target_fresh_count = await get_odds_map(
                 target_date=target,
                 collection_stats=target_stats,
                 request_time=request_time,
+                sharp_market_cache=sharp_market_cache,
             )
             odds.update(target_odds)
             fresh_count += target_fresh_count
