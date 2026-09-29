@@ -15,28 +15,30 @@ from datetime import date, datetime
 from fastapi import APIRouter, HTTPException
 
 from . import utils as router_utils
-from .mlb_team_ids import get_tricode_from_sgo_team_id
+from .mlb_team_ids import get_tricode_from_sgo_team_id, get_tricode_from_team_name
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mlb/pitcher-k-odds", tags=["MLB"])
 
-PITCHER_K_TABLE = "mlb_pitcher_k_odds"
+PITCHER_K_BOARD_VIEW = "mlb_pitcher_k_board_rows"
 DAY_ROWS_CACHE_TTL = 60
 DAY_ROWS_PAGE_SIZE = 1000
 # Sanity ceiling: one day is ~2k rows today; stop long before a runaway loop.
 DAY_ROWS_MAX_PAGES = 50
 
 ROW_COLUMNS = (
-    "captured_at,collection_id,event_id,starts_at,home_team_id,away_team_id,"
+    "provider,captured_at,collection_id,event_id,starts_at,home_team_id,away_team_id,"
     "player_id,player_name,player_team_id,side,bookmaker_id,is_alternate,"
-    "market_phase,line,american_odds,open_line,open_american_odds"
+    "market_phase,line,american_odds,open_line,open_american_odds,"
+    "mlb_game_pk,mlb_player_id"
 )
 SETTLEMENT_VIEW = "mlb_pitcher_k_settlements"
 SETTLEMENT_PAGE_SIZE = 1000
 SETTLEMENT_MAX_PAGES = 100
 SETTLEMENT_COLUMNS = (
-    "odds_observation_id,game_date,mlb_game_pk,sgo_event_id,sgo_player_id,pitcher_name,"
+    "odds_observation_id,game_date,provider,provider_event_id,provider_player_id,"
+    "mlb_game_pk,mlb_player_id,pitcher_name,"
     "away_team,home_team,bookmaker_id,side,is_alternate,line,american_odds,"
     "captured_at,strikeouts,did_start,appeared,innings_pitched,outs_recorded,"
     "batters_faced,pitches_thrown,results_fetched_at,result_fetched_at,"
@@ -54,6 +56,35 @@ def _book_sort_key(bookmaker_id: str) -> tuple[int, str]:
         return (BOOK_ORDER.index(bookmaker_id), bookmaker_id)
     except ValueError:
         return (len(BOOK_ORDER), bookmaker_id)
+
+
+def _event_key(row: dict) -> str:
+    if row.get("mlb_game_pk") is not None:
+        return f"mlb:{row['mlb_game_pk']}"
+    provider = row.get("provider") or "sportsgameodds"
+    if provider == "sportsgameodds":
+        return str(row["event_id"])
+    return f"{provider}:{row['event_id']}"
+
+
+def _player_key(row: dict) -> str:
+    if row.get("mlb_player_id") is not None:
+        return str(row["mlb_player_id"])
+    provider = row.get("provider") or "sportsgameodds"
+    if provider == "sportsgameodds":
+        return str(row["player_id"])
+    return f"{provider}:{row['player_id']}"
+
+
+def _team_tricode(value: str | None) -> str:
+    return (
+        get_tricode_from_sgo_team_id(value or "")
+        or get_tricode_from_team_name(value or "")
+    )
+
+
+def _provider_event_id(row: dict) -> str | None:
+    return row.get("provider_event_id", row.get("sgo_event_id"))
 
 
 def _parse_game_date(value: str | None) -> date:
@@ -86,7 +117,7 @@ def fetch_day_rows(game_date: date) -> tuple[list[dict], bool]:
         for page in range(DAY_ROWS_MAX_PAGES):
             start = page * DAY_ROWS_PAGE_SIZE
             response = (
-                router_utils.supabase.table(PITCHER_K_TABLE)
+                router_utils.supabase.table(PITCHER_K_BOARD_VIEW)
                 .select(ROW_COLUMNS)
                 .eq("game_date", key)
                 .order("id")
@@ -227,7 +258,7 @@ def build_board(rows: list[dict]) -> list[dict]:
     """Current-state board: one entry per (event, pitcher) with per-book views."""
     pitchers: dict[tuple[str, str], list[dict]] = {}
     for row in rows:
-        pitchers.setdefault((row["event_id"], row["player_id"]), []).append(row)
+        pitchers.setdefault((_event_key(row), _player_key(row)), []).append(row)
 
     board = []
     for (event_id, player_id), player_rows in pitchers.items():
@@ -242,9 +273,9 @@ def build_board(rows: list[dict]) -> list[dict]:
         ]
         if not books:
             continue
-        home_tri = get_tricode_from_sgo_team_id(latest["home_team_id"] or "")
-        away_tri = get_tricode_from_sgo_team_id(latest["away_team_id"] or "")
-        player_tri = get_tricode_from_sgo_team_id(latest["player_team_id"] or "")
+        home_tri = _team_tricode(latest["home_team_id"])
+        away_tri = _team_tricode(latest["away_team_id"])
+        player_tri = _team_tricode(latest["player_team_id"])
         if player_tri == away_tri:
             opponent_tri = home_tri
         elif player_tri == home_tri:
@@ -288,9 +319,9 @@ def build_history(rows: list[dict], player_id: str, event_id: str) -> list[dict]
     main_rows = [
         row
         for row in rows
-        if row["player_id"] == player_id
+        if _player_key(row) == player_id
         and not row["is_alternate"]
-        and row["event_id"] == event_id
+        and _event_key(row) == event_id
     ]
     by_book: dict[str, list[dict]] = {}
     for row in main_rows:
@@ -377,7 +408,7 @@ def _settlement_payload(row: dict) -> dict:
     return {
         "date": row.get("game_date"),
         "gamePk": row.get("mlb_game_pk"),
-        "eventId": row.get("sgo_event_id"),
+        "eventId": _provider_event_id(row),
         "awayTeam": row.get("away_team"),
         "homeTeam": row.get("home_team"),
         "bookmakerId": row.get("bookmaker_id"),
@@ -402,12 +433,16 @@ def _settlement_payload(row: dict) -> dict:
 
 
 def _start_groups(rows: list[dict]) -> list[list[dict]]:
-    groups: dict[tuple[str, object], list[dict]] = {}
+    groups: dict[tuple[object, ...], list[dict]] = {}
     for row in rows:
         if row.get("mlb_game_pk") is not None:
             key = ("game", row["mlb_game_pk"])
-        elif row.get("sgo_event_id") is not None:
-            key = ("event", row["sgo_event_id"])
+        elif _provider_event_id(row) is not None:
+            key = (
+                "event",
+                row.get("provider"),
+                _provider_event_id(row),
+            )
         else:
             # Settlement rows should always have one of the identifiers. Keep
             # malformed rows separated by date instead of merging all of them.
@@ -443,7 +478,7 @@ def _build_start(rows: list[dict]) -> dict:
     return {
         "date": first.get("game_date"),
         "gamePk": first.get("mlb_game_pk"),
-        "eventId": first.get("sgo_event_id"),
+        "eventId": _provider_event_id(first),
         "awayTeam": first.get("away_team"),
         "homeTeam": first.get("home_team"),
         "consensusLine": consensus_line,
@@ -590,11 +625,19 @@ def fetch_settlement_rows(player_id: str, include_alternates: bool) -> list[dict
     try:
         rows = []
         for page in range(SETTLEMENT_MAX_PAGES):
-            query = (
-                router_utils.supabase.table(SETTLEMENT_VIEW)
-                .select(SETTLEMENT_COLUMNS)
-                .eq("sgo_player_id", player_id)
+            query = router_utils.supabase.table(SETTLEMENT_VIEW).select(
+                SETTLEMENT_COLUMNS
             )
+            if player_id.isdigit():
+                query = query.eq("mlb_player_id", int(player_id))
+            elif ":" in player_id:
+                provider, provider_player_id = player_id.split(":", 1)
+                query = query.eq("provider", provider).eq(
+                    "provider_player_id", provider_player_id
+                )
+            else:
+                # Backward compatibility for saved links using an SGO player id.
+                query = query.eq("provider_player_id", player_id)
             if not include_alternates:
                 query = query.eq("is_alternate", False)
             start = page * SETTLEMENT_PAGE_SIZE
@@ -654,7 +697,7 @@ def pitcher_k_history(player_id: str, event_id: str, date: str | None = None):
             (
                 row["player_name"]
                 for row in rows
-                if row["player_id"] == player_id and row["player_name"]
+                if _player_key(row) == player_id and row["player_name"]
             ),
             player_id,
         ),

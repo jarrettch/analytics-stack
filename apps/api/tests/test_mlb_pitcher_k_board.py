@@ -23,11 +23,15 @@ def _row(
     player_id: str = "ANDRE_PALLANTE_1_MLB",
     player_name: str = "Andre Pallante",
     event_id: str = "EVT1",
+    provider: str = "sportsgameodds",
+    mlb_game_pk: int | None = None,
+    mlb_player_id: int | None = None,
     market_phase: str = "pregame",
     open_line: float | None = None,
     open_odds: int | None = None,
 ) -> dict:
     return {
+        "provider": provider,
         "captured_at": captured_at,
         "collection_id": collection_id,
         "event_id": event_id,
@@ -45,6 +49,8 @@ def _row(
         "american_odds": odds,
         "open_line": open_line,
         "open_american_odds": open_odds,
+        "mlb_game_pk": mlb_game_pk,
+        "mlb_player_id": mlb_player_id,
     }
 
 
@@ -80,6 +86,47 @@ def _standard_day() -> list[dict]:
 
 
 class BuildBoardTest(unittest.TestCase):
+    def test_resolved_provider_rows_merge_on_official_mlb_identity(self):
+        rows = [
+            _row(
+                captured_at="2026-08-17T16:00:00+00:00",
+                collection_id="c1",
+                side=side,
+                line=5.5,
+                odds=-110,
+                bookmaker_id="betonline",
+                event_id="SGO-EVENT",
+                mlb_game_pk=801,
+                mlb_player_id=1001,
+            )
+            for side in ("over", "under")
+        ] + [
+            _row(
+                captured_at="2026-08-17T17:00:00+00:00",
+                collection_id="c2",
+                side=side,
+                line=5.5,
+                odds=-105,
+                bookmaker_id="draftkings",
+                event_id="SHARP-EVENT",
+                player_id="name:andre pallante",
+                provider="sharpapi",
+                mlb_game_pk=801,
+                mlb_player_id=1001,
+            )
+            for side in ("over", "under")
+        ]
+
+        entries = board.build_board(rows)
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["eventId"], "mlb:801")
+        self.assertEqual(entries[0]["playerId"], "1001")
+        self.assertEqual(
+            {book["bookmakerId"] for book in entries[0]["books"]},
+            {"betonline", "draftkings"},
+        )
+
     def test_latest_and_first_observations_per_book(self):
         entries = board.build_board(_standard_day())
 

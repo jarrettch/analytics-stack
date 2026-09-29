@@ -31,6 +31,7 @@ from .mlb_pitcher_k_odds import (
     collection_id_for,
     collect_pitcher_k_snapshots,
 )
+from .mlb_pitcher_k_sharp import collect_sharp_pitcher_k_snapshots
 from .mlb_pitcher_k_settlement import (
     build_pitching_result_rows,
     identity_sources_from_sgo_events,
@@ -56,6 +57,7 @@ SettlementLookback = Annotated[
     Query(ge=1, le=7, description="Completed ET dates to recheck."),
 ]
 DEFAULT_SETTLEMENT_LOOKBACK_DAYS = 3
+MLB_COMPETITIVE_GAME_TYPES = {"R", "F", "D", "L", "W"}
 
 cache = Cache({
     "schedule":         CACHE_TTL_DEFAULT,
@@ -302,8 +304,9 @@ async def get_schedule(date_str: str, *, raise_on_error: bool = False) -> list:
         games = []
         for date_entry in data.get("dates", []):
             for game in date_entry.get("games", []):
-                # Spring training filter — flip to "R" for regular season
-                if game.get("gameType") != "R":
+                # Exclude spring/exhibition games while retaining every
+                # regular-season and postseason round.
+                if game.get("gameType") not in MLB_COMPETITIVE_GAME_TYPES:
                     continue
 
                 status_obj     = game.get("status", {})
@@ -376,7 +379,7 @@ async def get_schedule(date_str: str, *, raise_on_error: bool = False) -> list:
                     "currentInning": current_inning,
                 })
 
-        logger.info(f"MLB schedule: {len(games)} ST games on {date_str}")
+        logger.info(f"MLB schedule: {len(games)} games on {date_str}")
         return games
     except Exception as e:
         logger.error(f"MLB schedule fetch error: {e}", exc_info=True)
@@ -536,6 +539,19 @@ async def get_odds_map(
         if pitcher_k_stats is not None:
             pitcher_k_stats.copy_from(collected)
 
+    async def collect_fallback_pitcher_ks() -> None:
+        identity_date = target_date or datetime.now(ET).date()
+        schedule = await get_schedule(identity_date.isoformat())
+        collected = await collect_sharp_pitcher_k_snapshots(
+            target_date=identity_date,
+            schedule=schedule,
+            collection_id=(
+                pitcher_k_collection_id or collection_id_for(None)
+            ),
+        )
+        if pitcher_k_stats is not None:
+            pitcher_k_stats.copy_from(collected)
+
     return await fetch_sgo_odds(
         sport="mlb",
         league_id="MLB",
@@ -548,9 +564,7 @@ async def get_odds_map(
         include_alt_lines=True,
         include_open_close_odds=True,
         response_consumer=collect_pitcher_ks,
-        optional_market_fallback_consumer=(
-            pitcher_k_stats.mark_skipped if pitcher_k_stats is not None else None
-        ),
+        optional_market_fallback_consumer=collect_fallback_pitcher_ks,
     )
 
 @router.post("/cron/fetch-odds", dependencies=[Depends(require_cron_auth)])
@@ -714,7 +728,7 @@ async def cron_settle_pitcher_ks(
             "dates": dates,
             "stale_settlements": stale_settlements,
             "persisted_to": (
-                "supabase:mlb_sgo_event_map+mlb_sgo_pitcher_map+"
+                "supabase:mlb_pitcher_k_event_map+mlb_pitcher_k_player_map+"
                 "mlb_pitcher_k_results"
             ),
         }

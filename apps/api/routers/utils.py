@@ -472,7 +472,9 @@ async def fetch_sgo_odds(
     response_consumer: Callable[
         [list[dict], datetime], Awaitable[None] | None
     ] | None = None,
-    optional_market_fallback_consumer: Callable[[], None] | None = None,
+    optional_market_fallback_consumer: Callable[
+        [], Awaitable[None] | None
+    ] | None = None,
     collection_stats: dict | None = None,
 ) -> tuple[dict, int]:
     """Fetch and persist SGO odds, using SharpAPI if the SGO request fails.
@@ -520,12 +522,17 @@ async def fetch_sgo_odds(
         )
         return odds_map, 0
 
-    async def sharp_fallback(reason: str) -> tuple[dict, int]:
+    async def run_optional_market_fallback() -> None:
         if optional_market_fallback_consumer:
             try:
-                optional_market_fallback_consumer()
+                result = optional_market_fallback_consumer()
+                if result is not None:
+                    await result
             except Exception:
                 logger.exception("%s optional-market fallback consumer failed", league_id)
+
+    async def sharp_fallback(reason: str) -> tuple[dict, int]:
+        await run_optional_market_fallback()
         if not (os.getenv("SHARP_API_KEY") or os.getenv("SHARPAPI_KEY")):
             logger.warning(
                 "SportsGameOdds %s unavailable (%s); SharpAPI is not configured",
@@ -605,13 +612,7 @@ async def fetch_sgo_odds(
                 )
                 r.raise_for_status()
                 consumer_response_available = False
-                if optional_market_fallback_consumer:
-                    try:
-                        optional_market_fallback_consumer()
-                    except Exception:
-                        logger.exception(
-                            "SportsGameOdds %s fallback consumer failed", league_id
-                        )
+                await run_optional_market_fallback()
             else:
                 raise
 

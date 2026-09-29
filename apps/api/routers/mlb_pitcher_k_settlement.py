@@ -1,4 +1,4 @@
-"""Reconcile SGO pitcher props with official MLB games and boxscores."""
+"""Reconcile provider pitcher props with official MLB games and boxscores."""
 from __future__ import annotations
 
 import logging
@@ -7,12 +7,12 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from . import utils as router_utils
-from .mlb_team_ids import get_tricode_from_sgo_team_id
+from .mlb_team_ids import get_tricode_from_sgo_team_id, get_tricode_from_team_name
 
 logger = logging.getLogger(__name__)
 
-EVENT_MAP_TABLE = "mlb_sgo_event_map"
-PITCHER_MAP_TABLE = "mlb_sgo_pitcher_map"
+EVENT_MAP_TABLE = "mlb_pitcher_k_event_map"
+PITCHER_MAP_TABLE = "mlb_pitcher_k_player_map"
 RESULTS_TABLE = "mlb_pitcher_k_results"
 STATUS_COUNTS_VIEW = "mlb_pitcher_k_settlement_status_counts"
 RETRYABLE_SETTLEMENT_STATUSES = (
@@ -99,6 +99,7 @@ def identity_sources_from_sgo_events(
         )
         teams = event.get("teams") or {}
         base = {
+            "provider": "sportsgameodds",
             "event_id": str(event_id),
             "game_date": game_date.isoformat(),
             "starts_at": starts_at,
@@ -126,8 +127,8 @@ def identity_sources_from_sgo_events(
 
 
 def _event_candidate(snapshot: dict, schedule: list[dict]) -> tuple[dict | None, str]:
-    away = get_tricode_from_sgo_team_id(snapshot.get("away_team_id") or "")
-    home = get_tricode_from_sgo_team_id(snapshot.get("home_team_id") or "")
+    away = _team_tricode(snapshot.get("away_team_id"))
+    home = _team_tricode(snapshot.get("home_team_id"))
     candidates = [
         game
         for game in schedule
@@ -154,6 +155,13 @@ def _event_candidate(snapshot: dict, schedule: list[dict]) -> tuple[dict | None,
     return timed[0][1], "teams_start_time"
 
 
+def _team_tricode(value: str | None) -> str:
+    return (
+        get_tricode_from_sgo_team_id(value or "")
+        or get_tricode_from_team_name(value or "")
+    )
+
+
 def _probable_candidates(game: dict) -> list[tuple[int, str]]:
     candidates = []
     for side in ("away", "home"):
@@ -175,35 +183,35 @@ def build_identity_rows(
 ) -> IdentityBatch:
     """Build retryable event and pitcher mappings from one MLB slate."""
     attempted = attempted_at.isoformat()
-    event_sources: dict[str, dict] = {}
-    pitcher_sources: dict[tuple[str, str], dict] = {}
+    event_sources: dict[tuple[str, str], dict] = {}
+    pitcher_sources: dict[tuple[str, str, str], dict] = {}
     for row in snapshot_rows:
+        provider = str(row.get("provider") or "sportsgameodds")
         event_id = row.get("event_id")
         player_id = row.get("player_id")
         if not event_id:
             continue
-        event_sources.setdefault(str(event_id), row)
+        event_sources.setdefault((provider, str(event_id)), row)
         if player_id:
-            pitcher_sources.setdefault((str(event_id), str(player_id)), row)
+            pitcher_sources.setdefault(
+                (provider, str(event_id), str(player_id)), row
+            )
 
     event_rows = []
-    matched_games: dict[str, dict] = {}
-    for event_id, source in event_sources.items():
+    matched_games: dict[tuple[str, str], dict] = {}
+    for (provider, event_id), source in event_sources.items():
         game, method = _event_candidate(source, schedule)
         status = "resolved" if game is not None else method
         if game is not None:
-            matched_games[event_id] = game
+            matched_games[(provider, event_id)] = game
         event_rows.append({
-            "sgo_event_id": event_id,
+            "provider": provider,
+            "provider_event_id": event_id,
             "mlb_game_pk": int(game["gamePk"]) if game is not None else None,
             "game_date": source.get("game_date"),
-            "away_team": get_tricode_from_sgo_team_id(
-                source.get("away_team_id") or ""
-            ) or None,
-            "home_team": get_tricode_from_sgo_team_id(
-                source.get("home_team_id") or ""
-            ) or None,
-            "sgo_starts_at": source.get("starts_at"),
+            "away_team": _team_tricode(source.get("away_team_id")) or None,
+            "home_team": _team_tricode(source.get("home_team_id")) or None,
+            "provider_starts_at": source.get("starts_at"),
             "mlb_starts_at": game.get("startsAt") if game is not None else None,
             "resolution_status": status,
             "resolution_method": method if game is not None else None,
@@ -219,8 +227,8 @@ def build_identity_rows(
         })
 
     pitcher_rows = []
-    for (event_id, player_id), source in pitcher_sources.items():
-        game = matched_games.get(event_id)
+    for (provider, event_id, player_id), source in pitcher_sources.items():
+        game = matched_games.get((provider, event_id))
         normalized = normalize_person_name(source.get("player_name"))
         candidates = [
             candidate
@@ -230,10 +238,11 @@ def build_identity_rows(
         resolved = candidates[0] if len(candidates) == 1 else None
         status = "resolved" if resolved else "ambiguous" if len(candidates) > 1 else "unresolved"
         pitcher_rows.append({
-            "sgo_event_id": event_id,
-            "sgo_player_id": player_id,
+            "provider": provider,
+            "provider_event_id": event_id,
+            "provider_player_id": player_id,
             "mlb_player_id": resolved[0] if resolved else None,
-            "sgo_player_name": source.get("player_name"),
+            "provider_player_name": source.get("player_name"),
             "mlb_player_name": resolved[1] if resolved else None,
             "resolution_status": status,
             "resolution_method": "probable_name" if resolved else None,
@@ -250,7 +259,7 @@ def _existing_rows(table: str, columns: str, event_ids: list[str]) -> list[dict]
     return (
         router_utils.supabase.table(table)
         .select(columns)
-        .in_("sgo_event_id", event_ids)
+        .in_("provider_event_id", event_ids)
         .execute()
         .data
         or []
@@ -287,20 +296,21 @@ def persist_identity_batch(batch: IdentityBatch) -> IdentityPersistenceStats:
         logger.warning("Supabase not configured; skipping MLB pitcher-K identity maps")
         return stats
 
-    event_ids = [row["sgo_event_id"] for row in batch.event_rows]
+    event_ids = [row["provider_event_id"] for row in batch.event_rows]
     try:
         existing_events = {
-            row["sgo_event_id"]: row
+            (row["provider"], row["provider_event_id"]): row
             for row in _existing_rows(
                 EVENT_MAP_TABLE,
-                "sgo_event_id,mlb_game_pk,resolution_status,resolution_method,"
+                "provider,provider_event_id,mlb_game_pk,resolution_status,resolution_method,"
                 "mlb_starts_at,mlb_abstract_state,mlb_detailed_state,resolved_at,frozen_at",
                 event_ids,
             )
         }
         event_rows = []
         for row in batch.event_rows:
-            merged = _merge_mapping(row, existing_events.get(row["sgo_event_id"]))
+            key = (row["provider"], row["provider_event_id"])
+            merged = _merge_mapping(row, existing_events.get(key))
             if merged is None:
                 stats.frozen_rows_skipped += 1
             else:
@@ -308,22 +318,30 @@ def persist_identity_batch(batch: IdentityBatch) -> IdentityPersistenceStats:
         if event_rows:
             (
                 router_utils.supabase.table(EVENT_MAP_TABLE)
-                .upsert(event_rows, on_conflict="sgo_event_id")
+                .upsert(event_rows, on_conflict="provider,provider_event_id")
                 .execute()
             )
 
         existing_pitchers = {
-            (row["sgo_event_id"], row["sgo_player_id"]): row
+            (
+                row["provider"],
+                row["provider_event_id"],
+                row["provider_player_id"],
+            ): row
             for row in _existing_rows(
                 PITCHER_MAP_TABLE,
-                "sgo_event_id,sgo_player_id,mlb_player_id,mlb_player_name,"
+                "provider,provider_event_id,provider_player_id,mlb_player_id,mlb_player_name,"
                 "resolution_status,resolution_method,resolved_at,frozen_at",
                 event_ids,
             )
         }
         pitcher_rows = []
         for row in batch.pitcher_rows:
-            key = (row["sgo_event_id"], row["sgo_player_id"])
+            key = (
+                row["provider"],
+                row["provider_event_id"],
+                row["provider_player_id"],
+            )
             merged = _merge_mapping(row, existing_pitchers.get(key))
             if merged is None:
                 stats.frozen_rows_skipped += 1
@@ -334,7 +352,7 @@ def persist_identity_batch(batch: IdentityBatch) -> IdentityPersistenceStats:
                 router_utils.supabase.table(PITCHER_MAP_TABLE)
                 .upsert(
                     pitcher_rows,
-                    on_conflict="sgo_event_id,sgo_player_id",
+                    on_conflict="provider,provider_event_id,provider_player_id",
                 )
                 .execute()
             )
@@ -359,7 +377,7 @@ def load_snapshot_identity_sources(game_date: date) -> list[dict]:
         raise RuntimeError("Supabase is not configured")
     rows = []
     columns = (
-        "event_id,game_date,starts_at,home_team_id,away_team_id,"
+        "provider,event_id,game_date,starts_at,home_team_id,away_team_id,"
         "player_id,player_name,player_team_id"
     )
     for page in range(SNAPSHOT_MAX_PAGES):
@@ -506,7 +524,7 @@ def persist_pitching_results(
                 stats.final_games += 1
             mapped_events = (
                 router_utils.supabase.table(EVENT_MAP_TABLE)
-                .select("sgo_event_id")
+                .select("provider,provider_event_id")
                 .eq("mlb_game_pk", game_pk)
                 .execute()
                 .data
@@ -518,20 +536,19 @@ def persist_pitching_results(
                 .eq("mlb_game_pk", game_pk)
                 .execute()
             )
-            event_ids = [
-                row["sgo_event_id"]
-                for row in mapped_events
-                if row.get("sgo_event_id")
-            ]
             stats.games_updated += 1
-            if is_final and event_ids:
-                (
-                    router_utils.supabase.table(PITCHER_MAP_TABLE)
-                    .update({"frozen_at": timestamp, "updated_at": timestamp})
-                    .in_("sgo_event_id", event_ids)
-                    .execute()
-                )
-                stats.frozen_events += len(event_ids)
+            if is_final and mapped_events:
+                for mapped in mapped_events:
+                    if not mapped.get("provider_event_id"):
+                        continue
+                    (
+                        router_utils.supabase.table(PITCHER_MAP_TABLE)
+                        .update({"frozen_at": timestamp, "updated_at": timestamp})
+                        .eq("provider", mapped["provider"])
+                        .eq("provider_event_id", mapped["provider_event_id"])
+                        .execute()
+                    )
+                stats.frozen_events += len(mapped_events)
         stats.succeeded = True
     except Exception:
         logger.exception("Failed to persist MLB pitcher-K results")

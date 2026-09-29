@@ -30,6 +30,41 @@ def test_settlement_schedule_fetch_can_fail_closed(monkeypatch):
         asyncio.run(mlb.get_schedule("2026-08-17", raise_on_error=True))
 
 
+def test_schedule_includes_postseason_and_excludes_spring_games(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            def game(game_pk, game_type):
+                return {
+                    "gamePk": game_pk,
+                    "gameType": game_type,
+                    "gameDate": "2026-09-29T18:00:00Z",
+                    "officialDate": "2026-09-29",
+                    "status": {
+                        "abstractGameState": "Preview",
+                        "detailedState": "Scheduled",
+                    },
+                    "teams": {
+                        "away": {"team": {"id": 143, "abbreviation": "PHI"}},
+                        "home": {"team": {"id": 144, "abbreviation": "ATL"}},
+                    },
+                }
+
+            return {"dates": [{"games": [game(849845, "F"), game(1, "S")]}]}
+
+    class Client:
+        async def get(self, *_args, **_kwargs):
+            return Response()
+
+    monkeypatch.setattr(mlb, "get_http_client", lambda: Client())
+
+    games = asyncio.run(mlb.get_schedule("2026-09-29", raise_on_error=True))
+
+    assert [game["gamePk"] for game in games] == ["849845"]
+
+
 def snapshot(
     event_id: str,
     player_id: str,
@@ -275,17 +310,19 @@ class Database:
 
 def test_persistence_does_not_downgrade_a_resolved_mapping(monkeypatch):
     existing = {
-        "mlb_sgo_event_map": [{
-            "sgo_event_id": "SGO-1",
+        "mlb_pitcher_k_event_map": [{
+            "provider": "sportsgameodds",
+            "provider_event_id": "SGO-1",
             "mlb_game_pk": 801,
             "resolution_status": "resolved",
             "resolution_method": "teams_date",
             "resolved_at": "earlier",
             "frozen_at": None,
         }],
-        "mlb_sgo_pitcher_map": [{
-            "sgo_event_id": "SGO-1",
-            "sgo_player_id": "P-1",
+        "mlb_pitcher_k_player_map": [{
+            "provider": "sportsgameodds",
+            "provider_event_id": "SGO-1",
+            "provider_player_id": "P-1",
             "mlb_player_id": 1001,
             "mlb_player_name": "Andre Pallante",
             "resolution_status": "resolved",
@@ -298,15 +335,17 @@ def test_persistence_does_not_downgrade_a_resolved_mapping(monkeypatch):
     monkeypatch.setattr(settlement.router_utils, "supabase", database)
     batch = IdentityBatch(
         event_rows=[{
-            "sgo_event_id": "SGO-1",
+            "provider": "sportsgameodds",
+            "provider_event_id": "SGO-1",
             "mlb_game_pk": None,
             "resolution_status": "unresolved",
             "last_attempted_at": "later",
             "updated_at": "later",
         }],
         pitcher_rows=[{
-            "sgo_event_id": "SGO-1",
-            "sgo_player_id": "P-1",
+            "provider": "sportsgameodds",
+            "provider_event_id": "SGO-1",
+            "provider_player_id": "P-1",
             "mlb_player_id": None,
             "resolution_status": "unresolved",
             "last_attempted_at": "later",
@@ -316,8 +355,8 @@ def test_persistence_does_not_downgrade_a_resolved_mapping(monkeypatch):
 
     stats = persist_identity_batch(batch)
 
-    event = database.writes["mlb_sgo_event_map"][0]
-    pitcher = database.writes["mlb_sgo_pitcher_map"][0]
+    event = database.writes["mlb_pitcher_k_event_map"][0]
+    pitcher = database.writes["mlb_pitcher_k_player_map"][0]
     assert stats.succeeded is True
     assert event["mlb_game_pk"] == 801
     assert event["resolution_status"] == "resolved"
@@ -327,14 +366,16 @@ def test_persistence_does_not_downgrade_a_resolved_mapping(monkeypatch):
 
 def test_persistence_skips_frozen_mappings(monkeypatch):
     existing = {
-        "mlb_sgo_event_map": [{
-            "sgo_event_id": "SGO-1",
+        "mlb_pitcher_k_event_map": [{
+            "provider": "sportsgameodds",
+            "provider_event_id": "SGO-1",
             "resolution_status": "resolved",
             "frozen_at": "2026-08-18T03:00:00Z",
         }],
-        "mlb_sgo_pitcher_map": [{
-            "sgo_event_id": "SGO-1",
-            "sgo_player_id": "P-1",
+        "mlb_pitcher_k_player_map": [{
+            "provider": "sportsgameodds",
+            "provider_event_id": "SGO-1",
+            "provider_player_id": "P-1",
             "resolution_status": "resolved",
             "frozen_at": "2026-08-18T03:00:00Z",
         }],
@@ -342,10 +383,15 @@ def test_persistence_skips_frozen_mappings(monkeypatch):
     database = Database(existing)
     monkeypatch.setattr(settlement.router_utils, "supabase", database)
     batch = IdentityBatch(
-        event_rows=[{"sgo_event_id": "SGO-1", "resolution_status": "resolved"}],
+        event_rows=[{
+            "provider": "sportsgameodds",
+            "provider_event_id": "SGO-1",
+            "resolution_status": "resolved",
+        }],
         pitcher_rows=[{
-            "sgo_event_id": "SGO-1",
-            "sgo_player_id": "P-1",
+            "provider": "sportsgameodds",
+            "provider_event_id": "SGO-1",
+            "provider_player_id": "P-1",
             "resolution_status": "resolved",
         }],
     )
@@ -359,8 +405,9 @@ def test_persistence_skips_frozen_mappings(monkeypatch):
 
 def test_final_game_without_feed_rows_stays_unfetched_and_unfrozen(monkeypatch):
     database = Database({
-        "mlb_sgo_event_map": [{
-            "sgo_event_id": "SGO-1",
+        "mlb_pitcher_k_event_map": [{
+            "provider": "sportsgameodds",
+            "provider_event_id": "SGO-1",
             "mlb_game_pk": 801,
         }],
     })
@@ -381,8 +428,9 @@ def test_final_game_without_feed_rows_stays_unfetched_and_unfrozen(monkeypatch):
 
 def test_final_game_with_feed_rows_marks_results_fetched_and_freezes(monkeypatch):
     database = Database({
-        "mlb_sgo_event_map": [{
-            "sgo_event_id": "SGO-1",
+        "mlb_pitcher_k_event_map": [{
+            "provider": "sportsgameodds",
+            "provider_event_id": "SGO-1",
             "mlb_game_pk": 801,
         }],
     })
@@ -399,17 +447,21 @@ def test_final_game_with_feed_rows_marks_results_fetched_and_freezes(monkeypatch
     assert stats.succeeded is True
     assert stats.final_games == 1
     assert stats.frozen_events == 1
-    event_update = database.updates["mlb_sgo_event_map"][0]
-    pitcher_update = database.updates["mlb_sgo_pitcher_map"][0]
+    event_update = database.updates["mlb_pitcher_k_event_map"][0]
+    pitcher_update = database.updates["mlb_pitcher_k_player_map"][0]
     assert event_update["values"]["frozen_at"] == CAPTURED_AT.isoformat()
     assert event_update["values"]["results_fetched_at"] == CAPTURED_AT.isoformat()
-    assert pitcher_update["filters"] == [("in", "sgo_event_id", ["SGO-1"])]
+    assert pitcher_update["filters"] == [
+        ("eq", "provider", "sportsgameodds"),
+        ("eq", "provider_event_id", "SGO-1"),
+    ]
 
 
 def test_cancelled_game_without_feed_rows_marks_terminal_and_freezes(monkeypatch):
     database = Database({
-        "mlb_sgo_event_map": [{
-            "sgo_event_id": "SGO-CANCELLED",
+        "mlb_pitcher_k_event_map": [{
+            "provider": "sportsgameodds",
+            "provider_event_id": "SGO-CANCELLED",
             "mlb_game_pk": 801,
         }],
     })
@@ -425,7 +477,7 @@ def test_cancelled_game_without_feed_rows_marks_terminal_and_freezes(monkeypatch
     assert stats.succeeded is True
     assert stats.final_games == 1
     assert stats.frozen_events == 1
-    event_update = database.updates["mlb_sgo_event_map"][0]
+    event_update = database.updates["mlb_pitcher_k_event_map"][0]
     assert event_update["values"]["mlb_detailed_state"] == "Cancelled: Rain"
     assert "results_fetched_at" not in event_update["values"]
 

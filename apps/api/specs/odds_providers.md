@@ -109,6 +109,12 @@ slate does not trigger the fallback. SharpAPI is also the intended answer for
 NCAAB when college basketball starts in November, the sport that would
 otherwise force a paid tier since it runs roughly 100 games a night.
 
+MLB also requests `player_strikeouts` when its SGO request fails or SGO rejects
+the optional pitcher markets. Those DK/FD rows use the same append-only odds
+table as SGO, tagged by provider. Provider event and player identifiers remain
+auditable, while the board and settlement history join through official MLB
+game and player IDs.
+
 Its weakness is books: two recreational US books, no sharp reference, no
 de-vigged price.
 

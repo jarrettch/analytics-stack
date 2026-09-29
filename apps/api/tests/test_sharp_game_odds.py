@@ -144,6 +144,42 @@ class SharpGameOddsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(("2099-01-14", "NYK@BOS"), odds)
         fallback.assert_awaited_once()
 
+    async def test_sgo_failure_awaits_optional_market_fallback(self):
+        response = httpx.Response(
+            429,
+            json={"error": "monthly quota exhausted"},
+            request=httpx.Request(
+                "GET", "https://api.sportsgameodds.com/v2/events"
+            ),
+        )
+        client = AsyncMock()
+        client.get.return_value = response
+        optional_fallback = AsyncMock()
+
+        with (
+            patch("routers.utils.load_persisted_odds", return_value={}),
+            patch("routers.utils.get_http_client", return_value=client),
+            patch(
+                "routers.sharp_game_odds.fetch_sharp_game_odds",
+                AsyncMock(return_value=({}, 0)),
+            ),
+            patch.dict(
+                "routers.utils.os.environ",
+                {"SPORTS_GAME_ODDS_KEY": "sgo", "SHARP_API_KEY": "sharp"},
+                clear=True,
+            ),
+        ):
+            await fetch_sgo_odds(
+                sport="mlb",
+                league_id="MLB",
+                table_name="mlb_odds",
+                tricode_for=lambda value: value,
+                target_date=date(2099, 1, 14),
+                optional_market_fallback_consumer=optional_fallback,
+            )
+
+        optional_fallback.assert_awaited_once()
+
     async def test_valid_empty_sgo_slate_does_not_spend_sharp_requests(self):
         response = httpx.Response(
             200,

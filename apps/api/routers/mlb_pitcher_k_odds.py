@@ -1,4 +1,4 @@
-"""Append-only SportsGameOdds snapshots for MLB pitcher strikeout props."""
+"""Append-only provider snapshots for MLB pitcher strikeout props."""
 from __future__ import annotations
 
 import logging
@@ -20,7 +20,7 @@ PITCHER_K_TABLE = "mlb_pitcher_k_odds"
 INSERT_CHUNK_SIZE = 500
 COLLECTION_NAMESPACE = UUID("27a90e55-9fb7-4fd7-9ad7-20bf144d3437")
 IDEMPOTENCY_COLUMNS = (
-    "collection_id,event_id,odd_id,bookmaker_id,is_alternate,line,american_odds"
+    "collection_id,provider,event_id,odd_id,bookmaker_id,is_alternate,line,american_odds"
 )
 
 
@@ -189,6 +189,7 @@ def build_pitcher_k_snapshot_rows(
                     continue
                 base = {
                     "collection_id": response_id,
+                    "provider": "sportsgameodds",
                     "captured_at": captured_at_iso,
                     "game_date": game_date,
                     "event_id": event_id,
@@ -241,23 +242,12 @@ def build_pitcher_k_snapshot_rows(
     return rows, outcomes_found, malformed_prices, events_skipped
 
 
-def collect_pitcher_k_snapshots(
-    events: list[dict], captured_at: datetime, collection_id: str | None = None
+def persist_pitcher_k_rows(
+    rows: list[dict], stats: PitcherKCollectionStats
 ) -> PitcherKCollectionStats:
-    """Parse and append one SGO response's pitcher-K snapshots to Supabase."""
-    rows, outcomes_found, malformed_prices, events_skipped = (
-        build_pitcher_k_snapshot_rows(
-            events, captured_at, collection_id=collection_id
-        )
-    )
-    stats = PitcherKCollectionStats(
-        outcomes_found=outcomes_found,
-        rows_found=len(rows),
-        malformed_prices=malformed_prices,
-        events_skipped=events_skipped,
-    )
+    """Append normalized observations from any provider."""
+    stats.rows_found = len(rows)
     if not rows:
-        logger.info("MLB pitcher-K collector: no available prices in SGO response")
         stats.succeeded = stats.malformed_prices == 0 and stats.events_skipped == 0
         return stats
     if not router_utils.supabase:
@@ -291,13 +281,30 @@ def collect_pitcher_k_snapshots(
                 PITCHER_K_TABLE,
             )
 
-    # Success means every valid row was persisted or replay-deduplicated. A few
-    # malformed book prices remain telemetry rather than failing an otherwise
-    # complete collection; when no valid rows survive, malformed input does fail.
     stats.succeeded = (
         stats.rows_inserted + stats.rows_deduplicated == stats.rows_found
         and stats.events_skipped == 0
     )
+    return stats
+
+
+def collect_pitcher_k_snapshots(
+    events: list[dict], captured_at: datetime, collection_id: str | None = None
+) -> PitcherKCollectionStats:
+    """Parse and append one SGO response's pitcher-K snapshots to Supabase."""
+    rows, outcomes_found, malformed_prices, events_skipped = (
+        build_pitcher_k_snapshot_rows(
+            events, captured_at, collection_id=collection_id
+        )
+    )
+    stats = PitcherKCollectionStats(
+        outcomes_found=outcomes_found,
+        malformed_prices=malformed_prices,
+        events_skipped=events_skipped,
+    )
+    if not rows:
+        logger.info("MLB pitcher-K collector: no available prices in SGO response")
+    persist_pitcher_k_rows(rows, stats)
     logger.info(
         "MLB pitcher-K collector: %d outcomes, %d prices, %d malformed, "
         "%d events skipped, "

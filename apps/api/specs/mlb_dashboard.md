@@ -27,7 +27,7 @@ _Last updated: 2026-05-07_
 
 - **Odds source:** SportsGameOdds (SGO) — same integration as NBA. The Odds API is out of monthly quota for March; will re-evaluate in April.
 - **v1 scope:** Static dashboard only. No live score display or live polling for MLB (follow-up task after regular season launch).
-- **Game filter:** Spring training (`gameType == "S"`) until regular season starts (late March 2026), then switch to `gameType == "R"`. This is a one-line change.
+- **Game filter:** Include regular season and postseason (`R`, `F`, `D`, `L`, `W`); exclude spring training and exhibitions.
 - **EV Calculator:** Skip for v1 — it requires adding several odds fields to `MLBMatchupData`. Can enable in a follow-up once regular season data is flowing.
 
 ---
@@ -106,7 +106,7 @@ GET https://statsapi.mlb.com/api/v1/schedule
     &hydrate=probablePitcher,linescore,team
 ```
 
-Filter: `game["gameType"] == "S"` for spring training (**flip to `"R"` for regular season**).
+Filter: `game["gameType"] in {"R", "F", "D", "L", "W"}` for regular season through the World Series.
 
 Key fields per game:
 
@@ -371,21 +371,14 @@ Note: The schedule endpoint also returns `team["abbreviation"]` directly, so thi
 
 ---
 
-## Spring Training → Regular Season Transition
+## MLB game-type filter
 
-One-line change in `get_schedule()`:
+`get_schedule()` includes the regular season and each postseason round:
 
 ```python
-# Spring training (current):
-if game["gameType"] != "S":
-    continue
-
-# Regular season (flip when ready, ~late March 2026):
-if game["gameType"] != "R":
+if game["gameType"] not in {"R", "F", "D", "L", "W"}:
     continue
 ```
-
-Regular season starts late March 2026. Spring training can be used for end-to-end testing until then.
 
 ---
 

@@ -5,8 +5,8 @@ set local search_path = public, extensions;
 
 select plan(9);
 
-insert into public.mlb_sgo_event_map (
-    sgo_event_id,
+insert into public.mlb_pitcher_k_event_map (
+    provider_event_id,
     mlb_game_pk,
     game_date,
     resolution_status,
@@ -28,9 +28,9 @@ insert into public.mlb_sgo_event_map (
     ('TEST-UNRESOLVED', null, '2026-08-17', 'unresolved', null, null,
      null, '2026-08-18T05:00:00Z');
 
-insert into public.mlb_sgo_pitcher_map (
-    sgo_event_id,
-    sgo_player_id,
+insert into public.mlb_pitcher_k_player_map (
+    provider_event_id,
+    provider_player_id,
     mlb_player_id,
     resolution_status,
     last_attempted_at
@@ -104,7 +104,7 @@ select results_eq(
     $$
         select bookmaker_id, side, grade, round(profit_units, 3)
         from public.mlb_pitcher_k_settlements
-        where sgo_event_id = 'TEST-GRADED'
+        where provider_event_id = 'TEST-GRADED'
         order by bookmaker_id, side
     $$,
     $$ values
@@ -118,35 +118,35 @@ select results_eq(
 
 select is(
     (select settlement_status from public.mlb_pitcher_k_settlements
-     where sgo_event_id = 'TEST-SCRATCH'),
+     where provider_event_id = 'TEST-SCRATCH'),
     'void',
     'a fetched final with no pitcher row is void'
 );
 
 select is(
     (select void_reason from public.mlb_pitcher_k_settlements
-     where sgo_event_id = 'TEST-SCRATCH'),
+     where provider_event_id = 'TEST-SCRATCH'),
     'did_not_appear',
     'a fetched final with no pitcher row records the scratch reason'
 );
 
 select is(
     (select settlement_status from public.mlb_pitcher_k_settlements
-     where sgo_event_id = 'TEST-UNFETCHED'),
+     where provider_event_id = 'TEST-UNFETCHED'),
     'pending',
     'a final whose boxscore was not fetched never becomes a false void'
 );
 
 select is(
     (select settlement_status from public.mlb_pitcher_k_settlements
-     where sgo_event_id = 'TEST-DATA'),
+     where provider_event_id = 'TEST-DATA'),
     'data_pending',
     'missing strikeout facts remain pending'
 );
 
 select is(
     (select grade from public.mlb_pitcher_k_settlements
-     where sgo_event_id = 'TEST-DATA'),
+     where provider_event_id = 'TEST-DATA'),
     null::text,
     'missing strikeout facts never grade an under as a win'
 );
@@ -162,14 +162,14 @@ select is(
 
 select is(
     (select settlement_status from public.mlb_pitcher_k_settlements
-     where sgo_event_id = 'TEST-CANCELLED'),
+     where provider_event_id = 'TEST-CANCELLED'),
     'void',
     'a terminally cancelled game voids its observed markets'
 );
 
 select is(
     (select void_reason from public.mlb_pitcher_k_settlements
-     where sgo_event_id = 'TEST-CANCELLED'),
+     where provider_event_id = 'TEST-CANCELLED'),
     'game_cancelled',
     'a cancelled game records the cancellation reason'
 );
