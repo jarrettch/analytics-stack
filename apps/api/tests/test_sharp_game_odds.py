@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from routers import sharp_game_odds
+from routers.nhl import get_tricode_from_team_name as nhl_tricode
 from routers.utils import ET, fetch_sgo_odds
 
 
@@ -15,13 +16,14 @@ def row(
     side: str,
     value: int | float,
     *,
+    league: str = "nba",
     book: str = "draftkings",
     home: str = "Boston Celtics",
     away: str = "New York Knicks",
     start: str = "2099-01-15T00:30:00Z",
 ) -> dict:
     return {
-        "league": "nba",
+        "league": league,
         "market_type": market,
         "sportsbook": book,
         "event_id": f"nba-{book}",
@@ -39,6 +41,10 @@ def row(
 
 
 class SharpGameOddsTest(unittest.IsolatedAsyncioTestCase):
+    def test_nhl_sharp_team_aliases(self):
+        self.assertEqual(nhl_tricode("MTL Canadiens"), "MTL")
+        self.assertEqual(nhl_tricode("Montreal Canadiens"), "MTL")
+
     async def test_normalizes_one_book_without_mixing_lines(self):
         rows = {
             "moneyline": [
@@ -106,6 +112,56 @@ class SharpGameOddsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot_call["rows"][0]["bookmaker"], "draftkings")
         self.assertEqual(stats["provider"], "sharpapi")
         save_latest.assert_called_once()
+
+    async def test_nhl_uses_hockey_market_names(self):
+        nhl_row = {"league": "nhl", "home": "Boston Bruins", "away": "New York Rangers"}
+        rows = {
+            "moneyline": [
+                row("moneyline", "away", 145, **nhl_row),
+                row("moneyline", "home", -170, **nhl_row),
+            ],
+            "puck_line": [
+                row("puck_line", "away", 1.5, **nhl_row),
+                row("puck_line", "home", -1.5, **nhl_row),
+            ],
+            "total_goals": [
+                row("total_goals", "over", 6.5, **nhl_row),
+                row("total_goals", "under", 6.5, **nhl_row),
+            ],
+        }
+        requested_markets = []
+
+        async def fetch(league, market, *, sweep):
+            requested_markets.append(market)
+            return rows[market]
+
+        with (
+            patch.object(sharp_game_odds, "fetch_sharp_odds", side_effect=fetch),
+            patch.object(sharp_game_odds, "save_persisted_odds"),
+            patch.object(sharp_game_odds, "save_odds_snapshots"),
+        ):
+            odds, fresh = await sharp_game_odds.fetch_sharp_game_odds(
+                sport="nhl",
+                league="nhl",
+                table_name="nhl_odds",
+                tricode_for={
+                    "Boston Bruins": "BOS",
+                    "New York Rangers": "NYR",
+                }.get,
+                target_date=date(2099, 1, 14),
+                persisted_odds={},
+            )
+
+        self.assertEqual(
+            requested_markets,
+            ["moneyline", "puck_line", "total_goals"],
+        )
+        self.assertEqual(fresh, 1)
+        game = odds[("2099-01-14", "NYR@BOS")]
+        self.assertEqual(game["homeSpread"], -1.5)
+        self.assertEqual(game["overUnder"], 6.5)
+        self.assertEqual(game["overOdds"], -110)
+        self.assertEqual(game["underOdds"], -110)
 
     async def test_sgo_http_failure_uses_sharp_fallback(self):
         response = httpx.Response(

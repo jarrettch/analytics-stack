@@ -393,6 +393,7 @@ def get_tricode_from_team_name(team_name: str) -> str:
     if key.upper() in NHL_TRI_TO_FULL_NAME:
         return key.upper()
     return NHL_FULL_NAME_TO_TRI.get(key) or {
+        "MTL Canadiens": "MTL",
         "Montreal Canadiens": "MTL",
     }.get(key)
 

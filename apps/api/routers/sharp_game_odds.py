@@ -18,6 +18,9 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 SHARP_GAME_MARKETS = ("moneyline", "point_spread", "total_points")
+SHARP_GAME_MARKETS_BY_LEAGUE = {
+    "nhl": ("moneyline", "puck_line", "total_goals"),
+}
 SHARP_GAME_BOOKS = ("draftkings", "fanduel")
 
 
@@ -45,8 +48,8 @@ def _unique_value(rows: list[dict], side: str, field: str):
 
 def _book_values(markets: dict[str, list[dict]]) -> dict:
     moneyline = markets.get("moneyline", [])
-    spread = markets.get("point_spread", [])
-    total = markets.get("total_points", [])
+    spread = markets.get("point_spread") or markets.get("puck_line", [])
+    total = markets.get("total_points") or markets.get("total_goals", [])
 
     over_line = _unique_value(total, "over", "line")
     under_line = _unique_value(total, "under", "line")
@@ -101,7 +104,10 @@ async def fetch_sharp_game_odds(
     sweep = SharpSweep()
     rows_by_market = dict(market_rows or {})
     fetched_rows: dict[str, list[dict]] = {}
-    for market in SHARP_GAME_MARKETS:
+    game_markets = SHARP_GAME_MARKETS_BY_LEAGUE.get(
+        league.lower(), SHARP_GAME_MARKETS
+    )
+    for market in game_markets:
         if market in rows_by_market:
             continue
         fetched_rows[market] = await fetch_sharp_odds(league, market, sweep=sweep)
