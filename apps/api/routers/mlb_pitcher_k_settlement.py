@@ -403,6 +403,12 @@ def _innings_to_outs(value) -> int | None:
     return innings * 3 + partial
 
 
+def is_cancelled_game(game: dict) -> bool:
+    """True when MLB has terminally cancelled a game without a box score."""
+    detailed_state = str(game.get("detailedState") or "").casefold()
+    return detailed_state.startswith(("cancelled", "canceled"))
+
+
 def build_pitching_result_rows(
     game_pk: int,
     game_date: date,
@@ -482,7 +488,8 @@ def persist_pitching_results(
             except (KeyError, TypeError, ValueError):
                 continue
             is_final = game.get("abstractGameState") == "Final"
-            if is_final and game_pk not in fetched_game_pks:
+            is_cancelled = is_cancelled_game(game)
+            if is_final and game_pk not in fetched_game_pks and not is_cancelled:
                 # A final schedule state does not prove its boxscore was read.
                 # Leave the mapping pending so an absent result cannot look
                 # like a pitcher who never appeared.

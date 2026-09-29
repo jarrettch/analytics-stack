@@ -406,6 +406,78 @@ def test_final_game_with_feed_rows_marks_results_fetched_and_freezes(monkeypatch
     assert pitcher_update["filters"] == [("in", "sgo_event_id", ["SGO-1"])]
 
 
+def test_cancelled_game_without_feed_rows_marks_terminal_and_freezes(monkeypatch):
+    database = Database({
+        "mlb_sgo_event_map": [{
+            "sgo_event_id": "SGO-CANCELLED",
+            "mlb_game_pk": 801,
+        }],
+    })
+    monkeypatch.setattr(settlement.router_utils, "supabase", database)
+    schedule = [{
+        "gamePk": "801",
+        "abstractGameState": "Final",
+        "detailedState": "Cancelled: Rain",
+    }]
+
+    stats = persist_pitching_results([], schedule, CAPTURED_AT)
+
+    assert stats.succeeded is True
+    assert stats.final_games == 1
+    assert stats.frozen_events == 1
+    event_update = database.updates["mlb_sgo_event_map"][0]
+    assert event_update["values"]["mlb_detailed_state"] == "Cancelled: Rain"
+    assert "results_fetched_at" not in event_update["values"]
+
+
+def test_cancelled_game_does_not_fail_settlement_projection(monkeypatch):
+    schedule = [{
+        "gamePk": "823490",
+        "abstractGameState": "Final",
+        "detailedState": "Cancelled: Rain",
+    }]
+    feed_calls = []
+
+    async def fake_schedule(*_args, **_kwargs):
+        return schedule
+
+    async def fake_feed(game_pk):
+        feed_calls.append(game_pk)
+        return None
+
+    monkeypatch.setattr(mlb, "get_schedule", fake_schedule)
+    monkeypatch.setattr(mlb, "get_mlb_game_feed", fake_feed)
+    monkeypatch.setattr(mlb, "load_snapshot_identity_sources", lambda _date: [])
+    monkeypatch.setattr(
+        mlb,
+        "reconcile_pitcher_k_identities",
+        lambda *_args: type("IdentityStats", (), {
+            "events_found": 0,
+            "events_resolved": 0,
+            "pitchers_found": 0,
+            "pitchers_resolved": 0,
+            "succeeded": True,
+        })(),
+    )
+    monkeypatch.setattr(
+        mlb,
+        "persist_pitching_results",
+        lambda *_args: type("ResultStats", (), {
+            "result_rows": 0,
+            "succeeded": True,
+            "frozen_events": 1,
+        })(),
+    )
+    monkeypatch.setattr(mlb, "load_settlement_status_counts", lambda _date: {})
+
+    result = asyncio.run(mlb._settle_pitcher_k_date(date(2026, 9, 27)))
+
+    assert feed_calls == []
+    assert result["cancelled_games"] == 1
+    assert result["projection_failures"] == []
+    assert result["success"] is True
+
+
 def test_status_counts_surface_policy_backlog(monkeypatch):
     database = Database({
         "mlb_pitcher_k_settlement_status_counts": [{

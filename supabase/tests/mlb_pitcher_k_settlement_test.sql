@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(7);
+select plan(9);
 
 insert into public.mlb_sgo_event_map (
     sgo_event_id,
@@ -23,6 +23,8 @@ insert into public.mlb_sgo_event_map (
      null, '2026-08-18T05:00:00Z'),
     ('TEST-DATA', 990004, '2026-08-17', 'resolved', 'Final', 'Final',
      '2026-08-18T05:00:00Z', '2026-08-18T05:00:00Z'),
+    ('TEST-CANCELLED', 990005, '2026-08-17', 'resolved', 'Final',
+     'Cancelled: Rain', null, '2026-08-18T05:00:00Z'),
     ('TEST-UNRESOLVED', null, '2026-08-17', 'unresolved', null, null,
      null, '2026-08-18T05:00:00Z');
 
@@ -93,7 +95,10 @@ insert into public.mlb_pitcher_k_odds (
      'test-data', 'under', 'book1', false, 'pregame', 5.5, -110),
     ('00000000-0000-0000-0000-000000000005', '2026-08-17T18:00:00Z',
      '2026-08-17', 'TEST-UNRESOLVED', '2026-08-17T23:00:00Z', 'TEST-P5',
-     'test-unresolved', 'over', 'book1', false, 'pregame', 5.5, -110);
+     'test-unresolved', 'over', 'book1', false, 'pregame', 5.5, -110),
+    ('00000000-0000-0000-0000-000000000006', '2026-08-17T18:00:00Z',
+     '2026-08-17', 'TEST-CANCELLED', '2026-08-17T23:00:00Z', 'TEST-P6',
+     'test-cancelled', 'over', 'book1', false, 'pregame', 5.5, -110);
 
 select results_eq(
     $$
@@ -153,6 +158,20 @@ select is(
        and settlement_status = 'unresolved_identity'),
     1,
     'unresolved events count as games even without an MLB gamePk'
+);
+
+select is(
+    (select settlement_status from public.mlb_pitcher_k_settlements
+     where sgo_event_id = 'TEST-CANCELLED'),
+    'void',
+    'a terminally cancelled game voids its observed markets'
+);
+
+select is(
+    (select void_reason from public.mlb_pitcher_k_settlements
+     where sgo_event_id = 'TEST-CANCELLED'),
+    'game_cancelled',
+    'a cancelled game records the cancellation reason'
 );
 
 select * from finish();

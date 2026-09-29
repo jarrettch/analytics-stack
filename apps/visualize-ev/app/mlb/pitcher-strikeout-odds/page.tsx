@@ -494,6 +494,7 @@ function AlternatesTable({ books }: { books: BookView[] }) {
 
 function settlementStatusLabel(row: SettlementRow) {
   if (row.grade) return row.grade;
+  if (row.voidReason === "game_cancelled") return "void · game cancelled";
   if (row.voidReason === "did_not_start") return "void · did not start";
   if (row.voidReason === "did_not_appear") return "void · did not appear";
   if (row.settlementStatus === "unresolved_identity") return "identity pending";
@@ -509,6 +510,7 @@ function gradeColor(grade: SettlementRow["grade"]) {
 }
 
 function startStatusLabel(start: SettlementStart) {
+  if (start.voidReason === "game_cancelled") return "void · game cancelled";
   if (start.voidReason === "did_not_start") return "void · did not start";
   if (start.voidReason === "did_not_appear") return "void · did not appear";
   if (start.settlementStatus === "unresolved_identity")

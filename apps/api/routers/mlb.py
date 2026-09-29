@@ -34,6 +34,7 @@ from .mlb_pitcher_k_odds import (
 from .mlb_pitcher_k_settlement import (
     build_pitching_result_rows,
     identity_sources_from_sgo_events,
+    is_cancelled_game,
     load_snapshot_identity_sources,
     load_settlement_status_counts,
     load_stale_settlement_counts,
@@ -622,13 +623,15 @@ async def _settle_pitcher_k_date(target: date) -> dict:
     final_games = [
         game for game in schedule if game.get("abstractGameState") == "Final"
     ]
+    cancelled_games = [game for game in final_games if is_cancelled_game(game)]
+    result_games = [game for game in final_games if not is_cancelled_game(game)]
     feeds = await asyncio.gather(
-        *(get_mlb_game_feed(int(game["gamePk"])) for game in final_games)
+        *(get_mlb_game_feed(int(game["gamePk"])) for game in result_games)
     )
     result_rows = []
     feed_failures = []
     projection_failures = []
-    for game, feed in zip(final_games, feeds):
+    for game, feed in zip(result_games, feeds):
         game_pk = int(game["gamePk"])
         if feed is None:
             feed_failures.append(game_pk)
@@ -649,6 +652,7 @@ async def _settle_pitcher_k_date(target: date) -> dict:
         "date": target.isoformat(),
         "scheduled_games": len(schedule),
         "final_games": len(final_games),
+        "cancelled_games": len(cancelled_games),
         "feed_failures": feed_failures,
         "projection_failures": projection_failures,
         "result_rows": result_stats.result_rows,
