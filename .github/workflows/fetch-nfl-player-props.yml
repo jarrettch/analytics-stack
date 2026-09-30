@@ -34,28 +34,35 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in {1..6}; do
+            echo "Render warm-up attempt ${attempt}/6. Collection has not started; each health check allows 20 seconds."
             if curl --fail --silent --show-error --max-time 20 "$API_URL/health" >/dev/null; then
+              echo "Render is ready."
               break
             fi
             if [ "$attempt" -eq 6 ]; then
-              echo "Server did not become ready" >&2
+              echo "::error::Render did not become ready after six attempts; no collection was requested."
               exit 1
             fi
+            echo "Warm-up check failed or timed out; retrying in 15 seconds."
             sleep 15
           done
 
           # The server limits each sweep to eight minutes, within the ten-minute
           # kickoff guard. Replays reuse the run id, including workflow reruns.
-          response=$(curl \
+          echo "Starting NFL props collection. This request allows up to 10 minutes."
+          if ! response=$(curl \
             --retry 2 --retry-delay 15 --retry-max-time 1200 \
             --silent --show-error --fail-with-body --max-time 600 \
             --request POST \
             --header "Authorization: Bearer ${CRON_SECRET}" \
-            "$API_URL/api/nfl/cron/fetch-player-props?collection_key=${COLLECTION_KEY}&window_at=${WINDOW_AT}")
+            "$API_URL/api/nfl/cron/fetch-player-props?collection_key=${COLLECTION_KEY}&window_at=${WINDOW_AT}"); then
+            echo "::error::The collection request failed. Verify database results before retrying; its outcome may be unknown."
+            exit 1
+          fi
           printf 'NFL props response: %s\n' "$response"
 
           # Collector failures use HTTP 200. Missing fields must also fail closed.
-          jq -e '
+          if ! jq -e '
             .success == true and
             .schedule_ok == true and
             .sweep_complete == true and
@@ -63,4 +70,19 @@ jobs:
             .markets_completed == .markets_requested and
             .unmapped_teams == [] and
             .rows_rejected == 0
-          ' <<<"$response" >/dev/null
+          ' <<<"$response" >/dev/null; then
+            echo "::error::NFL props collection reported a failure; see the response above."
+            exit 1
+          fi
+
+          summary=$(jq -r '
+            if .games_selected == 0 then
+              "No eligible games after the API schedule recheck; no collection was needed."
+            else
+              "NFL props collection succeeded: \(.rows_inserted) rows inserted, \(.rows_deduplicated) duplicates, \(.rows_skipped) incidental rows skipped; \(.markets_completed) markets completed, \(.games_selected) games selected, \(.games_persisted) games archived."
+            end
+          ' <<<"$response")
+          printf '%s\n' "$summary"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            printf '%s\n' "$summary" >> "$GITHUB_STEP_SUMMARY"
+          fi

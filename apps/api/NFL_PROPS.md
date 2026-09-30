@@ -9,12 +9,24 @@ The API server needs `SHARP_API_KEY`, `SUPABASE_URL`, the service-role
 key. These credentials stay on the API server. GitHub's `production` environment
 needs the existing `API_URL` and `CRON_SECRET` secrets.
 
-The `Fetch NFL Player Props` workflow polls ESPN on the GitHub runner at minutes
-7 and 37 every hour, using a standard-library Python script with no API-server
+The `Fetch NFL Player Props` workflow is configured to poll ESPN on the GitHub
+runner at minutes 7 and 37 every hour, using a standard-library Python script with no API-server
 dependencies. It wakes Render only when a game kicks off between 10 and 90 minutes
 after the gate starts. Empty windows never call Render, including `/health`.
 Failed or malformed ESPN responses fail the Action without waking Render.
 The gate checks both ET dates when the window crosses midnight.
+
+GitHub's scheduled trigger has not delivered that cadence reliably. On September
+24, the actual runs at 6:18 p.m. and 8:45 p.m. ET missed the 6:45–8:05 p.m.
+eligibility window for the 8:15 p.m. game. A successful skipped run does not
+prove a close was captured. Reliable automatic capture still needs a replacement
+scheduler; until then, manually dispatch within the window and confirm inserts.
+
+A 20-second `/health` timeout is a failed warm-up attempt, not a collection
+failure. The workflow retries warm-up up to six times before requesting props.
+Read the final collection response and job summary to determine whether rows
+were saved. A collection request timeout can have an unknown database outcome;
+verify the collection before retrying.
 
 The API repeats the schedule check using the gate's timestamp. `schedule_ok`
 must be true before an empty window is treated as a successful no-op. If server

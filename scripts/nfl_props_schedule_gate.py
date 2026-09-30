@@ -63,7 +63,10 @@ def write_gate(output: Path, now: datetime, fetch=fetch_scoreboard) -> int:
     with output.open("a") as stream:
         stream.write(f"eligible={'true' if count else 'false'}\n")
         stream.write(f"window_at={now.astimezone(timezone.utc):%Y-%m-%dT%H:%M:%SZ}\n")
-    print(f"ESPN gate: {count} qualifying NFL games")
+    earliest = (now + timedelta(minutes=10)).astimezone(ET)
+    latest = (now + timedelta(minutes=90)).astimezone(ET)
+    print(f"ESPN gate: {count} qualifying NFL games; checked {now.astimezone(ET).isoformat()}; "
+          f"kickoff window {earliest.isoformat()} through {latest.isoformat()}")
     return count
 
 
