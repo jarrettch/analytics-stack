@@ -444,7 +444,10 @@ def get_tricode_from_sgo_team_id(team_id: str) -> str:
 
 
 def get_tricode_from_team_name(team_name: str) -> str:
-    return get_tricode_from_sgo_team_id("_".join((team_name or "").split()))
+    key = " ".join((team_name or "").split())
+    return get_tricode_from_sgo_team_id("_".join(key.split())) or {
+        "PHO Suns": "PHX",
+    }.get(key, "")
 
 async def get_odds_map(
     target_date: date | None = None,

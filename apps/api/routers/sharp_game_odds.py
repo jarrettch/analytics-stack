@@ -47,6 +47,19 @@ def _unique_value(rows: list[dict], side: str, field: str):
     return values.pop() if len(values) == 1 else None
 
 
+def _team_tricode(row: dict, side: str, tricode_for: Callable[[str], str]):
+    """Prefer the canonical nested team name over the book's display string.
+
+    ``home_team``/``away_team`` carry shortened names such as "LA Kings" or
+    "PHO Suns"; the nested ``home``/``away`` objects carry the full names.
+    """
+    team = row.get(side)
+    name = team.get("name") if isinstance(team, dict) else None
+    return (name and tricode_for(str(name))) or tricode_for(
+        str(row.get(f"{side}_team") or "")
+    )
+
+
 def _book_values(markets: dict[str, list[dict]]) -> dict:
     moneyline = markets.get("moneyline", [])
     spread = (
@@ -148,8 +161,8 @@ async def fetch_sharp_game_odds(
             if game_date != target_date:
                 continue
 
-            home_tri = tricode_for(str(row.get("home_team") or ""))
-            away_tri = tricode_for(str(row.get("away_team") or ""))
+            home_tri = _team_tricode(row, "home", tricode_for)
+            away_tri = _team_tricode(row, "away", tricode_for)
             book = row.get("sportsbook")
             if not home_tri or not away_tri or home_tri == away_tri:
                 logger.warning(

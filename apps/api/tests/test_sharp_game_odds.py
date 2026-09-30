@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from routers import sharp_game_odds
+from routers.nba import get_tricode_from_team_name as nba_tricode
 from routers.nhl import get_tricode_from_team_name as nhl_tricode
 from routers.utils import ET, fetch_sgo_odds
 
@@ -44,6 +45,76 @@ class SharpGameOddsTest(unittest.IsolatedAsyncioTestCase):
     def test_nhl_sharp_team_aliases(self):
         self.assertEqual(nhl_tricode("MTL Canadiens"), "MTL")
         self.assertEqual(nhl_tricode("Montreal Canadiens"), "MTL")
+        self.assertEqual(nhl_tricode("LA Kings"), "LAK")
+
+    def test_nba_sharp_team_aliases(self):
+        self.assertEqual(nba_tricode("PHO Suns"), "PHX")
+        self.assertEqual(nba_tricode("Phoenix Suns"), "PHX")
+        self.assertEqual(nba_tricode("LA Clippers"), "LAC")
+
+    async def test_prefers_canonical_team_name_over_display_name(self):
+        # "LV Knights" has no alias; only the nested canonical name maps.
+        teams = {
+            "league": "nhl",
+            "home": "Colorado Avalanche",
+            "away": "LV Knights",
+        }
+        rows = {
+            "moneyline": [
+                row("moneyline", "away", 160, **teams),
+                row("moneyline", "home", -192, **teams),
+            ],
+            "puck_line": [
+                row("puck_line", "away", 1.5, **teams),
+                row("puck_line", "home", -1.5, **teams),
+            ],
+            "total_goals": [
+                row("total_goals", "over", 6.5, **teams),
+                row("total_goals", "under", 6.5, **teams),
+            ],
+        }
+        for market_rows in rows.values():
+            for item in market_rows:
+                item["home"] = {"name": "Colorado Avalanche", "abbreviation": "COL"}
+                item["away"] = {"name": "Vegas Golden Knights", "abbreviation": "VGK"}
+
+        async def fetch(league, market, *, sweep):
+            return rows[market]
+
+        with (
+            patch.object(sharp_game_odds, "fetch_sharp_odds", side_effect=fetch),
+            patch.object(sharp_game_odds, "save_persisted_odds"),
+            patch.object(sharp_game_odds, "save_odds_snapshots"),
+        ):
+            odds, fresh = await sharp_game_odds.fetch_sharp_game_odds(
+                sport="nhl",
+                league="nhl",
+                table_name="nhl_odds",
+                tricode_for=nhl_tricode,
+                target_date=date(2099, 1, 14),
+                persisted_odds={},
+            )
+
+        self.assertEqual(fresh, 1)
+        game = odds[("2099-01-14", "VGK@COL")]
+        self.assertEqual(game["awayMoneyline"], 160)
+        self.assertEqual(game["overUnder"], 6.5)
+
+    def test_team_name_falls_back_to_display_name(self):
+        self.assertEqual(
+            sharp_game_odds._team_tricode(
+                {"away_team": "LA Kings", "away": {"name": "Unknown Team"}},
+                "away",
+                nhl_tricode,
+            ),
+            "LAK",
+        )
+        self.assertEqual(
+            sharp_game_odds._team_tricode(
+                {"home_team": "PHO Suns"}, "home", nba_tricode
+            ),
+            "PHX",
+        )
 
     async def test_normalizes_one_book_without_mixing_lines(self):
         rows = {
