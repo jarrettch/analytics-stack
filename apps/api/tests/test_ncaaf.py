@@ -189,6 +189,7 @@ def _run_today(scoreboard: dict, persisted: dict, standings: dict | None = None)
         patch.object(ncaaf, "fetch_espn_scoreboard", AsyncMock(return_value=scoreboard)) as fetch,
         patch.object(ncaaf, "load_persisted_odds", return_value=persisted),
         patch.object(ncaaf, "_standings_for_season", AsyncMock(return_value=standings or {})),
+        patch.object(espn_odds, "datetime", _frozen_at(PREGAME)),
     ):
         return asyncio.run(ncaaf.get_todays_games()), fetch
 

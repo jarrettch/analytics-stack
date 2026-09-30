@@ -100,6 +100,12 @@ def test_collects_both_sides_and_copies_identity_stats(monkeypatch):
         stats.succeeded = True
         return stats
 
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return CAPTURED_AT if tz is None else CAPTURED_AT.astimezone(tz)
+
+    monkeypatch.setattr(sharp, "datetime", Frozen)
     monkeypatch.setattr(sharp, "fetch_sharp_odds", fetch)
     monkeypatch.setattr(sharp, "persist_pitcher_k_rows", persist)
     monkeypatch.setattr(
