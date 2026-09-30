@@ -163,6 +163,60 @@ class SharpGameOddsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(game["overOdds"], -110)
         self.assertEqual(game["underOdds"], -110)
 
+    async def test_mlb_uses_baseball_market_names(self):
+        mlb_row = {
+            "league": "mlb",
+            "home": "Atlanta Braves",
+            "away": "Philadelphia Phillies",
+        }
+        rows = {
+            "moneyline": [
+                row("moneyline", "away", -117, **mlb_row),
+                row("moneyline", "home", -102, **mlb_row),
+            ],
+            "run_line": [
+                row("run_line", "away", -1.5, **mlb_row),
+                row("run_line", "home", 1.5, **mlb_row),
+            ],
+            "total_runs": [
+                row("total_runs", "over", 7.5, **mlb_row),
+                row("total_runs", "under", 7.5, **mlb_row),
+            ],
+        }
+        requested_markets = []
+
+        async def fetch(league, market, *, sweep):
+            requested_markets.append(market)
+            return rows[market]
+
+        with (
+            patch.object(sharp_game_odds, "fetch_sharp_odds", side_effect=fetch),
+            patch.object(sharp_game_odds, "save_persisted_odds"),
+            patch.object(sharp_game_odds, "save_odds_snapshots"),
+        ):
+            odds, fresh = await sharp_game_odds.fetch_sharp_game_odds(
+                sport="mlb",
+                league="mlb",
+                table_name="mlb_odds",
+                tricode_for={
+                    "Atlanta Braves": "ATL",
+                    "Philadelphia Phillies": "PHI",
+                }.get,
+                target_date=date(2099, 1, 14),
+                persisted_odds={},
+            )
+
+        self.assertEqual(
+            requested_markets,
+            ["moneyline", "run_line", "total_runs"],
+        )
+        self.assertEqual(fresh, 1)
+        game = odds[("2099-01-14", "PHI@ATL")]
+        self.assertEqual(game["awaySpread"], -1.5)
+        self.assertEqual(game["overUnder"], 7.5)
+        self.assertEqual(game["overOdds"], -110)
+        self.assertEqual(game["underOdds"], -110)
+
     async def test_sgo_http_failure_uses_sharp_fallback(self):
         response = httpx.Response(
             429,

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 SHARP_GAME_MARKETS = ("moneyline", "point_spread", "total_points")
 SHARP_GAME_MARKETS_BY_LEAGUE = {
+    "mlb": ("moneyline", "run_line", "total_runs"),
     "nhl": ("moneyline", "puck_line", "total_goals"),
 }
 SHARP_GAME_BOOKS = ("draftkings", "fanduel")
@@ -48,8 +49,16 @@ def _unique_value(rows: list[dict], side: str, field: str):
 
 def _book_values(markets: dict[str, list[dict]]) -> dict:
     moneyline = markets.get("moneyline", [])
-    spread = markets.get("point_spread") or markets.get("puck_line", [])
-    total = markets.get("total_points") or markets.get("total_goals", [])
+    spread = (
+        markets.get("point_spread")
+        or markets.get("run_line")
+        or markets.get("puck_line", [])
+    )
+    total = (
+        markets.get("total_points")
+        or markets.get("total_runs")
+        or markets.get("total_goals", [])
+    )
 
     over_line = _unique_value(total, "over", "line")
     under_line = _unique_value(total, "under", "line")
