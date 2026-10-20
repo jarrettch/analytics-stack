@@ -591,13 +591,14 @@ async def get_todays_games():
         advanced_stats_map = cache.get("advanced_stats") or cache.get_stale("advanced_stats") or {}
         odds_map = cache.get("odds") or cache.get_stale("odds") or {}
 
-        if not sb:
-            logger.error("No scoreboard data available")
-            return cache.get_stale("assembled") or []
-
         today_et = slate_date_et()
-        data = sb.get_dict()
-        games = data.get('scoreboard', {}).get('games', [])
+        if sb:
+            games = sb.get_dict().get('scoreboard', {}).get('games', [])
+        else:
+            # cdn.nba.com 403s every request (nba_api issue #678). Fall through to
+            # the ESPN lookahead rather than returning early, or the slate is empty.
+            logger.warning("NBA CDN scoreboard unavailable, falling back to ESPN")
+            games = []
         slate_date = today_et
         if not games:
             games, next_game_date = get_next_nba_schedule_games(today_et)
@@ -605,6 +606,10 @@ async def get_todays_games():
                 slate_date = next_game_date
                 if next_game_date > today_et + timedelta(days=1):
                     odds_map.update(load_persisted_odds(next_game_date, table_name="nba_odds"))
+
+        if not sb and not games:
+            logger.error("No scoreboard data available from NBA CDN or ESPN")
+            return cache.get_stale("assembled") or []
 
         logger.info(f"Processing {len(games)} games (standings: {len(standings_map)}, advanced: {len(advanced_stats_map)}, odds: {len(odds_map)})")
 

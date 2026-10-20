@@ -309,6 +309,30 @@ class NextSlateTest(unittest.TestCase):
     def test_empty_window_returns_no_date(self):
         self.assertEqual(self._slate([]), ([], None))
 
+    def test_requests_single_days_and_stops_after_the_first_slate(self):
+        """ESPN 400s on date ranges, so each request names one day. The day
+        after the slate is fetched too, to catch post-midnight tips."""
+        requested = []
+
+        def fake_get(_url, params=None):
+            requested.append(params["dates"])
+            if params["dates"] == "20260402":
+                return {"events": [_event("g", "2026-04-02T23:00Z", "BOS", "NY")]}
+            return {"events": []}
+
+        espn_feeds._get = fake_get  # type: ignore[assignment]
+        games, slate_date = espn_feeds.fetch_next_slate(
+            sport="nba",
+            start_date=date(2026, 4, 1),
+            lookahead_days=14,
+            canonical_tricode=nba_tricode,
+            timezone=ET,
+        )
+
+        self.assertEqual(slate_date, date(2026, 4, 2))
+        self.assertEqual([g["gameId"] for g in games], ["g"])
+        self.assertEqual(requested, ["20260401", "20260402", "20260403"])
+
     def test_ignores_games_beyond_the_lookahead_window(self):
         games, slate_date = self._slate(
             [_event("far", "2026-05-30T23:00Z", "BOS", "NY")], lookahead_days=14
