@@ -242,6 +242,14 @@ def _keys_for(
     return keys
 
 
+SUMMARY_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/{sport}/summary"
+
+
+def fetch_summary(sport: str, event_id: str) -> dict:
+    """One game's header linescores, box score, plays and win probability."""
+    return _get(SUMMARY_URL.format(sport=sport), {"event": event_id})
+
+
 SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/{sport}/scoreboard"
 # ESPN caps page size; a single day's slate is well under this.
 SCOREBOARD_LIMIT = 400

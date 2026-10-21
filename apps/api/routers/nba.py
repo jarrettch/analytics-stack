@@ -6,7 +6,7 @@ import math
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from nba_api.live.nba.endpoints import boxscore, playbyplay, scoreboard
+from nba_api.live.nba.endpoints import scoreboard
 
 from . import espn_feeds
 from .auth import CronOffset, require_cron_auth
@@ -111,7 +111,11 @@ def _parse_clock_seconds(game_clock: str) -> float:
     if ":" in game_clock:
         minutes, seconds = game_clock.split(":", 1)
         return float(minutes or 0) * 60 + float(seconds or 0)
-    return 0
+    # ESPN drops the minutes under one minute left: "45.3".
+    try:
+        return float(game_clock)
+    except ValueError:
+        return 0
 
 
 def _total_time_remaining(period: int, game_clock: str) -> float:
@@ -220,19 +224,33 @@ def _nba_play_description(action: dict) -> str:
     return "Game event"
 
 
-def _nba_pbp(actions: list[dict], matchup: dict) -> tuple[list[dict], list[dict]]:
+def _nba_pbp(
+    actions: list[dict], matchup: dict, home_prob_by_action: dict[str, float] | None = None
+) -> tuple[list[dict], list[dict]]:
+    """Plays and the win-probability series.
+
+    With home_prob_by_action (ESPN's per-play probabilities), those are used,
+    carrying the last one forward over any play without a point. The local
+    model is the fallback for games ESPN publishes no probabilities for.
+    """
     pregame_spread = matchup.get("pregameSpread") or 0
     pace = ((matchup.get("away") or {}).get("pace", 100) + (matchup.get("home") or {}).get("pace", 100)) / 2
     plays = []
     win_probability = []
     last_score = None
+    last_published_prob = None
 
     for index, action in enumerate(actions):
         period = int(_num(action.get("period"), 0))
         clock = str(action.get("clock") or "")
         away_score = int(_num(action.get("scoreAway")))
         home_score = int(_num(action.get("scoreHome")))
-        home_prob = _nba_win_prob(home_score, away_score, period, clock, pregame_spread, pace)
+        if home_prob_by_action:
+            last_published_prob = home_prob_by_action.get(str(action.get("actionNumber")), last_published_prob)
+        if last_published_prob is not None:
+            home_prob = last_published_prob
+        else:
+            home_prob = _nba_win_prob(home_score, away_score, period, clock, pregame_spread, pace)
         away_prob = 1 - home_prob
         elapsed = 2880 - _total_time_remaining(period, clock) if period <= 4 else 2880
         x = min(100, max(0, elapsed / 2880 * 100))
@@ -264,6 +282,89 @@ def _nba_pbp(actions: list[dict], matchup: dict) -> tuple[list[dict], list[dict]
             last_score = score_key
 
     return plays, win_probability
+
+
+# Game detail comes from ESPN's summary, adapted into the nba_api live shapes the
+# helpers above read. cdn.nba.com 403s every request (nba_api issue #678), and
+# the slate already carries ESPN event ids.
+
+def _espn_made_attempted(value) -> tuple[int, int]:
+    made, _, attempted = str(value or "").partition("-")
+    return int(_num(made)), int(_num(attempted))
+
+
+def _espn_linescore(competitor: dict) -> dict:
+    return _nba_linescore({
+        "periods": [{"score": p.get("displayValue")} for p in competitor.get("linescores") or []],
+        "score": competitor.get("score"),
+    })
+
+
+def _espn_box_team(player_box: dict) -> dict:
+    """One boxscore.players entry as an nba_api box score team. DNPs carry no stats and are dropped."""
+    players = []
+    for group in player_box.get("statistics") or []:
+        keys = group.get("keys") or []
+        for row in group.get("athletes") or []:
+            if row.get("didNotPlay") or not row.get("stats"):
+                continue
+            stats = dict(zip(keys, row["stats"]))
+            athlete = row.get("athlete") or {}
+            fgm, fga = _espn_made_attempted(stats.get("fieldGoalsMade-fieldGoalsAttempted"))
+            tpm, tpa = _espn_made_attempted(stats.get("threePointFieldGoalsMade-threePointFieldGoalsAttempted"))
+            ftm, fta = _espn_made_attempted(stats.get("freeThrowsMade-freeThrowsAttempted"))
+            players.append({
+                "name": athlete.get("displayName") or "Unknown",
+                "position": (athlete.get("position") or {}).get("abbreviation") or "",
+                "statistics": {
+                    "minutes": stats.get("minutes") or "0",
+                    "points": stats.get("points"),
+                    "reboundsTotal": stats.get("rebounds"),
+                    "assists": stats.get("assists"),
+                    "steals": stats.get("steals"),
+                    "blocks": stats.get("blocks"),
+                    "turnovers": stats.get("turnovers"),
+                    "foulsPersonal": stats.get("fouls"),
+                    "fieldGoalsMade": fgm,
+                    "fieldGoalsAttempted": fga,
+                    "threePointersMade": tpm,
+                    "threePointersAttempted": tpa,
+                    "freeThrowsMade": ftm,
+                    "freeThrowsAttempted": fta,
+                    "plusMinusPoints": stats.get("plusMinus"),
+                },
+            })
+    return {"players": players}
+
+
+def _espn_home_prob_by_play(points: list[dict]) -> dict[str, float]:
+    """ESPN's winprobability points keyed by playId, dropping malformed values."""
+    probs = {}
+    for point in points:
+        try:
+            home_prob = float(point["homeWinPercentage"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if point.get("playId") and 0 <= home_prob <= 1:
+            probs[str(point["playId"])] = home_prob
+    return probs
+
+
+def _espn_actions(plays: list[dict], tricode_by_team_id: dict[str, str]) -> list[dict]:
+    return [
+        {
+            "actionNumber": play.get("id") or play.get("sequenceNumber"),
+            "period": (play.get("period") or {}).get("number"),
+            "clock": (play.get("clock") or {}).get("displayValue") or "",
+            "scoreAway": play.get("awayScore"),
+            "scoreHome": play.get("homeScore"),
+            "teamTricode": tricode_by_team_id.get(str((play.get("team") or {}).get("id"))),
+            "description": play.get("text"),
+            "actionType": (play.get("type") or {}).get("text"),
+            "timeActual": play.get("wallclock"),
+        }
+        for play in plays
+    ]
 
 # Get the standings map
 # ESPN's scoreboard/stats abbreviations are not NBA tricodes. Anything missing
@@ -842,26 +943,43 @@ async def get_game_detail(game_id: str):
     win_probability = []
 
     loop = asyncio.get_event_loop()
-    box_task = loop.run_in_executor(None, lambda: boxscore.BoxScore(game_id, headers=NBA_LIVE_HEADERS, timeout=10).get_dict())
-    pbp_task = loop.run_in_executor(None, lambda: playbyplay.PlayByPlay(game_id, headers=NBA_LIVE_HEADERS, timeout=10).get_dict())
-    box_result, pbp_result = await asyncio.gather(box_task, pbp_task, return_exceptions=True)
+    try:
+        summary = await loop.run_in_executor(None, lambda: espn_feeds.fetch_summary("nba", game_id))
+    except Exception as e:
+        logger.warning(f"NBA detail summary failed for {game_id}: {e}")
+        summary = {}
 
-    if not isinstance(box_result, Exception):
-        game = box_result.get("game", {})
-        away_team = game.get("awayTeam") or {}
-        home_team = game.get("homeTeam") or {}
-        away_score = _nba_linescore(away_team)
-        home_score = _nba_linescore(home_team)
-        away_box = _nba_team_box(away_team)
-        home_box = _nba_team_box(home_team)
-    else:
-        logger.warning(f"NBA detail boxscore failed for {game_id}: {box_result}")
+    competition = ((summary.get("header") or {}).get("competitions") or [{}])[0]
+    competitors = {c.get("homeAway"): c for c in competition.get("competitors") or []}
+    side_by_team_id = {
+        str((competitors[side].get("team") or {}).get("id")): side
+        for side in ("away", "home")
+        if side in competitors
+    }
+    tricode_by_team_id = {
+        team_id: (matchup.get(side) or {}).get("abbreviation")
+        for team_id, side in side_by_team_id.items()
+    }
 
-    if not isinstance(pbp_result, Exception):
-        actions = (pbp_result.get("game") or {}).get("actions") or []
-        plays, win_probability = _nba_pbp(actions, matchup)
-    else:
-        logger.warning(f"NBA detail PBP failed for {game_id}: {pbp_result}")
+    if competitors.get("away") and competitors.get("home"):
+        away_score = _espn_linescore(competitors["away"])
+        home_score = _espn_linescore(competitors["home"])
+        raw_status = ((competition.get("status") or {}).get("type") or {}).get("detail") or raw_status
+
+    for player_box in (summary.get("boxscore") or {}).get("players") or []:
+        side = side_by_team_id.get(str((player_box.get("team") or {}).get("id")))
+        team = _espn_box_team(player_box)
+        if side == "away" and team["players"]:
+            away_box = _nba_team_box(team)
+        elif side == "home" and team["players"]:
+            home_box = _nba_team_box(team)
+
+    if summary.get("plays"):
+        plays, win_probability = _nba_pbp(
+            _espn_actions(summary["plays"], tricode_by_team_id),
+            matchup,
+            _espn_home_prob_by_play(summary.get("winprobability") or []),
+        )
 
     return {
         "sport": "nba",
