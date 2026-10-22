@@ -250,6 +250,45 @@ def fetch_summary(sport: str, event_id: str) -> dict:
     return _get(SUMMARY_URL.format(sport=sport), {"event": event_id})
 
 
+def _int_or_zero(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def adapt_espn_win_probability(payload: dict) -> list[dict]:
+    """Join a summary's probability points to their play clock and score context."""
+    plays_by_id = {
+        str(play.get("id")): play
+        for play in payload.get("plays") or []
+        if play.get("id") is not None
+    }
+    history = []
+    for point in payload.get("winprobability") or []:
+        play_id = str(point.get("playId") or "")
+        play = plays_by_id.get(play_id)
+        if not play:
+            continue
+        try:
+            home_probability = float(point["homeWinPercentage"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not 0 <= home_probability <= 1:
+            continue
+
+        history.append({
+            "playId": play_id,
+            "homeWinPercentage": home_probability,
+            "period": _int_or_zero((play.get("period") or {}).get("number")),
+            "clock": (play.get("clock") or {}).get("displayValue", ""),
+            "homeScore": _int_or_zero(play.get("homeScore")),
+            "awayScore": _int_or_zero(play.get("awayScore")),
+            "timestamp": play.get("wallclock"),
+        })
+    return history
+
+
 SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/{sport}/scoreboard"
 # ESPN caps page size; a single day's slate is well under this.
 SCOREBOARD_LIMIT = 400
@@ -282,6 +321,16 @@ def _scheduled_team(competitor: dict, canonical_tricode) -> dict:
         "losses": losses,
         "score": int(score) if str(score).isdigit() else 0,
     }
+
+
+def _iso_game_clock(display_clock: str | None) -> str:
+    """ESPN's display clock ("5:45", or "45.3" under a minute) as the PT05M45.00S
+    duration the UI parses."""
+    minutes, _, seconds = (display_clock or "").rpartition(":")
+    try:
+        return f"PT{int(minutes or 0):02d}M{float(seconds):05.2f}S"
+    except ValueError:
+        return ""
 
 
 def _slate_game(event: dict, canonical_tricode, timezone) -> tuple[object, dict] | None:
@@ -325,7 +374,7 @@ def _slate_game(event: dict, canonical_tricode, timezone) -> tuple[object, dict]
             status_type.get("description") or status_type.get("detail") or ""
         ),
         "period": status.get("period") or 0,
-        "gameClock": "",
+        "gameClock": _iso_game_clock(status.get("displayClock")) if state == "in" else "",
         "awayTeam": _scheduled_team(away, canonical_tricode),
         "homeTeam": _scheduled_team(home, canonical_tricode),
         "seriesText": "",
@@ -348,8 +397,9 @@ def fetch_next_slate(
 ) -> tuple[list[dict], object]:
     """Earliest date from start_date with games, in nba_api scoreboard shape.
 
-    Replaces ScheduleLeagueV2, which lives on stats.nba.com and so never returns
-    from a datacenter IP. Since ~2026-09-30 ESPN's site scoreboard returns 400
+    This is the NBA slate: cdn.nba.com 403s nba_api's live scoreboard (nba_api
+    issue #678), and ScheduleLeagueV2 lives on stats.nba.com, which never
+    returns from a datacenter IP. Since ~2026-09-30 ESPN's site scoreboard returns 400
     for any YYYYMMDD-YYYYMMDD range (Public-ESPN-API issue #23), so days are
     fetched one at a time, deduplicated by event id, stopping at the first slate.
 

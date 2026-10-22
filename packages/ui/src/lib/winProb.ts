@@ -134,57 +134,6 @@ function storeHistory(key: string, history: WinProbSnapshot[]): WinProbSnapshot[
 }
 
 /**
- * Hydrates the full win prob history from the NBA CDN play-by-play feed.
- * Call once on component mount — rebuilds the timeline from tip-off to now.
- */
-export async function hydrateWinProbHistory(
-  gameId: string,
-  pregameSpread: number,
-  pace = 100,
-): Promise<WinProbSnapshot[]> {
-  const url = `/api/nba-cdn/playbyplay/playbyplay_${gameId}.json`
-  try {
-    const res = await fetch(url)
-    if (!res.ok) return []
-    const data = await res.json()
-    const actions: Record<string, unknown>[] = data.game?.actions ?? []
-    const history: WinProbSnapshot[] = []
-
-    // Start at -1 so the 0-0 tip-off triggers the first snapshot
-    let lastHomeScore = -1
-    let lastAwayScore = -1
-
-    for (const a of actions) {
-      const homeScore = parseInt((a.scoreHome as string) || '0', 10)
-      const awayScore = parseInt((a.scoreAway as string) || '0', 10)
-      const isPeriodMarker = a.actionType === 'period'
-
-      if (homeScore !== lastHomeScore || awayScore !== lastAwayScore || isPeriodMarker) {
-        const period = a.period as number
-        const clock = (a.clock as string) ?? ''
-        const winProb = naiveWinProb(homeScore, awayScore, period, clock, pregameSpread, pace)
-        const timeRemaining = totalTimeRemainingSeconds(period, clock)
-
-        history.push({
-          timestamp: a.timeActual ? new Date(a.timeActual as string).getTime() : Date.now(),
-          winProb,
-          scoreDiff: homeScore - awayScore,
-          timeRemaining,
-          period,
-        })
-
-        lastHomeScore = homeScore
-        lastAwayScore = awayScore
-      }
-    }
-
-    return storeHistory(gameId, history)
-  } catch {
-    return []
-  }
-}
-
-/**
  * Appends a snapshot if the game state changed — call on each poll update.
  */
 export function recordSnapshot(
@@ -296,9 +245,13 @@ export function recordMLBSnapshot(
   touchGame(key)
 }
 
-// ─── WNBA Win Probability (ESPN-sourced) ────────────────────────────────────
+// ─── NBA / WNBA Win Probability (ESPN-sourced) ──────────────────────────────
 
-interface WNBAWinProbPlay {
+export type ESPNBasketballSport = 'nba' | 'wnba'
+
+const QUARTER_SECONDS: Record<ESPNBasketballSport, number> = { nba: 720, wnba: 600 }
+
+interface ESPNWinProbPlay {
   playId: string
   homeWinPercentage: number
   period: number
@@ -308,7 +261,7 @@ interface WNBAWinProbPlay {
   timestamp: string | null
 }
 
-function wnbaClockSeconds(clock: string): number {
+function espnClockSeconds(clock: string): number {
   if (!clock) return 0
   if (!clock.includes(':')) {
     const seconds = Number.parseFloat(clock)
@@ -319,23 +272,25 @@ function wnbaClockSeconds(clock: string): number {
   return Number.isFinite(total) ? total : 0
 }
 
-function wnbaTimeRemainingSeconds(period: number, clock: string): number {
-  const clockSeconds = wnbaClockSeconds(clock)
-  if (period <= 0) return 2400
-  if (period <= 4) return (4 - period) * 600 + clockSeconds
+export function espnTimeRemainingSeconds(sport: ESPNBasketballSport, period: number, clock: string): number {
+  const quarter = QUARTER_SECONDS[sport]
+  const clockSeconds = espnClockSeconds(clock)
+  if (period <= 0) return quarter * 4
+  if (period <= 4) return (4 - period) * quarter + clockSeconds
   return clockSeconds
 }
 
-/** Fetch ESPN's source-provided WNBA probability timeline. */
-export async function hydrateWNBAWinProbHistory(
+/** Fetch ESPN's source-provided NBA or WNBA probability timeline. */
+export async function hydrateESPNWinProbHistory(
+  sport: ESPNBasketballSport,
   gameId: string,
   apiBaseUrl = '',
 ): Promise<WinProbSnapshot[]> {
   const key = String(gameId)
   try {
-    const res = await fetch(`${apiBaseUrl}/api/wnba/game/${gameId}/win-probability`)
+    const res = await fetch(`${apiBaseUrl}/api/${sport}/game/${gameId}/win-probability`)
     if (!res.ok) return []
-    const plays: WNBAWinProbPlay[] = await res.json()
+    const plays: ESPNWinProbPlay[] = await res.json()
     if (!plays.length) return []
 
     const history = plays.map((play) => {
@@ -344,7 +299,7 @@ export async function hydrateWNBAWinProbHistory(
         timestamp: Number.isFinite(parsedTimestamp) ? parsedTimestamp : Date.now(),
         winProb: play.homeWinPercentage,
         scoreDiff: play.homeScore - play.awayScore,
-        timeRemaining: wnbaTimeRemainingSeconds(play.period, play.clock),
+        timeRemaining: espnTimeRemainingSeconds(sport, play.period, play.clock),
         period: play.period,
       }
     })

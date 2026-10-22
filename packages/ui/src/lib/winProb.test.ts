@@ -6,6 +6,7 @@ import {
   recordMLBSnapshot,
   getHistory,
   capHistory,
+  espnTimeRemainingSeconds,
   type WinProbSnapshot,
 } from "./winProb"
 
@@ -108,5 +109,18 @@ describe("LRU game cap", () => {
       getHistory("final-game") // the card re-renders each poll
     }
     expect(winProbHistory.has("final-game")).toBe(true)
+  })
+})
+
+describe("espnTimeRemainingSeconds", () => {
+  it("uses 12-minute NBA quarters and 10-minute WNBA quarters", () => {
+    expect(espnTimeRemainingSeconds("nba", 0, "")).toBe(2880)
+    expect(espnTimeRemainingSeconds("wnba", 0, "")).toBe(2400)
+    expect(espnTimeRemainingSeconds("nba", 2, "5:00")).toBe(2 * 720 + 300)
+    expect(espnTimeRemainingSeconds("wnba", 2, "5:00")).toBe(2 * 600 + 300)
+  })
+
+  it("reads ESPN's sub-minute clock", () => {
+    expect(espnTimeRemainingSeconds("nba", 4, "45.3")).toBeCloseTo(45.3)
   })
 })

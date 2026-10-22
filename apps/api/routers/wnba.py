@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 
 from . import espn_feeds
+from .espn_feeds import adapt_espn_win_probability
 from .auth import CronOffset, require_cron_auth
 from .utils import (
     CACHE_TTL_DEFAULT,
@@ -210,38 +211,6 @@ def adapt_espn_scoreboard(payload: dict) -> dict:
         )
 
     return {"scoreboard": {"games": games}}
-
-
-def adapt_espn_win_probability(payload: dict) -> list[dict]:
-    """Join ESPN's probability points to their play clock and score context."""
-    plays_by_id = {
-        str(play.get("id")): play
-        for play in payload.get("plays") or []
-        if play.get("id") is not None
-    }
-    history = []
-    for point in payload.get("winprobability") or []:
-        play_id = str(point.get("playId") or "")
-        play = plays_by_id.get(play_id)
-        if not play:
-            continue
-        try:
-            home_probability = float(point["homeWinPercentage"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if not 0 <= home_probability <= 1:
-            continue
-
-        history.append({
-            "playId": play_id,
-            "homeWinPercentage": home_probability,
-            "period": _safe_int((play.get("period") or {}).get("number")),
-            "clock": (play.get("clock") or {}).get("displayValue", ""),
-            "homeScore": _safe_int(play.get("homeScore")),
-            "awayScore": _safe_int(play.get("awayScore")),
-            "timestamp": play.get("wallclock"),
-        })
-    return history
 
 
 async def fetch_wnba_scoreboard(target_date: date | None = None) -> dict:

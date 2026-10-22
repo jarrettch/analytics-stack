@@ -17,14 +17,13 @@ import {
 } from "lucide-react"
 import {
   getHistory,
-  hydrateWinProbHistory,
   hydrateMLBWinProbHistory,
-  hydrateWNBAWinProbHistory,
-  recordSnapshot,
+  hydrateESPNWinProbHistory,
   recordMLBSnapshot,
   calcCLV,
   type WinProbSnapshot,
   type BetSide,
+  type ESPNBasketballSport,
 } from "./lib/winProb"
 import type {
   MatchupData,
@@ -508,90 +507,6 @@ function WinProbSparkline({ snapshots, sport = "nba" }: { snapshots: WinProbSnap
   )
 }
 
-// ─── Live Win Prob Section ───────────────────────────────────────────────────
-
-function LiveWinProbSection({ matchup }: { matchup: NBAMatchupData }) {
-  const [chartData, setChartData] = useState<WinProbSnapshot[]>([])
-  const hydratedRef = useRef(false)
-
-  const pace = matchup.home.pace && matchup.away.pace
-    ? (matchup.home.pace + matchup.away.pace) / 2
-    : 100
-  const pregameSpread = matchup.pregameSpread ?? 0
-
-  // Hydrate full timeline from PBP on mount (runs once per gameId)
-  useEffect(() => {
-    if (hydratedRef.current) return
-    hydratedRef.current = true
-    hydrateWinProbHistory(matchup.gameId, pregameSpread, pace).then((history) => {
-      setChartData([...history])
-    })
-  }, [matchup.gameId, pace, pregameSpread])
-
-  // Append live snapshot whenever score or clock changes (driven by parent poll).
-  // Skip post-final: the scoreboard can drop period to 0 or blank the clock, and
-  // naiveWinProb then regresses toward 0.5 — bending the sparkline toward midline.
-  useEffect(() => {
-    if (matchup.gameStatus === 3) return
-    recordSnapshot(
-      matchup.gameId,
-      matchup.home.score,
-      matchup.away.score,
-      matchup.period,
-      matchup.gameClock,
-      pregameSpread,
-      pace,
-    )
-    setChartData([...getHistory(matchup.gameId)])
-  }, [matchup.gameId, matchup.home.score, matchup.away.score, matchup.period, matchup.gameClock, matchup.gameStatus, pace, pregameSpread])
-
-  const current = chartData[chartData.length - 1]
-  if (!current) {
-    return (
-      <div className="px-3 py-4 flex justify-center">
-        <span className="font-mono text-[10px] text-muted-foreground animate-pulse">Loading timeline...</span>
-      </div>
-    )
-  }
-
-  const isFinal = matchup.gameStatus === 3
-  const homeProb = isFinal
-    ? (matchup.home.score > matchup.away.score ? 1 : matchup.home.score < matchup.away.score ? 0 : 0.5)
-    : Math.min(0.98, Math.max(0.02, current.winProb))
-  const awayProb = 1 - homeProb
-
-  return (
-    <div className="px-3 py-2">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-          {isFinal ? "Win Prob" : "Live Win Prob"}
-        </span>
-        <span className="font-mono text-[10px] text-muted-foreground">Model</span>
-      </div>
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className="w-12 text-right font-mono text-xs font-semibold tabular-nums text-emerald-400">
-          {(awayProb * 100).toFixed(1)}%
-        </span>
-        <div className="flex h-2.5 flex-1 overflow-hidden rounded-sm">
-          <div className="bg-emerald-500 transition-all" style={{ width: `${awayProb * 100}%` }} />
-          <div className="bg-red-500/80 transition-all" style={{ width: `${homeProb * 100}%` }} />
-        </div>
-        <span className="w-12 font-mono text-xs font-semibold tabular-nums text-red-400">
-          {(homeProb * 100).toFixed(1)}%
-        </span>
-      </div>
-      <div className="mb-2 flex justify-between">
-        <span className="font-mono text-[10px] text-muted-foreground">{matchup.away.abbreviation}</span>
-        <span className="font-mono text-[10px] text-muted-foreground">{matchup.home.abbreviation}</span>
-      </div>
-      <WinProbSparkline snapshots={chartData} />
-      <p className="mt-1 font-mono text-[9px] text-muted-foreground/50">
-        Heuristic based on score, time, and spread — not a live market feed
-      </p>
-    </div>
-  )
-}
-
 // ─── Live MLB Win Prob Section ────────────────────────────────────────────────
 
 function LiveMLBWinProbSection({ matchup }: { matchup: MLBMatchupData }) {
@@ -665,26 +580,29 @@ function LiveMLBWinProbSection({ matchup }: { matchup: MLBMatchupData }) {
   )
 }
 
-// ─── Live WNBA Win Prob Section ───────────────────────────────────────────────
+// ─── Live NBA / WNBA Win Prob Section ─────────────────────────────────────────
 
-function LiveWNBAWinProbSection({
+function LiveESPNWinProbSection({
   matchup,
+  sport,
   apiBaseUrl,
 }: {
-  matchup: WNBAMatchupData
+  matchup: NBAMatchupData | WNBAMatchupData
+  sport: ESPNBasketballSport
   apiBaseUrl: string
 }) {
   const [chartData, setChartData] = useState<WinProbSnapshot[]>([])
 
   useEffect(() => {
     let cancelled = false
-    hydrateWNBAWinProbHistory(matchup.gameId, apiBaseUrl).then((history) => {
+    hydrateESPNWinProbHistory(sport, matchup.gameId, apiBaseUrl).then((history) => {
       if (!cancelled) setChartData([...history])
     })
     return () => {
       cancelled = true
     }
   }, [
+    sport,
     matchup.gameId,
     matchup.home.score,
     matchup.away.score,
@@ -725,7 +643,7 @@ function LiveWNBAWinProbSection({
           <span className="font-mono text-[10px] text-muted-foreground">{matchup.away.abbreviation}</span>
           <span className="font-mono text-[10px] text-muted-foreground">{matchup.home.abbreviation}</span>
         </div>
-        <WinProbSparkline snapshots={chartData} sport="wnba" />
+        <WinProbSparkline snapshots={chartData} sport={sport} />
         <p className="mt-1 font-mono text-[9px] text-muted-foreground/50">
           Live win probability via ESPN
         </p>
@@ -1130,18 +1048,11 @@ export function MatchupCard({
 
       <Separator className="bg-border" />
 
-      {/* Live win prob — NBA (heuristic) */}
-      {isLiveNBA && (
-        <>
-          <LiveWinProbSection matchup={matchup as NBAMatchupData} />
-          <Separator className="bg-border" />
-        </>
-      )}
-
-      {/* Live win prob — WNBA (ESPN-sourced) */}
-      {isLiveWNBA && (
-        <LiveWNBAWinProbSection
-          matchup={matchup as WNBAMatchupData}
+      {/* Live win prob — NBA / WNBA (ESPN-sourced) */}
+      {(isLiveNBA || isLiveWNBA) && (
+        <LiveESPNWinProbSection
+          matchup={matchup as NBAMatchupData | WNBAMatchupData}
+          sport={isLiveNBA ? "nba" : "wnba"}
           apiBaseUrl={apiBaseUrl}
         />
       )}

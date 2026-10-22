@@ -340,6 +340,31 @@ class NextSlateTest(unittest.TestCase):
 
         self.assertEqual((games, slate_date), ([], None))
 
+    def test_live_games_carry_the_clock_as_an_iso_duration(self):
+        """The slate card renders Q{period} {clock} and feeds the clock to the live
+        win-prob model; an empty clock showed a bare "Q3"."""
+        live = _event("live", "2026-04-01T23:00Z", "BOS", "NY", status="STATUS_IN_PROGRESS")
+        live["competitions"][0]["status"] = {
+            "period": 3,
+            "displayClock": "5:45",
+            "type": {"name": "STATUS_IN_PROGRESS", "state": "in"},
+        }
+        upcoming = _event("upcoming", "2026-04-01T23:30Z", "GS", "LAL")
+        upcoming["competitions"][0]["status"]["displayClock"] = "0.0"
+
+        games, _ = self._slate([live, upcoming])
+
+        by_id = {g["gameId"]: g for g in games}
+        self.assertEqual((by_id["live"]["period"], by_id["live"]["gameClock"]), (3, "PT05M45.00S"))
+        self.assertEqual(by_id["upcoming"]["gameClock"], "")
+
+    def test_iso_game_clock_reads_sub_minute_clocks(self):
+        self.assertEqual(espn_feeds._iso_game_clock("12:00"), "PT12M00.00S")
+        self.assertEqual(espn_feeds._iso_game_clock("45.3"), "PT00M45.30S")
+        self.assertEqual(espn_feeds._iso_game_clock("0.0"), "PT00M00.00S")
+        self.assertEqual(espn_feeds._iso_game_clock(""), "")
+        self.assertEqual(espn_feeds._iso_game_clock(None), "")
+
     def test_emits_the_fields_the_slate_builder_reads(self):
         games, _ = self._slate([_event("g1", "2026-04-01T23:00Z", "GS", "WSH")])
         game = games[0]

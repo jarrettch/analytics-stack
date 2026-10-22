@@ -6,8 +6,13 @@ helpers, so the risk is a field that silently maps to zero.
 """
 from __future__ import annotations
 
+import asyncio
 import unittest
 
+from fastapi import HTTPException
+
+from routers import espn_feeds
+from routers.nba import get_game_win_probability
 from routers.nba import (
     _espn_actions,
     _espn_box_team,
@@ -19,6 +24,8 @@ from routers.nba import (
     _nba_team_box,
     _parse_clock_seconds,
 )
+
+_real_fetch_summary = espn_feeds.fetch_summary
 
 BOX_KEYS = [
     "minutes", "points", "fieldGoalsMade-fieldGoalsAttempted",
@@ -267,6 +274,37 @@ class WinProbabilityTest(unittest.TestCase):
         ])
 
         self.assertEqual(probs, {"ok": 0.5})
+
+
+class WinProbabilityEndpointTest(unittest.TestCase):
+    """The slate card sparkline's feed, which replaced NBA CDN play-by-play."""
+
+    def tearDown(self):
+        espn_feeds.fetch_summary = _real_fetch_summary
+
+    def test_joins_espn_points_to_their_plays(self):
+        espn_feeds.fetch_summary = lambda sport, event_id: {  # type: ignore[assignment]
+            "plays": [{"id": "p1", "period": {"number": 2}, "clock": {"displayValue": "45.3"},
+                       "homeScore": 50, "awayScore": 48, "wallclock": "2026-10-21T23:40:00Z"}],
+            "winprobability": [{"playId": "p1", "homeWinPercentage": 0.62}],
+        }
+
+        history = asyncio.run(get_game_win_probability("401909093"))
+
+        self.assertEqual(history, [{
+            "playId": "p1", "homeWinPercentage": 0.62, "period": 2, "clock": "45.3",
+            "homeScore": 50, "awayScore": 48, "timestamp": "2026-10-21T23:40:00Z",
+        }])
+
+    def test_feed_failure_is_a_502(self):
+        def fail(sport, event_id):
+            raise RuntimeError("ESPN down")
+
+        espn_feeds.fetch_summary = fail  # type: ignore[assignment]
+
+        with self.assertRaises(HTTPException) as raised:
+            asyncio.run(get_game_win_probability("401909093"))
+        self.assertEqual(raised.exception.status_code, 502)
 
 
 if __name__ == "__main__":

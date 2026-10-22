@@ -6,7 +6,6 @@ import math
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from nba_api.live.nba.endpoints import scoreboard
 
 from . import espn_feeds
 from .auth import CronOffset, require_cron_auth
@@ -24,21 +23,6 @@ from .utils import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# NBA's CDN (Akamai) 403s requests without a www.nba.com Referer, regardless of
-# User-Agent. nba_api's bundled headers don't set one, so override them here.
-NBA_LIVE_HEADERS = {
-    "Accept": "*/*",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Host": "cdn.nba.com",
-    "Origin": "https://www.nba.com",
-    "Referer": "https://www.nba.com/",
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    ),
-}
 
 router = APIRouter(prefix="/api/nba", tags=["NBA"])
 
@@ -529,24 +513,20 @@ def get_arena_map():
     }
 
 
-def get_next_nba_schedule_games(start_date: date, lookahead_days: int = NBA_LOOKAHEAD_DAYS) -> tuple[list[dict], date | None]:
-    """Find the next NBA date with games, from ESPN.
+def get_nba_slate(start_date: date, lookahead_days: int = NBA_LOOKAHEAD_DAYS) -> tuple[list[dict], date | None]:
+    """The next NBA date with games and its games, from ESPN.
 
-    Replaces ScheduleLeagueV2: it lives on stats.nba.com, which tarpits
-    datacenter IPs, so from Render the lookahead never returned and an empty
-    slate stayed empty instead of rolling forward.
+    ESPN is the only slate source: cdn.nba.com 403s nba_api's live scoreboard
+    (nba_api issue #678), and stats.nba.com tarpits datacenter IPs. Raises on
+    failure so /today keeps the last good slate rather than caching an empty one.
     """
-    try:
-        return espn_feeds.fetch_next_slate(
-            sport="nba",
-            start_date=start_date,
-            lookahead_days=lookahead_days,
-            canonical_tricode=_canonical_tricode,
-            timezone=ET,
-        )
-    except Exception as e:
-        logger.warning(f"NBA schedule lookahead failed: {e}", exc_info=True)
-    return [], None
+    return espn_feeds.fetch_next_slate(
+        sport="nba",
+        start_date=start_date,
+        lookahead_days=lookahead_days,
+        canonical_tricode=_canonical_tricode,
+        timezone=ET,
+    )
 
 
 def get_tricode_from_sgo_team_id(team_id: str) -> str:
@@ -674,26 +654,24 @@ async def cron_fetch_odds(offset: CronOffset = 0):
 
 @router.get("/debug/scoreboard")
 def debug_scoreboard():
-    """See what data the scoreboard actually provides"""
+    """See what the ESPN slate provides"""
     try:
-        sb = scoreboard.ScoreBoard(headers=NBA_LIVE_HEADERS)
-        data = sb.get_dict()
-        games = data.get('scoreboard', {}).get('games', [])
+        games, slate_date = get_nba_slate(slate_date_et())
 
         if games:
             # Return first game's full structure
             first_game = games[0]
             return {
                 "success": True,
+                "slate_date": slate_date.isoformat(),
                 "game_count": len(games),
                 "first_game_keys": list(first_game.keys()),
                 "first_game_id": first_game.get('gameId'),
                 "game_ids": [g.get('gameId') for g in games],
                 "away_team_data": first_game.get('awayTeam', {}),
                 "home_team_data": first_game.get('homeTeam', {}),
-                "pbOdds": first_game.get('pbOdds', {})  # Check if odds are in scoreboard
             }
-        return {"success": True, "message": "No games today"}
+        return {"success": True, "message": f"No games within {NBA_LOOKAHEAD_DAYS} days"}
     except Exception as e:
         return {
             "success": False,
@@ -711,8 +689,9 @@ async def get_todays_games():
     try:
         loop = asyncio.get_event_loop()
 
-        # Fetch each data source, using cache when fresh
-        # Scoreboard always needs fresh data for live games
+        # Fetch each data source, using cache when fresh. The scoreboard entry is
+        # ESPN's (games, slate date); its TTL drops to CACHE_TTL_LIVE during games.
+        today_et = slate_date_et()
         cached_scoreboard = cache.get("scoreboard")
         cached_standings = cache.get("standings")
         cached_advanced = cache.get("advanced_stats")
@@ -723,7 +702,7 @@ async def get_todays_games():
         fetch_keys = []
 
         if not cached_scoreboard:
-            tasks.append(loop.run_in_executor(None, lambda: scoreboard.ScoreBoard(headers=NBA_LIVE_HEADERS)))
+            tasks.append(loop.run_in_executor(None, lambda: get_nba_slate(today_et)))
             fetch_keys.append("scoreboard")
         if not cached_standings:
             tasks.append(loop.run_in_executor(None, get_standings_map))
@@ -745,30 +724,20 @@ async def get_todays_games():
                     cache.set(key, result)
 
         # Get data (fresh or cached, with fallback to stale)
-        sb = cache.get("scoreboard") or cache.get_stale("scoreboard")
+        slate = cache.get("scoreboard") or cache.get_stale("scoreboard")
         standings_map = cache.get("standings") or cache.get_stale("standings") or {}
         advanced_stats_map = cache.get("advanced_stats") or cache.get_stale("advanced_stats") or {}
         odds_map = cache.get("odds") or cache.get_stale("odds") or {}
 
-        today_et = slate_date_et()
-        if sb:
-            games = sb.get_dict().get('scoreboard', {}).get('games', [])
-        else:
-            # cdn.nba.com 403s every request (nba_api issue #678). Fall through to
-            # the ESPN lookahead rather than returning early, or the slate is empty.
-            logger.warning("NBA CDN scoreboard unavailable, falling back to ESPN")
-            games = []
-        slate_date = today_et
-        if not games:
-            games, next_game_date = get_next_nba_schedule_games(today_et)
-            if next_game_date:
-                slate_date = next_game_date
-                if next_game_date > today_et + timedelta(days=1):
-                    odds_map.update(load_persisted_odds(next_game_date, table_name="nba_odds"))
-
-        if not sb and not games:
-            logger.error("No scoreboard data available from NBA CDN or ESPN")
+        if not slate:
+            logger.error("No NBA slate available from ESPN")
             return cache.get_stale("assembled") or []
+
+        games, slate_date = slate
+        slate_date = slate_date or today_et
+        # The default odds load covers yesterday through tomorrow.
+        if slate_date > today_et + timedelta(days=1):
+            odds_map.update(load_persisted_odds(slate_date, table_name="nba_odds"))
 
         logger.info(f"Processing {len(games)} games (standings: {len(standings_map)}, advanced: {len(advanced_stats_map)}, odds: {len(odds_map)})")
 
@@ -981,6 +950,18 @@ async def get_todays_games():
 
         # Only return empty list if we have absolutely zero history
         return []
+
+
+@router.get("/game/{game_id}/win-probability")
+async def get_game_win_probability(game_id: str):
+    """ESPN's per-play win-probability timeline, for the slate card sparkline."""
+    loop = asyncio.get_event_loop()
+    try:
+        summary = await loop.run_in_executor(None, lambda: espn_feeds.fetch_summary("nba", game_id))
+    except Exception as exc:
+        logger.warning("NBA win-probability fetch failed for %s: %s", game_id, exc)
+        raise HTTPException(status_code=502, detail="NBA win-probability feed unavailable") from exc
+    return espn_feeds.adapt_espn_win_probability(summary)
 
 
 @router.get("/game/{game_id}")
