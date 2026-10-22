@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 CACHE_TTL_LIVE = 20
 CACHE_TTL_DEFAULT = 60
 CACHE_TTL_ODDS = 1800
+# Game detail pages and slate card sparklines poll every 15s per viewer.
+CACHE_TTL_GAME_FEED = 15
 PERSISTED_ODDS_READ_ATTEMPTS = 3
 PERSISTED_ODDS_RETRY_DELAYS = (0.25, 0.75)
 
@@ -69,6 +71,42 @@ class Cache:
 
     def set_ttl(self, key: str, ttl: int):
         self._entries[key]["ttl"] = ttl
+
+
+class UpstreamCache:
+    """Short-lived cache for per-game upstream payloads, keyed by request URL.
+
+    Cache holds a fixed set of slate-wide sources; this holds one entry per
+    game. Without it, every viewer's 15s poll of a detail page or card
+    sparkline became its own upstream request, so traffic from our one server
+    IP grew with viewers instead of with live games.
+
+    If a refresh fails, the last payload for that key is served; with none,
+    the error propagates to the caller's existing handling. Entries not
+    refreshed for `retention` seconds are dropped.
+    """
+
+    def __init__(self, ttl: float = CACHE_TTL_GAME_FEED, retention: float = 3600):
+        self.ttl = ttl
+        self.retention = retention
+        self._entries: dict[str, tuple[float, object]] = {}
+
+    async def fetch(self, key: str, load: Callable[[], Awaitable]):
+        now = time.monotonic()
+        cached = self._entries.get(key)
+        if cached and now - cached[0] < self.ttl:
+            return cached[1]
+        try:
+            data = await load()
+        except Exception as exc:
+            if cached is None:
+                raise
+            logger.warning("Refresh of %s failed, serving a %.0fs-old copy: %s", key, now - cached[0], exc)
+            return cached[1]
+        self._entries[key] = (now, data)
+        for stale_key in [k for k, (fetched, _) in self._entries.items() if now - fetched > self.retention]:
+            del self._entries[stale_key]
+        return data
 
 
 _http_client: httpx.AsyncClient | None = None

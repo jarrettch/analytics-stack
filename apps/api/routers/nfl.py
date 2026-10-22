@@ -15,6 +15,7 @@ from .utils import (
     CACHE_TTL_ODDS,
     ET,
     Cache,
+    UpstreamCache,
     fetch_sgo_odds,
     format_et_time,
     grade_spread_result,
@@ -47,6 +48,7 @@ cache = Cache({
     "assembled": CACHE_TTL_DEFAULT,
     "weekly": CACHE_TTL_DEFAULT,
 })
+game_feeds = UpstreamCache()
 
 NFL_TEAM_NAMES = {
     "ARI": "Arizona Cardinals", "ATL": "Atlanta Falcons", "BAL": "Baltimore Ravens",
@@ -777,10 +779,13 @@ async def get_game_detail(game_id: str):
     if not matchup:
         raise HTTPException(status_code=404, detail="NFL game not found in the current slate")
 
-    try:
+    async def load():
         response = await get_http_client().get(ESPN_SUMMARY_URL, params={"event": game_id})
         response.raise_for_status()
-        summary = response.json()
+        return response.json()
+
+    try:
+        summary = await game_feeds.fetch(f"{ESPN_SUMMARY_URL}?event={game_id}", load)
     except Exception as exc:
         logger.warning("NFL detail fetch failed for %s: %s", game_id, exc)
         summary = {}

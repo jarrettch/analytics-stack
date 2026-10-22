@@ -16,6 +16,7 @@ from .utils import (
     ET,
     UTC,
     Cache,
+    UpstreamCache,
     de_vig_ml,
     fetch_sgo_odds,
     format_et_time,
@@ -67,6 +68,7 @@ cache = Cache({
     "pitcher_records":  600,
     "assembled":        CACHE_TTL_DEFAULT,
 })
+game_feeds = UpstreamCache()
 
 
 async def get_pitcher_records(pitcher_ids: list[int]) -> dict[int, str]:
@@ -1015,10 +1017,13 @@ async def get_game_detail(game_pk: str):
     client = get_http_client()
 
     async def fetch_json(url: str):
-        try:
+        async def load():
             response = await client.get(url, timeout=15.0)
             response.raise_for_status()
             return response.json()
+
+        try:
+            return await game_feeds.fetch(url, load)
         except Exception as exc:
             logger.warning(f"MLB detail fetch failed for {game_pk}: {url} {exc}")
             return None

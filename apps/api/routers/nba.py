@@ -15,6 +15,7 @@ from .utils import (
     CACHE_TTL_ODDS,
     ET,
     Cache,
+    UpstreamCache,
     fetch_sgo_odds,
     grade_spread_result,
     load_persisted_odds,
@@ -33,6 +34,7 @@ cache = Cache({
     "odds":           CACHE_TTL_ODDS,
     "assembled":      CACHE_TTL_DEFAULT,
 })
+game_feeds = UpstreamCache()
 
 NBA_LOOKAHEAD_DAYS = 14
 
@@ -952,12 +954,20 @@ async def get_todays_games():
         return []
 
 
+async def _game_summary(game_id: str) -> dict:
+    """ESPN's summary for one game, shared by the detail page and card sparkline."""
+    loop = asyncio.get_event_loop()
+    return await game_feeds.fetch(
+        f"{espn_feeds.SUMMARY_URL.format(sport='nba')}?event={game_id}",
+        lambda: loop.run_in_executor(None, lambda: espn_feeds.fetch_summary("nba", game_id)),
+    )
+
+
 @router.get("/game/{game_id}/win-probability")
 async def get_game_win_probability(game_id: str):
     """ESPN's per-play win-probability timeline, for the slate card sparkline."""
-    loop = asyncio.get_event_loop()
     try:
-        summary = await loop.run_in_executor(None, lambda: espn_feeds.fetch_summary("nba", game_id))
+        summary = await _game_summary(game_id)
     except Exception as exc:
         logger.warning("NBA win-probability fetch failed for %s: %s", game_id, exc)
         raise HTTPException(status_code=502, detail="NBA win-probability feed unavailable") from exc
@@ -981,9 +991,8 @@ async def get_game_detail(game_id: str):
     plays = []
     win_probability = []
 
-    loop = asyncio.get_event_loop()
     try:
-        summary = await loop.run_in_executor(None, lambda: espn_feeds.fetch_summary("nba", game_id))
+        summary = await _game_summary(game_id)
     except Exception as e:
         logger.warning(f"NBA detail summary failed for {game_id}: {e}")
         summary = {}

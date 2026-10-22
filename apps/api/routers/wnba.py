@@ -15,6 +15,7 @@ from .utils import (
     CACHE_TTL_ODDS,
     ET,
     Cache,
+    UpstreamCache,
     fetch_odds_api_odds,
     grade_spread_result,
     get_http_client,
@@ -42,6 +43,7 @@ cache = Cache({
     "odds":           CACHE_TTL_ODDS,
     "assembled":      CACHE_TTL_DEFAULT,
 })
+game_feeds = UpstreamCache()
 
 # Authoritative WNBA team identity, harvested from the WNBA schedule CDN. ESPN's
 # scoreboard abbreviations are normalized to these tricodes. nba_api's team list is stale for 2026
@@ -349,19 +351,23 @@ async def debug_scoreboard():
 @router.get("/game/{game_id}/win-probability")
 async def get_game_win_probability(game_id: str):
     """Return ESPN's source-provided WNBA win-probability timeline."""
-    try:
+    async def load():
         response = await get_http_client().get(
             ESPN_WNBA_SUMMARY_URL,
             params={"event": game_id},
         )
         response.raise_for_status()
+        return response.json()
+
+    try:
+        summary = await game_feeds.fetch(f"{ESPN_WNBA_SUMMARY_URL}?event={game_id}", load)
     except Exception as exc:
         logger.warning("WNBA win-probability fetch failed for %s: %s", game_id, exc)
         raise HTTPException(
             status_code=502,
             detail="WNBA win-probability feed unavailable",
         ) from exc
-    return adapt_espn_win_probability(response.json())
+    return adapt_espn_win_probability(summary)
 
 
 @router.post("/cron/fetch-odds", dependencies=[Depends(require_cron_auth)])

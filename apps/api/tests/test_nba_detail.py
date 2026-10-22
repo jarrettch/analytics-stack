@@ -11,8 +11,9 @@ import unittest
 
 from fastapi import HTTPException
 
-from routers import espn_feeds
+from routers import espn_feeds, nba
 from routers.nba import get_game_win_probability
+from routers.utils import UpstreamCache
 from routers.nba import (
     _espn_actions,
     _espn_box_team,
@@ -278,6 +279,9 @@ class WinProbabilityTest(unittest.TestCase):
 
 class WinProbabilityEndpointTest(unittest.TestCase):
     """The slate card sparkline's feed, which replaced NBA CDN play-by-play."""
+
+    def setUp(self):
+        nba.game_feeds = UpstreamCache()
 
     def tearDown(self):
         espn_feeds.fetch_summary = _real_fetch_summary

@@ -14,6 +14,7 @@ from .utils import (
     CACHE_TTL_ODDS,
     ET,
     Cache,
+    UpstreamCache,
     fetch_sgo_odds,
     format_et_time,
     grade_spread_result,
@@ -34,6 +35,7 @@ cache = Cache({
     "odds":         CACHE_TTL_ODDS,
     "assembled":    CACHE_TTL_DEFAULT,
 })
+game_feeds = UpstreamCache()
 
 NHL_LOOKAHEAD_DAYS = 14
 
@@ -845,10 +847,15 @@ async def get_game_detail(game_id: str):
     client = get_http_client()
 
     async def fetch_json(path: str):
-        try:
-            response = await client.get(f"https://api-web.nhle.com/v1/gamecenter/{game_id}/{path}", follow_redirects=True)
+        url = f"https://api-web.nhle.com/v1/gamecenter/{game_id}/{path}"
+
+        async def load():
+            response = await client.get(url, follow_redirects=True)
             response.raise_for_status()
             return response.json()
+
+        try:
+            return await game_feeds.fetch(url, load)
         except Exception as exc:
             logger.warning(f"NHL detail {path} failed for {game_id}: {exc}")
             return None
