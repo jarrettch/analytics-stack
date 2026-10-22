@@ -270,20 +270,27 @@ function PlaysTable({ plays }: { plays: PlayByPlayEvent[] }) {
   )
 }
 
-function NBABoxScoreTable({ box, team }: { box: NBATeamBoxScore | null; team: string }) {
+const NBA_BOX_COLUMNS = ["Player", "Min", "Pts", "Reb", "Ast", "Stl", "Blk", "TO", "FG", "3P", "FT", "+/-"]
+
+export function NBABoxScoreTable({ box, team }: { box: NBATeamBoxScore | null; team: string }) {
   if (!box || box.players.length === 0) return <EmptyPanel label={`${team} box score is not available yet.`} />
   return (
     <div className="overflow-x-auto rounded-md border border-border bg-card">
       <table className="w-full min-w-[760px] text-left font-mono text-xs">
         <thead className="bg-secondary text-[10px] uppercase tracking-wider text-muted-foreground">
           <tr>
-            {["Player", "Min", "Pts", "Reb", "Ast", "Stl", "Blk", "TO", "FG", "3P", "FT", "+/-"].map((h) => (
+            {NBA_BOX_COLUMNS.map((h) => (
               <th key={h} className={`px-3 py-2 ${h !== "Player" ? "text-right" : ""}`}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {box.players.map((p) => (
+          {box.players.map((p) => p.dnp ? (
+            <tr key={`${team}-${p.name}`} className="border-t border-border">
+              <td className="px-3 py-2 text-foreground">{p.name} <span className="text-muted-foreground">{p.position}</span></td>
+              <td colSpan={NBA_BOX_COLUMNS.length - 1} className="px-3 py-2 text-muted-foreground">DNP - {p.dnp}</td>
+            </tr>
+          ) : (
             <tr key={`${team}-${p.name}`} className="border-t border-border">
               <td className="px-3 py-2 text-foreground">{p.name} <span className="text-muted-foreground">{p.position}</span></td>
               <td className="px-3 py-2 text-right">{p.minutes}</td>

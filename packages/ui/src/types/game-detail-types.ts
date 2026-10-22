@@ -42,6 +42,8 @@ export interface NBAPlayerBoxScore {
   ftm: number
   fta: number
   plusMinus: number
+  /** Why the player sat, e.g. "Coach's Decision" or "Right Calf, Soreness"; absent if they played or may still. */
+  dnp?: string | null
 }
 
 export interface NBATeamBoxScore {

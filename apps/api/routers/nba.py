@@ -176,6 +176,7 @@ def _nba_player(row: dict) -> dict:
         "ftm": int(_num(stats.get("freeThrowsMade"))),
         "fta": int(_num(stats.get("freeThrowsAttempted"))),
         "plusMinus": int(_num(stats.get("plusMinusPoints") or stats.get("plusMinus"))),
+        "dnp": row.get("dnp"),
     }
 
 
@@ -300,16 +301,68 @@ def _espn_linescore(competitor: dict) -> dict:
     })
 
 
-def _espn_box_team(player_box: dict) -> dict:
-    """One boxscore.players entry as an nba_api box score team. DNPs carry no stats and are dropped."""
+def _espn_title(text: str) -> str:
+    # str.title() would give "Coach'S Decision".
+    return " ".join(word.capitalize() for word in text.split())
+
+
+def _espn_injury_label(details: dict) -> str:
+    """"Left Ankle, Sprain" from ESPN's structured injury details."""
+    side = details.get("side") if details.get("side") not in (None, "", "Not Specified") else ""
+    body = " ".join(part for part in (side, details.get("type") or "") if part) or "Injury"
+    return f"{body}, {details['detail']}" if details.get("detail") else body
+
+
+def _espn_ruled_out(team_injuries: dict) -> dict[str, dict]:
+    """Players the injury report has Out, keyed by athlete id, with their DNP label."""
+    out = {}
+    for injury in team_injuries.get("injuries") or []:
+        athlete = injury.get("athlete") or {}
+        if (injury.get("type") or {}).get("name") == "INJURY_STATUS_OUT" and athlete.get("id"):
+            out[str(athlete["id"])] = {
+                "athlete": athlete,
+                "dnp": _espn_injury_label(injury.get("details") or {}),
+            }
+    return out
+
+
+def _espn_statless_row(athlete: dict, dnp: str | None) -> dict:
+    """A player with no stats: a DNP when dnp is set, otherwise a row of zeros."""
+    return {
+        "name": athlete.get("displayName") or "Unknown",
+        "position": (athlete.get("position") or {}).get("abbreviation") or "",
+        "statistics": {"minutes": "0"},
+        "dnp": dnp,
+    }
+
+
+def _espn_box_team(player_box: dict, ruled_out: dict[str, dict], final: bool) -> dict:
+    """One boxscore.players entry as an nba_api box score team.
+
+    ESPN marks every bench player who hasn't checked in as a Coach's Decision
+    DNP while the game is live, injured or not, and leaves most injured players
+    out of the box entirely. So players the injury report has Out are DNPs from
+    tip-off, with their injury; anyone else without stats is a row of zeros
+    until the final, when ESPN's reason stands. DNPs sort to the bottom.
+    """
     players = []
+    dnps = []
+    seen_ids = set()
     for group in player_box.get("statistics") or []:
         keys = group.get("keys") or []
         for row in group.get("athletes") or []:
-            if row.get("didNotPlay") or not row.get("stats"):
+            athlete = row.get("athlete") or {}
+            athlete_id = str(athlete.get("id") or "")
+            seen_ids.add(athlete_id)
+            if not row.get("stats"):
+                if athlete_id in ruled_out:
+                    dnps.append(_espn_statless_row(athlete, ruled_out[athlete_id]["dnp"]))
+                elif final:
+                    dnps.append(_espn_statless_row(athlete, _espn_title(row.get("reason") or "Coach's Decision")))
+                else:
+                    players.append(_espn_statless_row(athlete, None))
                 continue
             stats = dict(zip(keys, row["stats"]))
-            athlete = row.get("athlete") or {}
             fgm, fga = _espn_made_attempted(stats.get("fieldGoalsMade-fieldGoalsAttempted"))
             tpm, tpa = _espn_made_attempted(stats.get("threePointFieldGoalsMade-threePointFieldGoalsAttempted"))
             ftm, fta = _espn_made_attempted(stats.get("freeThrowsMade-freeThrowsAttempted"))
@@ -334,7 +387,12 @@ def _espn_box_team(player_box: dict) -> dict:
                     "plusMinusPoints": stats.get("plusMinus"),
                 },
             })
-    return {"players": players}
+    dnps.extend(
+        _espn_statless_row(entry["athlete"], entry["dnp"])
+        for athlete_id, entry in ruled_out.items()
+        if athlete_id not in seen_ids
+    )
+    return {"players": players + dnps}
 
 
 def _espn_home_prob_by_play(points: list[dict]) -> dict[str, float]:
@@ -966,9 +1024,14 @@ async def get_game_detail(game_id: str):
         home_score = _espn_linescore(competitors["home"])
         raw_status = ((competition.get("status") or {}).get("type") or {}).get("detail") or raw_status
 
+    ruled_out_by_team_id = {
+        str((team_injuries.get("team") or {}).get("id")): _espn_ruled_out(team_injuries)
+        for team_injuries in summary.get("injuries") or []
+    }
     for player_box in (summary.get("boxscore") or {}).get("players") or []:
-        side = side_by_team_id.get(str((player_box.get("team") or {}).get("id")))
-        team = _espn_box_team(player_box)
+        team_id = str((player_box.get("team") or {}).get("id"))
+        side = side_by_team_id.get(team_id)
+        team = _espn_box_team(player_box, ruled_out_by_team_id.get(team_id, {}), final=game_status == 3)
         if side == "away" and team["players"]:
             away_box = _nba_team_box(team)
         elif side == "home" and team["players"]:

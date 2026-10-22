@@ -12,7 +12,9 @@ from routers.nba import (
     _espn_actions,
     _espn_box_team,
     _espn_home_prob_by_play,
+    _espn_injury_label,
     _espn_linescore,
+    _espn_ruled_out,
     _nba_pbp,
     _nba_team_box,
     _parse_clock_seconds,
@@ -26,11 +28,28 @@ BOX_KEYS = [
 ]
 
 
-def _athlete(name, stats, *, did_not_play=False):
+PLAYED = ["30", "10", "4-8", "1-3", "1-2", "6", "2", "1", "1", "0", "1", "5", "2", "+3"]
+
+
+def _athlete(name, stats, *, athlete_id=None, did_not_play=False, reason="COACH'S DECISION"):
     return {
-        "athlete": {"displayName": name, "position": {"abbreviation": "F"}},
+        "athlete": {"id": athlete_id or name, "displayName": name, "position": {"abbreviation": "F"}},
         "didNotPlay": did_not_play,
+        "reason": reason,
         "stats": stats,
+    }
+
+
+def _bench(name, **kwargs):
+    """How ESPN lists anyone who hasn't checked in, live or final."""
+    return _athlete(name, [], did_not_play=True, **kwargs)
+
+
+def _injury(athlete_id, name, details, status="INJURY_STATUS_OUT"):
+    return {
+        "type": {"name": status},
+        "athlete": {"id": athlete_id, "displayName": name, "position": {"abbreviation": "C"}},
+        "details": details,
     }
 
 
@@ -43,7 +62,7 @@ class BoxScoreTest(unittest.TestCase):
         team = _espn_box_team(_player_box(
             _athlete("Paul George", ["31", "38", "12-21", "7-12", "7-8", "5", "3", "3", "5", "0", "0", "5", "5", "+9"]),
             _athlete("Jayson Tatum", ["38", "13", "6-23", "0-7", "1-1", "4", "11", "2", "0", "0", "1", "3", "3", "-5"]),
-        ))
+        ), {}, final=True)
         box = _nba_team_box(team)
         george, tatum = box["players"]
 
@@ -57,13 +76,78 @@ class BoxScoreTest(unittest.TestCase):
         self.assertEqual(box["totals"]["points"], 51)
         self.assertEqual(box["totals"]["fgPct"], round(18 / 44 * 100, 1))
 
-    def test_drops_players_who_did_not_play(self):
-        team = _espn_box_team(_player_box(
-            _athlete("Starter", ["30", "10", "4-8", "1-3", "1-2", "6", "2", "1", "1", "0", "1", "5", "2", "+3"]),
-            _athlete("Inactive", [], did_not_play=True),
-        ))
+        self.assertIsNone(george["dnp"])
 
-        self.assertEqual([p["name"] for p in team["players"]], ["Starter"])
+
+class DidNotPlayTest(unittest.TestCase):
+    def _box(self, *athletes, injuries=(), final):
+        ruled_out = _espn_ruled_out({"injuries": list(injuries)})
+        return _nba_team_box(_espn_box_team(_player_box(*athletes), ruled_out, final=final))
+
+    def test_bench_without_minutes_is_zeros_while_live(self):
+        """ESPN calls them Coach's Decision DNPs before they've had a chance to check in."""
+        box = self._box(_athlete("Starter", PLAYED), _bench("Bench"), final=False)
+
+        bench = box["players"][1]
+        self.assertEqual((bench["name"], bench["dnp"], bench["points"], bench["minutes"]), ("Bench", None, 0, "0"))
+
+    def test_bench_without_minutes_takes_espn_reason_at_the_final(self):
+        box = self._box(
+            _bench("Bench"),
+            _athlete("Starter", PLAYED),
+            _bench("Hurt", reason="RIGHT CALF STRAIN"),
+            final=True,
+        )
+
+        self.assertEqual(
+            [(p["name"], p["dnp"]) for p in box["players"]],
+            [("Starter", None), ("Bench", "Coach's Decision"), ("Hurt", "Right Calf Strain")],
+        )
+
+    def test_injured_out_is_a_dnp_from_tip_off_with_the_injury(self):
+        """ESPN lists Steven Adams (Out, calf) as a Coach's Decision mid-game; the report wins."""
+        box = self._box(
+            _athlete("Starter", PLAYED),
+            _bench("Steven Adams", athlete_id="adams"),
+            injuries=[_injury("adams", "Steven Adams", {"type": "Calf", "detail": "Soreness", "side": "Right"})],
+            final=False,
+        )
+
+        self.assertEqual(box["players"][1]["dnp"], "Right Calf, Soreness")
+
+    def test_injured_out_missing_from_the_box_is_added(self):
+        box = self._box(
+            _athlete("Starter", PLAYED),
+            injuries=[_injury("lively", "Dereck Lively II", {"type": "Foot", "detail": "Surgery", "side": "Right"})],
+            final=False,
+        )
+
+        self.assertEqual(
+            [(p["name"], p["position"], p["dnp"]) for p in box["players"]],
+            [("Starter", "F", None), ("Dereck Lively II", "C", "Right Foot, Surgery")],
+        )
+
+    def test_injured_player_who_plays_keeps_their_stats(self):
+        box = self._box(
+            _athlete("Starter", PLAYED, athlete_id="s"),
+            injuries=[_injury("s", "Starter", {"type": "Ankle"})],
+            final=True,
+        )
+
+        self.assertEqual([(p["name"], p["dnp"], p["points"]) for p in box["players"]], [("Starter", None, 10)])
+
+    def test_day_to_day_is_not_ruled_out(self):
+        ruled_out = _espn_ruled_out({"injuries": [
+            _injury("curry", "Stephen Curry", {"type": "Ankle"}, status="INJURY_STATUS_DAYTODAY"),
+        ]})
+
+        self.assertEqual(ruled_out, {})
+
+    def test_injury_labels(self):
+        self.assertEqual(_espn_injury_label({"type": "Ankle", "detail": "Sprain", "side": "Left"}), "Left Ankle, Sprain")
+        self.assertEqual(_espn_injury_label({"type": "Knee", "side": "Not Specified"}), "Knee")
+        self.assertEqual(_espn_injury_label({"type": "Illness"}), "Illness")
+        self.assertEqual(_espn_injury_label({}), "Injury")
 
 
 class LinescoreTest(unittest.TestCase):
