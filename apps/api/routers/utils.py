@@ -5,6 +5,7 @@ Supabase odds persistence, time formatting, and a module-level httpx client.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -81,32 +82,59 @@ class UpstreamCache:
     sparkline became its own upstream request, so traffic from our one server
     IP grew with viewers instead of with live games.
 
-    If a refresh fails, the last payload for that key is served; with none,
-    the error propagates to the caller's existing handling. Entries not
-    refreshed for `retention` seconds are dropped.
+    Callers that miss while a refresh is in flight await that refresh rather
+    than starting their own, since viewers polling on the same cadence tend to
+    miss together. Freshness counts from when the payload arrived, so a slow
+    upstream doesn't eat into the TTL.
+
+    If a refresh fails, the last payload for that key is served, unless it is
+    older than `retention`; then, as with nothing cached, the error propagates
+    to the caller's existing handling. Entries not refreshed for `retention`
+    seconds are dropped.
     """
 
     def __init__(self, ttl: float = CACHE_TTL_GAME_FEED, retention: float = 3600):
         self.ttl = ttl
         self.retention = retention
         self._entries: dict[str, tuple[float, object]] = {}
+        self._refreshing: dict[str, asyncio.Task] = {}
 
     async def fetch(self, key: str, load: Callable[[], Awaitable]):
-        now = time.monotonic()
         cached = self._entries.get(key)
-        if cached and now - cached[0] < self.ttl:
+        if cached and time.monotonic() - cached[0] < self.ttl:
             return cached[1]
+        refresh = self._refreshing.get(key)
+        if refresh is None:
+            refresh = asyncio.ensure_future(self._refresh(key, load))
+            # If every waiter was cancelled, nobody awaits a failure; retrieving it
+            # here avoids "Task exception was never retrieved". Waiters still get it.
+            # Through Python 3.13, shield() happens to retrieve it already; 3.14 doesn't.
+            refresh.add_done_callback(lambda task: task.cancelled() or task.exception())
+            self._refreshing[key] = refresh
+        # Shielded so one caller disconnecting doesn't cancel the others' refresh.
+        return await asyncio.shield(refresh)
+
+    async def _refresh(self, key: str, load: Callable[[], Awaitable]):
         try:
-            data = await load()
-        except Exception as exc:
-            if cached is None:
-                raise
-            logger.warning("Refresh of %s failed, serving a %.0fs-old copy: %s", key, now - cached[0], exc)
-            return cached[1]
-        self._entries[key] = (now, data)
-        for stale_key in [k for k, (fetched, _) in self._entries.items() if now - fetched > self.retention]:
-            del self._entries[stale_key]
-        return data
+            try:
+                data = await load()
+            except Exception as exc:
+                cached = self._entries.get(key)
+                if cached is None:
+                    raise
+                age = time.monotonic() - cached[0]
+                if age > self.retention:
+                    del self._entries[key]
+                    raise
+                logger.warning("Refresh of %s failed, serving a %.0fs-old copy: %s", key, age, exc)
+                return cached[1]
+            now = time.monotonic()
+            self._entries[key] = (now, data)
+            for stale_key in [k for k, (fetched, _) in self._entries.items() if now - fetched > self.retention]:
+                del self._entries[stale_key]
+            return data
+        finally:
+            self._refreshing.pop(key, None)
 
 
 _http_client: httpx.AsyncClient | None = None
