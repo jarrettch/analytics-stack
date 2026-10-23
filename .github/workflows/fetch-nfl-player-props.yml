@@ -1,10 +1,11 @@
 name: Fetch NFL Player Props
 
+# Every half hour from 8am to 8:37pm ET, every day, which covers international
+# games, holiday games, and the playoffs. The runner checks ESPN first; empty
+# windows never wake Render. Scheduled by Supabase pg_cron, since GitHub's
+# schedule ran hours late:
+# supabase/migrations/20261023000000_schedule_collectors_with_pg_cron.sql
 on:
-  schedule:
-    # Every day covers international games, holiday games, and the playoffs.
-    # The runner checks ESPN first; empty windows never wake Render.
-    - cron: '7,37 * * * *'
   workflow_dispatch:
 
 # Future UFC collectors must use this same group because the API key is shared.

@@ -6,12 +6,10 @@ name: Fetch NCAAF Odds
 # ESPN drops a game's odds at kickoff. The morning run is the only chance to
 # price an early kickoff: if it fails, re-dispatch it rather than waiting for
 # the evening run, which catches late kickoffs only.
+#
+# Scheduled by Supabase pg_cron, since GitHub's schedule ran hours late:
+# supabase/migrations/20261023000000_schedule_collectors_with_pg_cron.sql
 on:
-  schedule:
-    - cron: '0 10 * * *'
-      timezone: 'America/New_York'
-    - cron: '0 17 * * *'
-      timezone: 'America/New_York'
   workflow_dispatch:
 
 jobs:

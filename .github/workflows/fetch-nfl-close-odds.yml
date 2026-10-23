@@ -1,11 +1,9 @@
 name: Fetch NFL Early-Window Odds
 
+# Sunday 12:30 ET, before the 1pm window kicks off. Scheduled by Supabase
+# pg_cron, since GitHub's schedule fired after the 1pm kickoffs:
+# supabase/migrations/20261023000000_schedule_collectors_with_pg_cron.sql
 on:
-  schedule:
-    # Native timezone scheduling follows EDT/EST and remains valid if the
-    # GitHub-hosted runner starts after the nominal trigger time.
-    - cron: '30 12 * * 0'
-      timezone: 'America/New_York'
   workflow_dispatch:
 
 jobs:

@@ -1,12 +1,9 @@
 name: Fetch Daily Odds
 
+# Scheduled by Supabase pg_cron, since GitHub's schedule ran hours late:
+# supabase/migrations/20261023000000_schedule_collectors_with_pg_cron.sql
 on:
-  schedule:
-    # Noon ET during daylight time (16:00 UTC) - morning / early-window close
-    - cron: '0 16 * * *'
-    # 6pm ET during daylight time (22:00 UTC) - evening lines
-    - cron: '0 22 * * *'
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
   fetch-odds:

@@ -1,9 +1,8 @@
 name: Settle MLB Pitcher K Results
 
+# Scheduled by Supabase pg_cron, since GitHub's schedule ran hours late:
+# supabase/migrations/20261023000000_schedule_collectors_with_pg_cron.sql
 on:
-  schedule:
-    - cron: "30 4 * * *"
-      timezone: "America/New_York"
   workflow_dispatch:
 
 jobs:

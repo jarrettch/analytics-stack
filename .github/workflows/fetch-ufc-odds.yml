@@ -10,12 +10,10 @@ name: Fetch UFC Odds
 # NFL props. The concurrency group serializes manual, retried, and delayed
 # runs; the :20 schedule just keeps the usual case clear of props at :07/:37.
 # A sweep takes at least 15 seconds by design.
+#
+# Scheduled by Supabase pg_cron, since GitHub's schedule ran hours late:
+# supabase/migrations/20261023000000_schedule_collectors_with_pg_cron.sql
 on:
-  schedule:
-    - cron: '20 10 * * *'
-      timezone: 'America/New_York'
-    - cron: '20 16 * * *'
-      timezone: 'America/New_York'
   workflow_dispatch:
 
 concurrency:

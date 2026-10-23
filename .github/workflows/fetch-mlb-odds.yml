@@ -1,9 +1,9 @@
 name: Fetch MLB Intraday Odds
 
+# Extra MLB-only poll at 3pm ET. Scheduled by Supabase pg_cron, since GitHub's
+# schedule ran hours late:
+# supabase/migrations/20261023000000_schedule_collectors_with_pg_cron.sql
 on:
-  schedule:
-    # Extra MLB-only poll at 3pm ET during daylight time.
-    - cron: "0 19 * * *"
   workflow_dispatch:
 
 jobs:

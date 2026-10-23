@@ -1,0 +1,55 @@
+name: Check Collectors Ran
+
+# Supabase pg_cron dispatches the collectors but can't see whether GitHub
+# accepted a dispatch: an expired token or a paused project stops every
+# collector without a failed run to email about. This fails, and so emails,
+# when a collector has no run within its window. It stays on GitHub's own
+# schedule because a few hours' delay doesn't matter for a daily check.
+on:
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+
+jobs:
+  check-collectors:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Find collectors with no recent run
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          check() {
+            local workflow=$1 hours=$2 since runs
+            since=$(date -u -d "${hours} hours ago" +%Y-%m-%dT%H:%M:%SZ)
+            # main only: pg_cron dispatches main, and a run from another
+            # branch must not hide a broken dispatch.
+            runs=$(gh api "repos/${{ github.repository }}/actions/workflows/${workflow}/runs?branch=main&created=%3E%3D${since}&per_page=1" --jq '.total_count')
+            echo "${workflow}: ${runs} runs since ${since}"
+            if [ "$runs" -eq 0 ]; then
+              missing+=("$workflow")
+            fi
+          }
+
+          # Daily collectors: 26 hours leaves slack for a late check.
+          check fetch-odds.yml 26
+          check fetch-tomorrow-odds.yml 26
+          check fetch-mlb-odds.yml 26
+          check settle-mlb-pitcher-ks.yml 26
+          check fetch-ncaaf-odds.yml 26
+          check fetch-ufc-odds.yml 26
+          check fetch-nfl-player-props.yml 26
+          # Sunday 12:30 ET. 7.5 days keeps last week's run in the window until
+          # early Monday UTC, so a missed Sunday fails Monday's check, however
+          # late GitHub starts it, with no weekday logic to roll over.
+          check fetch-nfl-close-odds.yml 180
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::No recent runs: ${missing[*]}. In Supabase, check net._http_response for the dispatch status (401 means the GitHub token expired) and cron.job_run_details."
+            exit 1
+          fi
