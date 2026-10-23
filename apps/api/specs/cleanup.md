@@ -76,6 +76,9 @@ This is the unlock that turns visualize-ev from a one-shot tool into something u
 - [ ] **Confirm `.env` is gitignored**
   `apps/api/.env` contains API keys and Supabase credentials. Verified never committed to GitHub. Just ensure `.gitignore` continues to cover it.
 
+- [ ] **Dead code: local basketball win-prob model in `winProb.ts`**
+  `recordSnapshot` and `naiveWinProb` are test-only since NBA moved to ESPN's probabilities (2026-10). Deleting them also orphans `totalTimeRemainingSeconds`, `parseGameClockSeconds`, `logistic` and `getK`. The `capHistory`/LRU tests in `winProb.test.ts` fill the store via `recordSnapshot`, so rewrite those setups (e.g. via `recordMLBSnapshot`) rather than dropping them; they guard the store the ESPN and MLB sparklines still use. Mark `specs/win_probability.md` as superseded.
+
 - [x] **Dead code: `NbaDashboard.tsx`**
   Deleted file and export. Completed 2026-05-07.
 
