@@ -440,8 +440,8 @@ sleeping, not SharpAPI (confirmed in `pmset` logs).
    request runs in a worker that is abandoned at the deadline, and the
    league is marked failed with an unknown outcome. A slow trickling
    response can't use up the second league's budget.
-5. `.github/workflows/fetch-player-props.yml`, replacing
-   `fetch-nfl-player-props.yml`: gate (3 min), warm-up, driver (20 min),
+5. `.github/workflows/fetch-player-props.yml`, which replaces
+   `fetch-nfl-player-props.yml` once the rollout below finishes: gate (3 min), warm-up, driver (20 min),
    job 30 min, `permissions: actions: read`. Update the `NFL_PROPS.md`
    references.
 6. ~~Raise the Actions budget~~ Done 2026-10-25: the Actions budget is now $5.
@@ -466,6 +466,26 @@ sleeping, not SharpAPI (confirmed in `pmset` logs).
    mid-sweep, and the same player on two books.
 11. An `NBA_PROPS.md` operations note, and an update to `NFL_PROPS.md` for the
     new workflow and cadence.
+
+## Rollout order
+
+pg_cron dispatches workflows by file name on `main`, and each step below
+depends on the one before it. Out of order, NBA sweeps fail, and the
+combined run's failure would also hide whether NFL collected.
+
+1. Apply `20261025000000_create_nba_player_prop_odds.sql` and
+   `20261025010000_revoke_nfl_props_append_from_clients.sql` in Supabase.
+2. Merge to `main` and confirm Render deployed: `POST
+   /api/nba/cron/fetch-player-props` answers 401 without the cron secret, not
+   404.
+3. With `fetch-player-props.yml` now on `main`, dispatch it once by hand
+   and read the job summary.
+4. Apply the pg_cron migration that unschedules `fetch-nfl-player-props` and
+   schedules `fetch-player-props`, in one statement.
+5. Update `check-collectors.yml` to watch `fetch-player-props.yml`.
+6. Only then delete `fetch-nfl-player-props.yml` and
+   `scripts/nfl_props_schedule_gate.py`. Until step 4, pg_cron still
+   dispatches the NFL workflow by name.
 
 ## Out of scope
 
