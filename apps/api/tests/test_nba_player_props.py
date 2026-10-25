@@ -341,6 +341,53 @@ def test_close_window_crossing_et_midnight_reads_both_dates(collector):
     assert {d.isoformat() for d in queried} >= {"2026-10-24", "2026-10-25"}
 
 
+NEXT_NIGHT = TIP + timedelta(days=1)
+
+
+def back_to_back_fetch(*nights):
+    async def fetch(league, market, *, sweep):
+        rows = []
+        for start, event_id in nights:
+            rows += both_sides(market, event_start_time=start.isoformat(), event_id=event_id,
+                               selection_id=f"{market}-{event_id}")
+        return [{**row, "selection_id": f"{row['selection_id']}-{row['selection_type']}"} for row in rows]
+    return fetch
+
+
+def test_back_to_back_same_matchup_resolves_each_night(collector, monkeypatch):
+    collector[0].append(event(NEXT_NIGHT))
+    monkeypatch.setattr(props, "fetch_sharp_odds", back_to_back_fetch(
+        (TIP, "nba_heat_hornets_2026-10-24_b3"), (NEXT_NIGHT, "nba_heat_hornets_2026-10-25_b3")))
+    result = collect()
+    assert result["success"] and result["rows_rejected"] == 0
+    assert result["games_selected"] == 1 and result["games_persisted"] == 2
+    by_event = {r["provider_event_id"]: r["game_date"] for r in persisted(collector)}
+    assert by_event == {"nba_heat_hornets_2026-10-24_b3": "2026-10-24",
+                        "nba_heat_hornets_2026-10-25_b3": "2026-10-25"}
+    assert {r["starts_at"] for r in persisted(collector)} == {TIP.isoformat(), NEXT_NIGHT.isoformat()}
+
+
+@pytest.mark.parametrize("start,event_id", [
+    (TIP + timedelta(hours=7), "nba_heat_hornets_b3"),  # outside both nights' bound
+    (NEXT_NIGHT, "nba_heat_hornets_2026-10-24_b3"),  # start a day off; id disagrees
+])
+def test_back_to_back_never_guesses_the_night(collector, monkeypatch, start, event_id):
+    collector[0].append(event(NEXT_NIGHT))
+    monkeypatch.setattr(props, "fetch_sharp_odds", back_to_back_fetch((start, event_id)))
+    result = collect()
+    assert not result["success"] and result["rows_rejected"] == 16
+    collector[1].assert_not_called()
+
+
+def test_back_to_back_without_id_date_uses_nearest_start(collector, monkeypatch):
+    collector[0].append(event(NEXT_NIGHT))
+    monkeypatch.setattr(props, "fetch_sharp_odds", back_to_back_fetch(
+        (TIP + timedelta(minutes=30), "nba_heat_hornets_b3")))
+    result = collect()
+    assert result["success"]
+    assert {r["game_date"] for r in persisted(collector)} == {"2026-10-24"}
+
+
 def test_zero_games_is_success_without_provider_request(collector):
     collector[0].clear()
     result = collect()

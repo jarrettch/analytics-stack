@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
@@ -39,6 +40,9 @@ MAX_COMBO_EXAMPLES = 5
 SWEEP_GUARD = timedelta(minutes=10)
 ELIGIBILITY_WINDOW = timedelta(minutes=90)
 SWEEP_TIMEOUT_SECONDS = 480
+# Only used to choose between same-matchup games on consecutive days.
+START_MATCH_BOUND = timedelta(hours=6)
+EVENT_ID_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _DEAD_STATUSES = {"STATUS_POSTPONED", "STATUS_CANCELED", "STATUS_CANCELLED", "STATUS_SUSPENDED"}
 _collection_lock = asyncio.Lock()
 
@@ -112,7 +116,8 @@ class NBASchedule:
                       and now + SWEEP_GUARD <= g.starts_at <= now + ELIGIBILITY_WINDOW]
         return list({(g.game_date, g.matchup_key): g for g in chosen}.values())
 
-    async def resolve(self, matchup_key: str, provider_start: datetime) -> ScheduledGame:
+    async def resolve(self, matchup_key: str, provider_start: datetime,
+                      provider_event_id: str | None = None) -> ScheduledGame:
         # The book's time is only a search hint; both canonical fields come from ESPN.
         hint = provider_start.astimezone(utils.ET).date()
         matches = {}
@@ -120,9 +125,25 @@ class NBASchedule:
             for game in await self.day(hint + timedelta(days=offset)):
                 if game.matchup_key == matchup_key:
                     matches[(game.game_date, game.matchup_key)] = game
-        if len(matches) != 1:
-            raise ValueError(f"Expected one ESPN game for {matchup_key} near {hint}, found {len(matches)}")
-        return next(iter(matches.values()))
+        if len(matches) == 1:
+            return next(iter(matches.values()))
+        # Same teams on consecutive days (a home back-to-back): the provider's
+        # start picks the game, but only within a bound, so a book time off by
+        # hours is rejected rather than attached to the wrong night.
+        near = [game for game in matches.values()
+                if abs(game.starts_at - provider_start) <= START_MATCH_BOUND]
+        if len(near) != 1:
+            raise ValueError(f"Expected one ESPN game for {matchup_key} near {hint}, found {len(matches)}"
+                             f" ({len(near)} within {START_MATCH_BOUND} of the provider start)")
+        # A book start off by a whole day would land within the bound of the
+        # other night. SharpAPI event ids carry the ET game date
+        # ("nba_grizzlies_kings_2026-10-25_b3" for a 9 pm ET tip), so when one
+        # is present it must agree. The format is undocumented; no date, no check.
+        event_date = EVENT_ID_DATE.search(provider_event_id or "")
+        if event_date and event_date.group(0) != near[0].game_date:
+            raise ValueError(f"Provider event {provider_event_id} disagrees with ESPN date "
+                             f"{near[0].game_date} for back-to-back {matchup_key}")
+        return near[0]
 
 
 def _prop_matchup(row: dict, unmapped_teams: set[str]) -> str:
@@ -176,7 +197,8 @@ async def normalize_prop(
     if probability is not None and not 0 <= probability <= 1:
         raise ValueError("Invalid implied probability")
     provider_time = _timestamp(row.get("timestamp"))
-    game = await schedule.resolve(matchup_key, _timestamp(row.get("event_start_time")))
+    game = await schedule.resolve(matchup_key, _timestamp(row.get("event_start_time")),
+                                  row.get("event_id"))
     if provider_time >= game.starts_at:
         raise ValueError("Provider observation is at or after canonical tip-off")
 
