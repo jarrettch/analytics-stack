@@ -427,11 +427,19 @@ sleeping, not SharpAPI (confirmed in `pmset` logs).
    (`*_eligible`, `*_gate_ok`, `*_deadline`, `nba_phase`), plus
    `window_at`. It derives the NBA phase from the run's `created_at` tick,
    falling back to its start time, and exits 0 once both leagues have
-   written.
+   written. A thread's timeout doesn't stop its lookup, so outputs are
+   written only by the main thread, once per league, under a lock. A worker
+   that finishes after its deadline is ignored. Workers are daemon threads,
+   so a stuck lookup can't delay the gate's exit.
 4. `scripts/run_props_collection.py`: the collection driver. It collects
    eligible leagues in earliest-deadline order with no retries, runs each
    league's success checks (today's `jq` conditions), writes the job
    summary, and exits non-zero after attempting both if either failed.
+   `urllib`'s `timeout` limits each socket operation, not the whole request,
+   so the 540-second limit is enforced as a total wall-clock deadline. The
+   request runs in a worker that is abandoned at the deadline, and the
+   league is marked failed with an unknown outcome. A slow trickling
+   response can't use up the second league's budget.
 5. `.github/workflows/fetch-player-props.yml`, replacing
    `fetch-nfl-player-props.yml`: gate (3 min), warm-up, driver (20 min),
    job 30 min, `permissions: actions: read`. Update the `NFL_PROPS.md`
@@ -449,7 +457,9 @@ sleeping, not SharpAPI (confirmed in `pmset` logs).
    `test_nfl_props_schedule_gate.py`, plus gate cases (NFL only, NBA only,
    both, intraday ticks, an intraday run that starts late or is rerun, a
    failed `created_at` lookup, one league's scoreboard down while the other
-   is still collected, an ET midnight crossing for 10:30 pm tips), NFL
+   is still collected, a lookup that finishes after its deadline and must
+   not write outputs or delay exit, a collection response that trickles
+   past the 540-second total deadline while the second league still runs, an ET midnight crossing for 10:30 pm tips), NFL
    selection unchanged, a sweep where one book is absent, tricode
    canonicalization, and combo checks covering pass, fail, a missing
    component, over and under lines that disagree, a line that moves
