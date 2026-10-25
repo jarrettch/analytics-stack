@@ -199,3 +199,30 @@ def test_step_summary_lists_each_league(api, tmp_path):
     assert "NBA intraday: 16 rows inserted" in text
     assert "draftkings 88 passed, 0 failed, 206 unchecked" in text
     assert "NFL close: 16 rows inserted" in text
+
+
+@pytest.mark.parametrize("combo_checks", [
+    {"draftkings": {"passed": 1}},  # missing keys
+    {"draftkings": None},
+    "not a mapping",
+])
+def test_malformed_response_summary_fails_that_league_and_still_runs_the_next(api, combo_checks):
+    _, behavior, _ = api
+    behavior["nba"] = ("json", {**GOOD, "combo_checks": combo_checks})
+    status, calls = run(api)
+    assert status == 1
+    assert [c[0] for c in calls] == ["nba", "nfl"]
+
+
+def test_unexpected_sender_error_is_contained(api):
+    url, _, _ = api
+    sent = []
+
+    def send(api_url, path, secret, limit):
+        sent.append(path)
+        if "/nba/" in path:
+            raise RuntimeError("unexpected")
+        return driver.post(api_url, path, secret, limit)
+
+    assert driver.main(gate_env(API_URL=url), limit=2.0, send=send) == 1
+    assert len(sent) == 2

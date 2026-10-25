@@ -149,7 +149,12 @@ def main(env=os.environ, limit: float = LEAGUE_LIMIT_SECONDS, send=post) -> int:
         lines.append("No eligible NFL or NBA games in this window; nothing was collected.")
     for item in planned:
         print(f"Collecting {item.league.upper()} (guard deadline {item.deadline:%H:%M:%S}Z).")
-        ok, line = collect(item, env, limit, send)
+        try:
+            ok, line = collect(item, env, limit, send)
+        except Exception as exc:
+            # Anything unexpected in one league's response must not stop the next league.
+            ok, line = False, (f"{item.league.upper()}: driver error while handling the response ({exc!r}); "
+                               "check the response above and the database before rerunning")
         lines.append(line)
         if not ok:
             failures.append(line)
