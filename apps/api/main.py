@@ -7,6 +7,7 @@ from routers import (
     mlb,
     mlb_pitcher_k_board,
     nba,
+    nba_player_props,
     ncaaf,
     nfl,
     nfl_player_props,
@@ -39,6 +40,7 @@ app.add_middleware(
 )
 
 app.include_router(nba.router)
+app.include_router(nba_player_props.router)
 app.include_router(mlb.router)
 app.include_router(mlb_pitcher_k_board.router)
 app.include_router(nhl.router)
