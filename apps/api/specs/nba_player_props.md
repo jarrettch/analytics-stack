@@ -481,8 +481,8 @@ sleeping, not SharpAPI (confirmed in `pmset` logs).
    canonicalization, and combo checks covering pass, fail, a missing
    component, over and under lines that disagree, a line that moves
    mid-sweep, and the same player on two books.
-11. An `NBA_PROPS.md` operations note, and an update to `NFL_PROPS.md` for the
-    new workflow and cadence.
+11. `NBA_PROPS.md`, an operations note, and `NFL_PROPS.md` updated for the
+    combined workflow, pg_cron and the watchdog's cancelled-run check.
 
 ## Rollout order
 
