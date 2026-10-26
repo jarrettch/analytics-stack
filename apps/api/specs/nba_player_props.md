@@ -445,11 +445,18 @@ sleeping, not SharpAPI (confirmed in `pmset` logs).
    job 30 min, `permissions: actions: read`. Update the `NFL_PROPS.md`
    references.
 6. ~~Raise the Actions budget~~ Done 2026-10-25: the Actions budget is now $5.
-7. pg_cron migration: unschedule `fetch-nfl-player-props` and schedule
-   `fetch-player-props` at `7,37` for ET hours 8–22, in the same migration,
-   so no tick goes unscheduled. `ops.dispatch_workflow()` is unchanged.
-8. `check-collectors.yml`: replace the NFL props entry with
-   `fetch-player-props.yml`, and add the cancelled-run check.
+7. pg_cron migration `20261026000000_schedule_combined_player_props.sql`:
+   schedules `fetch-player-props` at `7,37` for ET hours 8–22 and
+   unschedules `fetch-nfl-player-props` in one DO block, behind the same
+   Vault-token check, so no tick goes unscheduled or doubled.
+   `ops.dispatch_workflow()` is unchanged. `test_collector_schedule.py` now
+   applies every migration's schedule and unschedule calls in order before
+   replaying the year.
+8. `check-collectors.yml`: the NFL props entry becomes
+   `fetch-player-props.yml`, and `check_cancelled` fails on any cancelled or
+   timed-out run of `fetch-player-props.yml` or `fetch-ufc-odds.yml` in 26
+   hours. A test derives that list from the workflows in the
+   `sharpapi-odds` group.
 9. Per-game coverage check: a protected endpoint with the qualifying-row
    rules above, reporting book × market gaps per game, called from
    `check-collectors.yml`.
@@ -477,15 +484,16 @@ combined run's failure would also hide whether NFL collected.
    `20261025010000_revoke_nfl_props_append_from_clients.sql` in Supabase.
 2. Merge to `main` and confirm Render deployed: `POST
    /api/nba/cron/fetch-player-props` answers 401 without the cron secret, not
-   404.
-3. With `fetch-player-props.yml` now on `main`, dispatch it once by hand
-   and read the job summary.
-4. Apply the pg_cron migration that unschedules `fetch-nfl-player-props` and
-   schedules `fetch-player-props`, in one statement.
-5. Update `check-collectors.yml` to watch `fetch-player-props.yml`.
-6. Only then delete `fetch-nfl-player-props.yml` and
-   `scripts/nfl_props_schedule_gate.py`. Until step 4, pg_cron still
-   dispatches the NFL workflow by name.
+   404. The watchdog change ships in this merge, so from here it checks
+   `fetch-player-props.yml` instead of the NFL workflow.
+3. The same day, dispatch `fetch-player-props.yml` once by hand and read the
+   job summary. That run also satisfies the watchdog for 26 hours.
+4. Within those 26 hours, apply
+   `20261026000000_schedule_combined_player_props.sql` in the SQL editor,
+   then run `supabase/tests/pg_cron_schedule_test.sql`.
+5. After a day of clean scheduled runs, a follow-up change deletes
+   `fetch-nfl-player-props.yml` and `scripts/nfl_props_schedule_gate.py`.
+   Until step 4, pg_cron still dispatches the NFL workflow by name.
 
 ## Out of scope
 

@@ -35,6 +35,19 @@ jobs:
               missing+=("$workflow")
             fi
           }
+          cancelled=()
+          check_cancelled() {
+            local workflow=$1 hours=$2 since runs=0 count conclusion
+            since=$(date -u -d "${hours} hours ago" +%Y-%m-%dT%H:%M:%SZ)
+            for conclusion in cancelled timed_out; do
+              count=$(gh api "repos/${{ github.repository }}/actions/workflows/${workflow}/runs?branch=main&status=${conclusion}&created=%3E%3D${since}&per_page=1" --jq '.total_count')
+              runs=$((runs + count))
+            done
+            echo "${workflow}: ${runs} cancelled or timed-out runs since ${since}"
+            if [ "$runs" -gt 0 ]; then
+              cancelled+=("$workflow")
+            fi
+          }
 
           # Daily collectors: 26 hours leaves slack for a late check.
           check fetch-odds.yml 26
@@ -43,13 +56,26 @@ jobs:
           check settle-mlb-pitcher-ks.yml 26
           check fetch-ncaaf-odds.yml 26
           check fetch-ufc-odds.yml 26
-          check fetch-nfl-player-props.yml 26
+          check fetch-player-props.yml 26
           # Sunday 12:30 ET. 7.5 days keeps last week's run in the window until
           # early Monday UTC, so a missed Sunday fails Monday's check, however
           # late GitHub starts it, with no weekday logic to roll over.
           check fetch-nfl-close-odds.yml 180
 
+          # The sharpapi-odds concurrency group keeps one pending run and
+          # cancels the older one, so a cancelled run there may be a skipped
+          # collection, which the run-exists check above can't see. A run
+          # cancelled by hand also fails this, once, for 26 hours.
+          check_cancelled fetch-player-props.yml 26
+          check_cancelled fetch-ufc-odds.yml 26
+
+          status=0
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "::error::No recent runs: ${missing[*]}. In Supabase, check net._http_response for the dispatch status (401 means the GitHub token expired) and cron.job_run_details."
-            exit 1
+            status=1
           fi
+          if [ "${#cancelled[@]}" -gt 0 ]; then
+            echo "::error::Cancelled or timed-out runs: ${cancelled[*]}. A cancelled props run may have skipped a close sweep; compare the run's created time with the sharpapi-odds runs around it."
+            status=1
+          fi
+          exit "$status"
