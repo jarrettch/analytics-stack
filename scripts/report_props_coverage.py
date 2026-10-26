@@ -36,10 +36,28 @@ def fetch(api_url: str, secret: str) -> dict:
 
 
 def render(report: dict) -> tuple[list[str], str | None]:
-    """Markdown summary lines, plus one warning when any game has a gap."""
+    """Markdown summary lines, plus one warning for gaps or rows for unplayed matchups."""
     day = report["game_date"]
-    if report["games"] == 0:
-        return [f"NBA props close coverage, {day}: no games."], None
+    gaps = report["game_gaps"]
+    lines = [f"NBA props close coverage, {day}: no games."] if report["games"] == 0 else _coverage_lines(report)
+    # Even with no played games: rows archived for a postponed game still show.
+    if report["unexpected_matchups"]:
+        lines += ["", "Close rows for matchups not on ESPN's played slate: "
+                  + ", ".join(report["unexpected_matchups"])]
+    problems = []
+    if gaps:
+        problems.append(f"{len(gaps)} of {report['games']} games have gaps")
+    if report["unexpected_matchups"]:
+        problems.append(f"rows for unplayed matchups {', '.join(report['unexpected_matchups'])}")
+    warning = None
+    if problems:
+        warning = (f"NBA props close coverage {day}: {report['cells_covered']}/{report['cells_expected']} cells; "
+                   + "; ".join(problems) + ". See the job summary.")
+    return lines, warning
+
+
+def _coverage_lines(report: dict) -> list[str]:
+    day, gaps = report["game_date"], report["game_gaps"]
     books = list(report["matrix"])
     markets = list(report["matrix"][books[0]])
     lines = [
@@ -53,7 +71,6 @@ def render(report: dict) -> tuple[list[str], str | None]:
     for market in markets:
         lines.append(f"| {market} | " + " | ".join(
             f"{report['matrix'][book][market]}/{report['games']}" for book in books) + " |")
-    gaps = report["game_gaps"]
     if gaps:
         lines += ["", "Games with gaps:"]
     for gap in gaps:
@@ -66,14 +83,7 @@ def render(report: dict) -> tuple[list[str], str | None]:
         if gap["failed_rows"]:
             parts.append(f"{gap['failed_rows']} failed combo rows")
         lines.append(f"- {gap['matchup_key']} ({tip:%-I:%M %p} ET): " + "; ".join(parts))
-    if report["unexpected_matchups"]:
-        lines += ["", "Close rows for matchups not on ESPN's played slate: "
-                  + ", ".join(report["unexpected_matchups"])]
-    warning = None
-    if gaps or report["unexpected_matchups"]:
-        warning = (f"NBA props close coverage {day}: {report['cells_covered']}/{report['cells_expected']} cells; "
-                   f"{len(gaps)} of {report['games']} games have gaps. See the job summary.")
-    return lines, warning
+    return lines
 
 
 def main(env=os.environ, get=fetch) -> int:

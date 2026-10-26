@@ -53,9 +53,22 @@ def test_unexpected_matchups_warn(capsys):
     assert "not on ESPN's played slate: GSW@PHX" in out and "::warning::" in out
 
 
+NO_GAMES = {**REPORT, "games": 0, "cells_expected": 0, "cells_covered": 0, "matrix": {}, "game_gaps": []}
+
+
 def test_no_games_is_one_line():
-    lines, warning = report_script.render({**REPORT, "games": 0, "matrix": {}, "game_gaps": []})
+    lines, warning = report_script.render(NO_GAMES)
     assert lines == ["NBA props close coverage, 2026-10-24: no games."] and warning is None
+
+
+def test_no_games_still_shows_rows_for_unplayed_matchups(tmp_path, capsys):
+    """Every game postponed, but its props were archived before the call."""
+    summary = tmp_path / "summary.md"
+    report = {**NO_GAMES, "unexpected_matchups": ["GSW@PHX"]}
+    assert report_script.main({**ENV, "GITHUB_STEP_SUMMARY": str(summary)}, get=lambda *a: report) == 0
+    assert "not on ESPN's played slate: GSW@PHX" in summary.read_text()
+    [warning] = [line for line in capsys.readouterr().out.splitlines() if line.startswith("::warning::")]
+    assert "rows for unplayed matchups GSW@PHX" in warning
 
 
 @pytest.mark.parametrize("response", [
