@@ -1,8 +1,9 @@
 """The pg_cron migration must dispatch each collector exactly at its ET times.
 
 pg_cron schedules in UTC, so every job fires at both UTC offsets ET can have
-and ops.in_et_hours keeps the one on the intended ET hour. This replays a year
-spanning both DST transitions against the migration's cron expressions; the
+and ops.in_et_hours keeps the one on the intended ET hour. This applies the
+migrations' schedule and unschedule calls in order, then replays a year
+spanning both DST transitions against the resulting cron expressions; the
 SQL test covers ops.in_et_hours itself.
 """
 from __future__ import annotations
@@ -16,13 +17,13 @@ from zoneinfo import ZoneInfo
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-MIGRATION = REPO_ROOT / "supabase/migrations/20261023000000_schedule_collectors_with_pg_cron.sql"
+MIGRATIONS = sorted((REPO_ROOT / "supabase/migrations").glob("*.sql"))
 WORKFLOWS = REPO_ROOT / ".github/workflows"
 ET = ZoneInfo("America/New_York")
 
 DAILY = frozenset(range(7))
 SUNDAY = frozenset({6})
-PROPS_TIMES = [f"{hour:02d}:{minute}" for hour in range(8, 21) for minute in ("07", "37")]
+PROPS_TIMES = [f"{hour:02d}:{minute}" for hour in range(8, 23) for minute in ("07", "37")]
 
 EXPECTED = {
     "fetch-odds-morning": ("fetch-odds.yml", ["11:00"], DAILY),
@@ -35,17 +36,35 @@ EXPECTED = {
     "fetch-nfl-close-odds": ("fetch-nfl-close-odds.yml", ["12:30"], SUNDAY),
     "fetch-ufc-odds-morning": ("fetch-ufc-odds.yml", ["10:20"], DAILY),
     "fetch-ufc-odds-afternoon": ("fetch-ufc-odds.yml", ["16:20"], DAILY),
-    "fetch-nfl-player-props": ("fetch-nfl-player-props.yml", PROPS_TIMES, DAILY),
+    "fetch-player-props": ("fetch-player-props.yml", PROPS_TIMES, DAILY),
 }
 
 JOB = re.compile(
     r"cron\.schedule\('(?P<name>[^']+)', '(?P<expr>[^']+)', "
     r"\$job\$select ops\.dispatch_workflow\('(?P<workflow>[^']+)', array\[(?P<hours>[^\]]*)\]\)\$job\$\)"
 )
+UNSCHEDULE = re.compile(r"cron\.unschedule\('(?P<name>[^']+)'\)")
+
+
+def cron_calls(sql: str) -> list[re.Match]:
+    return sorted([*JOB.finditer(sql), *UNSCHEDULE.finditer(sql)], key=lambda m: m.start())
+
+
+def cron_migrations() -> list[Path]:
+    return [path for path in MIGRATIONS if cron_calls(path.read_text())]
 
 
 def scheduled_jobs():
-    return {m["name"]: m for m in JOB.finditer(MIGRATION.read_text())}
+    """The jobs left after every migration, in order. Scheduling by name replaces."""
+    jobs = {}
+    for path in cron_migrations():
+        for call in cron_calls(path.read_text()):
+            if call.re is JOB:
+                jobs[call["name"]] = call
+            else:
+                assert call["name"] in jobs, f"{path.name} unschedules unknown job {call['name']}"
+                del jobs[call["name"]]
+    return jobs
 
 
 def cron_field(field: str, full: range) -> set[int]:
@@ -80,10 +99,12 @@ def guarded_schedule_blocks(sql: str) -> list[str]:
     return [body for body in blocks if "github_actions_dispatch_token is missing" in body]
 
 
-def test_a_missing_token_schedules_nothing_whatever_client_runs_the_migration():
+@pytest.mark.parametrize("migration", cron_migrations(), ids=lambda path: path.name)
+def test_a_missing_token_schedules_nothing_whatever_client_runs_the_migration(migration: Path):
     """Statements a client sends one at a time autocommit, so the token check
-    and every schedule must stay in one DO block, with the check first."""
-    sql = MIGRATION.read_text()
+    and every schedule or unschedule must stay in one DO block, with the check
+    first. A swap then never leaves a job missing or doubled."""
+    sql = migration.read_text()
     [body] = guarded_schedule_blocks(sql)
     guard = (
         "begin if not exists (select from vault.secrets where name = 'github_actions_dispatch_token') then "
@@ -92,7 +113,7 @@ def test_a_missing_token_schedules_nothing_whatever_client_runs_the_migration():
     )
 
     assert " ".join(body.split()).startswith(guard)
-    assert len(JOB.findall(body)) == len(JOB.findall(sql)) == len(EXPECTED)
+    assert len(cron_calls(body)) == len(cron_calls(sql))
 
 
 @pytest.mark.parametrize("name", sorted(EXPECTED))
@@ -134,6 +155,21 @@ def test_watchdog_checks_every_collector_within_its_window():
 
     assert len(checks) == len({workflow for workflow, _ in checks}), "one check per collector"
     assert dict(checks) == expected
+
+
+def test_watchdog_flags_cancelled_runs_in_the_shared_sharpapi_group():
+    """GitHub keeps one pending run per concurrency group and cancels the
+    older one, so a cancelled run there may be a skipped collection."""
+    contents = (WORKFLOWS / "check-collectors.yml").read_text()
+    checks = dict(re.findall(r"^\s*check_cancelled (\S+\.yml) (\d+)$", contents, re.M))
+    dispatched = {workflow for workflow, _, _ in EXPECTED.values()}
+    shared = {
+        path.name for path in WORKFLOWS.glob("*.yml")
+        if path.name in dispatched and re.search(r"^\s*group: sharpapi-odds$", path.read_text(), re.M)
+    }
+
+    assert shared == {"fetch-player-props.yml", "fetch-ufc-odds.yml"}
+    assert checks == {workflow: "26" for workflow in shared}
 
 
 @pytest.mark.parametrize("first_sunday", [date(2026, 10, 18), date(2027, 3, 7)], ids=["fall-back", "spring-forward"])

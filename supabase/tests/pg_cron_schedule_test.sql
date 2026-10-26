@@ -1,4 +1,4 @@
--- Run in the Supabase SQL editor after the pg_cron migration and the Vault
+-- Run in the Supabase SQL editor after the pg_cron migrations and the Vault
 -- secret. Everything rolls back: pg_net only sends committed requests, so no
 -- workflow is dispatched and the secret is restored. The full-year DST replay
 -- of each job's schedule is apps/api/tests/test_collector_schedule.py.
@@ -29,9 +29,11 @@ begin
             'fetch-odds-morning', 'fetch-odds-evening', 'fetch-tomorrow-odds',
             'fetch-mlb-odds', 'settle-mlb-pitcher-ks', 'fetch-ncaaf-odds-morning',
             'fetch-ncaaf-odds-evening', 'fetch-nfl-close-odds', 'fetch-ufc-odds-morning',
-            'fetch-ufc-odds-afternoon', 'fetch-nfl-player-props'
+            'fetch-ufc-odds-afternoon', 'fetch-player-props'
         )
     ) = 11, 'all 11 collector jobs are installed and active';
+    assert not exists (select from cron.job where jobname = 'fetch-nfl-player-props'),
+        'NFL props dispatch only through the combined fetch-player-props job';
 
     queued := (select count(*) from net.http_request_queue);
     assert ops.dispatch_workflow('fetch-ufc-odds.yml', array[-1]) is null,
