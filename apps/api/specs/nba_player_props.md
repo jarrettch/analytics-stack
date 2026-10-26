@@ -497,8 +497,14 @@ combined run's failure would also hide whether NFL collected.
    /api/nba/cron/fetch-player-props` answers 401 without the cron secret, not
    404. The watchdog change ships in this merge, so from here it checks
    `fetch-player-props.yml` instead of the NFL workflow.
-3. The same day, dispatch `fetch-player-props.yml` once by hand and read the
-   job summary. That run also satisfies the watchdog for 26 hours.
+3. The same day, dispatch `fetch-player-props.yml` by hand **while an NBA
+   game is eligible**. An empty-window run skips Render and the database, so it
+   proves only the gate. Dispatching between 11:37 and 12:06 ET runs the
+   intraday phase over the whole slate. Confirm `rows_inserted > 0` in the job
+   summary and the rows in Supabase under `<run-id>-nba-props-intraday`. That
+   run also satisfies the watchdog for 26 hours. Then run `check-collectors.yml`
+   by hand to check the coverage endpoint and summary. Gaps for days before
+   collection started are expected.
 4. Within those 26 hours, apply
    `20261026000000_schedule_combined_player_props.sql` in the SQL editor,
    away from the :07 and :37 ticks, then run
