@@ -33,6 +33,7 @@ COMBO_COMPONENTS = {
     "player_rebounds_+_assists": ("player_rebounds", "player_assists"),
 }
 MARKETS = SINGLE_MARKETS + tuple(COMBO_COMPONENTS)
+BOOKS = ("draftkings", "fanduel")
 # Combo lines landed within ±2 of their components' sum on the first slate; a
 # mislabeled R+A row holding the PRA line misses by the points line.
 COMBO_TOLERANCE = 3.0
@@ -68,6 +69,8 @@ class NBASchedule:
     def __init__(self):
         self.days: dict[date, list[ScheduledGame]] = {}
         self.failed_days: dict[date, str] = {}
+        # (game_date, matchup_key) of postponed, cancelled or suspended games.
+        self.called_off: set[tuple[str, str]] = set()
 
     async def day(self, target: date) -> list[ScheduledGame]:
         if target in self.days:
@@ -91,10 +94,13 @@ class NBASchedule:
                 status = (competition.get("status") or event.get("status") or {}).get("type") or {}
                 if status.get("state") not in {"pre", "in", "post"}:
                     raise ValueError("Missing NBA schedule status")
-                games.append(ScheduledGame(
+                game = ScheduledGame(
                     f"{away}@{home}", _timestamp(event["date"]),
                     status.get("state") == "pre" and status.get("name") not in _DEAD_STATUSES,
-                ))
+                )
+                if status.get("name") in _DEAD_STATUSES:
+                    self.called_off.add((game.game_date, game.matchup_key))
+                games.append(game)
         except (AttributeError, KeyError, IndexError, TypeError, ValueError) as exc:
             self.failed_days[target] = f"Malformed NBA schedule for {target}"
             raise ScheduleError(self.failed_days[target]) from exc
@@ -177,7 +183,7 @@ async def normalize_prop(
         raise ValueError("Response contains live or alternate prices")
     if row.get("league") != "nba" or row.get("market_type") != market:
         raise ValueError("Response does not match requested NBA market")
-    if row.get("sportsbook") not in {"draftkings", "fanduel"}:
+    if row.get("sportsbook") not in BOOKS:
         raise ValueError("Unexpected sportsbook")
 
     if matchup_key is None:
@@ -356,6 +362,79 @@ async def collect_player_props(collection_id: str, now: datetime, phase: Phase =
         result["requests_made"] = sweep.requests_made
         result["unmapped_teams"] = sorted(unmapped)
     return result
+
+
+def close_coverage_cells(target: date) -> list[dict]:
+    """Usable close counts per matchup, book and market with any row in the window."""
+    if utils.supabase is None:
+        raise ValueError("Supabase is not configured")
+    response = utils.supabase.rpc("nba_player_prop_close_coverage", {"target": target.isoformat()}).execute()
+    if not isinstance(response.data, list):
+        raise ValueError("Invalid NBA close coverage response")
+    return response.data
+
+
+async def close_coverage(target: date) -> dict:
+    """Per played game, which book x market cells have no usable close row.
+
+    A standing metric, not an alarm: some gaps are expected (a book that
+    drops out near tip, a market a book never posted). Gaps never fail it;
+    only a missing schedule or query does.
+    """
+    result = {
+        "success": False, "game_date": target.isoformat(), "schedule_ok": False,
+        "games": 0, "cells_expected": 0, "cells_covered": 0,
+        "matrix": {}, "game_gaps": [], "unexpected_matchups": [],
+    }
+    try:
+        schedule = NBASchedule()
+        games = sorted(
+            (g for g in await schedule.day(target)
+             if g.game_date == result["game_date"]
+             and (g.game_date, g.matchup_key) not in schedule.called_off),
+            key=lambda g: (g.starts_at, g.matchup_key),
+        )
+        result.update(schedule_ok=True, games=len(games), cells_expected=len(games) * len(BOOKS) * len(MARKETS))
+        cells = {(c["matchup_key"], c["bookmaker_id"], c["market_type"]): c
+                 for c in await asyncio.to_thread(close_coverage_cells, target)}
+        # Per book x market: how many of the day's games had a usable close.
+        matrix = {book: dict.fromkeys(MARKETS, 0) for book in BOOKS}
+        for game in games:
+            missing, unchecked_only, failed_rows = [], [], 0
+            for book in BOOKS:
+                for market in MARKETS:
+                    cell = cells.get((game.matchup_key, book, market)) or {}
+                    failed_rows += cell.get("failed_rows", 0)
+                    if cell.get("usable_rows", 0) > 0:
+                        matrix[book][market] += 1
+                        result["cells_covered"] += 1
+                    elif cell.get("unchecked_rows", 0) > 0:
+                        unchecked_only.append(f"{book} {market}")
+                    else:
+                        missing.append(f"{book} {market}")
+            if missing or unchecked_only or failed_rows:
+                result["game_gaps"].append({
+                    "matchup_key": game.matchup_key, "starts_at": game.starts_at.isoformat(),
+                    "missing": missing, "unchecked_only": unchecked_only, "failed_rows": failed_rows,
+                })
+        result["matrix"] = matrix
+        played = {g.matchup_key for g in games}
+        result["unexpected_matchups"] = sorted({key[0] for key in cells} - played)
+        result["success"] = True
+    except Exception as exc:
+        logger.exception("NBA props close coverage failed for %s", target)
+        result["error"] = str(exc)
+    return result
+
+
+@router.post("/cron/player-props-coverage", dependencies=[Depends(require_cron_auth)])
+async def cron_player_props_coverage(game_date: Annotated[date | None, Query(alias="date")] = None):
+    """Close coverage for one finished ET date, yesterday by default."""
+    today = datetime.now(utils.UTC).astimezone(utils.ET).date()
+    target = game_date or today - timedelta(days=1)
+    if target >= today:
+        raise HTTPException(status_code=422, detail="date must be before today in ET")
+    return await close_coverage(target)
 
 
 @router.post("/cron/fetch-player-props", dependencies=[Depends(require_cron_auth)])

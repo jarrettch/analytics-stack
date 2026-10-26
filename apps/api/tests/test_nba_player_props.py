@@ -503,3 +503,126 @@ def test_overlapping_sweep_fails_without_starting_another(monkeypatch):
         collector.assert_not_called()
 
     asyncio.run(run())
+
+
+YESTERDAY = TIP.astimezone(utils.ET).date()
+
+
+def cell(matchup="MIA@CHA", book="draftkings", market="player_points", usable=4, unchecked=0, failed=0):
+    return {"matchup_key": matchup, "bookmaker_id": book, "market_type": market,
+            "usable_rows": usable, "usable_players": usable // 2, "unchecked_rows": unchecked,
+            "failed_rows": failed}
+
+
+def full_game(matchup):
+    return [cell(matchup, book, market) for book in props.BOOKS for market in props.MARKETS]
+
+
+@pytest.fixture
+def coverage(monkeypatch):
+    """Yesterday's slate: two played games and a postponed one."""
+    events = [
+        event(TIP, "MIA", "CHA", state="post", name="STATUS_FINAL"),
+        event(TIP + timedelta(hours=1), "NY", "BOS", state="post", name="STATUS_FINAL"),
+        event(TIP, "GS", "PHX", state="post", name="STATUS_POSTPONED"),
+    ]
+    cells = []
+
+    async def scoreboard(target):
+        return {"events": [e for e in events
+                           if props._timestamp(e["date"]).astimezone(utils.ET).date() == target]}, True
+
+    monkeypatch.setattr(props, "_scoreboard_for_date_with_status", AsyncMock(side_effect=scoreboard))
+    monkeypatch.setattr(props, "close_coverage_cells", Mock(side_effect=lambda target: cells))
+    return events, cells
+
+
+def test_coverage_reports_book_by_market_gaps_per_game(coverage):
+    _, cells = coverage
+    cells += full_game("MIA@CHA")
+    cells += [c for c in full_game("NYK@BOS") if c["bookmaker_id"] == "draftkings"]
+    result = asyncio.run(props.close_coverage(YESTERDAY))
+    assert result["success"] and result["schedule_ok"]
+    assert result["games"] == 2 and result["cells_expected"] == 32 and result["cells_covered"] == 24
+    assert result["matrix"]["draftkings"] == dict.fromkeys(props.MARKETS, 2)
+    assert result["matrix"]["fanduel"] == dict.fromkeys(props.MARKETS, 1)
+    [gap] = result["game_gaps"]
+    assert gap["matchup_key"] == "NYK@BOS"
+    assert gap["missing"] == [f"fanduel {market}" for market in props.MARKETS]
+
+
+def test_unchecked_and_failed_combos_never_count_as_covered(coverage):
+    _, cells = coverage
+    cells += [c for c in full_game("MIA@CHA") + full_game("NYK@BOS")
+              if not (c["matchup_key"] == "MIA@CHA" and c["bookmaker_id"] == "fanduel"
+                      and c["market_type"].count("+"))]
+    cells += [cell("MIA@CHA", "fanduel", "player_points_+_rebounds", usable=0, unchecked=6),
+              cell("MIA@CHA", "fanduel", "player_points_+_assists", usable=0, failed=2)]
+    result = asyncio.run(props.close_coverage(YESTERDAY))
+    [gap] = result["game_gaps"]
+    assert gap["unchecked_only"] == ["fanduel player_points_+_rebounds"]
+    assert gap["missing"] == ["fanduel player_points_+_rebounds_+_assists", "fanduel player_points_+_assists",
+                              "fanduel player_rebounds_+_assists"]
+    assert gap["failed_rows"] == 2
+    assert result["cells_covered"] == 28
+
+
+def test_called_off_games_are_not_expected_and_their_rows_are_flagged(coverage):
+    _, cells = coverage
+    cells += full_game("MIA@CHA") + full_game("NYK@BOS") + [cell("GSW@PHX")]
+    result = asyncio.run(props.close_coverage(YESTERDAY))
+    assert result["games"] == 2 and result["game_gaps"] == []
+    assert result["unexpected_matchups"] == ["GSW@PHX"]
+
+
+def test_coverage_with_no_games_is_success(coverage):
+    events, _ = coverage
+    events.clear()
+    result = asyncio.run(props.close_coverage(YESTERDAY))
+    assert result["success"] and result["games"] == 0 and result["cells_expected"] == 0
+
+
+def test_coverage_fails_without_schedule_or_query(coverage, monkeypatch):
+    props._scoreboard_for_date_with_status.side_effect = None
+    props._scoreboard_for_date_with_status.return_value = ({}, False)
+    result = asyncio.run(props.close_coverage(YESTERDAY))
+    assert not result["success"] and not result["schedule_ok"]
+
+    events, _ = coverage
+    props._scoreboard_for_date_with_status.return_value = ({"events": events}, True)
+    monkeypatch.setattr(props, "close_coverage_cells", Mock(side_effect=ValueError("database unavailable")))
+    result = asyncio.run(props.close_coverage(YESTERDAY))
+    assert result["schedule_ok"] and not result["success"] and "database unavailable" in result["error"]
+
+
+def test_coverage_query_is_one_rpc_by_date(monkeypatch):
+    database = Mock()
+    database.rpc.return_value.execute.return_value = SimpleNamespace(data=[cell()])
+    monkeypatch.setattr(utils, "supabase", database)
+    assert props.close_coverage_cells(YESTERDAY) == [cell()]
+    database.rpc.assert_called_once_with("nba_player_prop_close_coverage", {"target": "2026-10-24"})
+    database.rpc.return_value.execute.return_value = SimpleNamespace(data=None)
+    with pytest.raises(ValueError):
+        props.close_coverage_cells(YESTERDAY)
+
+
+def test_coverage_endpoint_defaults_to_yesterday_and_rejects_today(monkeypatch):
+    monkeypatch.setenv("CRON_SECRET", "test-secret")
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 25, 3, 30, tzinfo=utils.UTC).astimezone(tz)  # 23:30 ET on the 24th
+
+    monkeypatch.setattr(props, "datetime", Clock)
+    reporter = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr(props, "close_coverage", reporter)
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-secret"}
+    assert client.post("/api/nba/cron/player-props-coverage", headers=headers).status_code == 200
+    assert reporter.call_args.args == (datetime(2026, 10, 23).date(),)
+    response = client.post("/api/nba/cron/player-props-coverage", params={"date": "2026-10-22"}, headers=headers)
+    assert response.status_code == 200 and reporter.call_args.args == (datetime(2026, 10, 22).date(),)
+    assert client.post("/api/nba/cron/player-props-coverage", params={"date": "2026-10-24"},
+                       headers=headers).status_code == 422
+    assert client.post("/api/nba/cron/player-props-coverage").status_code == 401

@@ -5,6 +5,8 @@ name: Check Collectors Ran
 # collector without a failed run to email about. This fails, and so emails,
 # when a collector has no run within its window. It stays on GitHub's own
 # schedule because a few hours' delay doesn't matter for a daily check.
+# It also reports yesterday's NBA props close coverage, a metric that warns
+# but never fails, since some gaps are expected.
 on:
   schedule:
     - cron: '0 18 * * *'
@@ -12,10 +14,13 @@ on:
 
 permissions:
   actions: read
+  contents: read
 
 jobs:
   check-collectors:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -79,3 +84,38 @@ jobs:
             status=1
           fi
           exit "$status"
+
+      # The coverage report explains a failure above (which games a cancelled
+      # run cost), so it runs whatever the run checks found.
+      - uses: actions/checkout@v4
+        if: ${{ !cancelled() }}
+
+      - name: Wake Render
+        id: wake
+        if: ${{ !cancelled() }}
+        timeout-minutes: 4
+        shell: bash
+        env:
+          API_URL: ${{ secrets.API_URL }}
+        run: |
+          set -euo pipefail
+          for attempt in {1..6}; do
+            if curl --fail --silent --show-error --max-time 20 "$API_URL/health" >/dev/null; then
+              echo "Render is ready."
+              exit 0
+            fi
+            if [ "$attempt" -eq 6 ]; then
+              echo "::error::Render did not become ready after six attempts; no coverage report."
+              exit 1
+            fi
+            echo "Warm-up attempt ${attempt}/6 failed or timed out; retrying in 15 seconds."
+            sleep 15
+          done
+
+      - name: Report NBA props close coverage
+        if: ${{ !cancelled() && steps.wake.outcome == 'success' }}
+        timeout-minutes: 5
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: python3 scripts/report_props_coverage.py

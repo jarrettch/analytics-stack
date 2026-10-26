@@ -6,6 +6,9 @@
 -- The new job and the unschedule are one DO block, so whatever client runs
 -- this file, the ticks are never left unscheduled or dispatched twice.
 -- ops.dispatch_workflow() is unchanged. Rerunning this is safe.
+-- Apply it away from the :07 and :37 ticks (say :15-:30 or :45-:00): the
+-- swap can't recall a dispatch the old job already sent, and right at a tick
+-- it's unclear which job fires.
 do $$
 begin
     if not exists (select from vault.secrets where name = 'github_actions_dispatch_token') then

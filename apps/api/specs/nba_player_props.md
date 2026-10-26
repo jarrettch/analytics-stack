@@ -457,9 +457,19 @@ sleeping, not SharpAPI (confirmed in `pmset` logs).
    timed-out run of `fetch-player-props.yml` or `fetch-ufc-odds.yml` in 26
    hours. A test derives that list from the workflows in the
    `sharpapi-odds` group.
-9. Per-game coverage check: a protected endpoint with the qualifying-row
-   rules above, reporting book × market gaps per game, called from
-   `check-collectors.yml`.
+9. Per-game coverage check. `nba_player_prop_close_coverage(date)`
+   (migration `20261025020000`) counts usable, unchecked and failed rows per
+   matchup, book and market in the close window. `POST
+   /api/nba/cron/player-props-coverage?date=` (yesterday ET by default,
+   today or later rejected) fills in empty cells from ESPN's played games,
+   skipping postponed, cancelled and suspended ones, and returns a book ×
+   market matrix plus per-game gaps. Rows for matchups ESPN didn't play are
+   listed separately. `scripts/report_props_coverage.py` writes it to the
+   watchdog's job summary. Gaps add one warning annotation and never fail
+   the job; only a report that can't be produced does. The watchdog runs the
+   wake and report steps with `!cancelled()`, so a failed run check still
+   gets the coverage that explains it. The wake runs daily, NBA season or
+   not.
 10. Tests: modeled on `test_nfl_player_props.py` and
    `test_nfl_props_schedule_gate.py`, plus gate cases (NFL only, NBA only,
    both, intraday ticks, an intraday run that starts late or is rerun, a
@@ -480,8 +490,9 @@ pg_cron dispatches workflows by file name on `main`, and each step below
 depends on the one before it. Out of order, NBA sweeps fail, and the
 combined run's failure would also hide whether NFL collected.
 
-1. Apply `20261025000000_create_nba_player_prop_odds.sql` and
-   `20261025010000_revoke_nfl_props_append_from_clients.sql` in Supabase.
+1. Apply `20261025000000_create_nba_player_prop_odds.sql`,
+   `20261025010000_revoke_nfl_props_append_from_clients.sql` and
+   `20261025020000_create_nba_player_prop_close_coverage.sql` in Supabase.
 2. Merge to `main` and confirm Render deployed: `POST
    /api/nba/cron/fetch-player-props` answers 401 without the cron secret, not
    404. The watchdog change ships in this merge, so from here it checks
@@ -490,7 +501,9 @@ combined run's failure would also hide whether NFL collected.
    job summary. That run also satisfies the watchdog for 26 hours.
 4. Within those 26 hours, apply
    `20261026000000_schedule_combined_player_props.sql` in the SQL editor,
-   then run `supabase/tests/pg_cron_schedule_test.sql`.
+   away from the :07 and :37 ticks, then run
+   `supabase/tests/pg_cron_schedule_test.sql`. The swap is atomic but can't
+   recall a dispatch the old job already sent.
 5. After a day of clean scheduled runs, a follow-up change deletes
    `fetch-nfl-player-props.yml` and `scripts/nfl_props_schedule_gate.py`.
    Until step 4, pg_cron still dispatches the NFL workflow by name.
