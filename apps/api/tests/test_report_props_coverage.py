@@ -33,10 +33,10 @@ def test_summary_has_matrix_and_gaps_and_one_warning(tmp_path, capsys):
     assert report_script.main({**ENV, "GITHUB_STEP_SUMMARY": str(summary)}, get=lambda *a: REPORT) == 0
     text = summary.read_text()
     assert "5 of 8 book × market cells" in text
-    assert "| player_points | 2/2 | 1/2 |" in text
-    assert "| player_points_+_rebounds | 2/2 | 0/2 |" in text
-    assert "- NYK@BOS (8:00 PM ET): no usable close: fanduel player_points, fanduel player_points_+_rebounds" in text
-    assert "- MIA@CHA (7:00 PM ET): unchecked combos only: fanduel player_points_+_rebounds; 2 failed combo rows" in text
+    assert "| `player_points` | 2/2 | 1/2 |" in text
+    assert "| `player_points_+_rebounds` | 2/2 | 0/2 |" in text
+    assert "- NYK@BOS (8:00 PM ET): no usable close: `fanduel` (all markets)" in text
+    assert "- MIA@CHA (7:00 PM ET): unchecked combos only: `fanduel player_points_+_rebounds`; 2 failed combo rows" in text
     assert capsys.readouterr().out.count("::warning::") == 1
 
 
@@ -92,3 +92,14 @@ def test_request_failure_fails_after_bounded_retries(monkeypatch):
     monkeypatch.setattr(report_script.time, "sleep", lambda _: None)
     assert report_script.main(ENV) == 1
     assert len(attempts) == report_script.ATTEMPTS
+
+
+def test_partial_gaps_list_each_cell_and_full_gaps_collapse_per_book():
+    """Code spans keep GitHub from reading `_+_` in market names as emphasis."""
+    report = {**REPORT, "game_gaps": [{
+        "matchup_key": "LAL@UTA", "starts_at": "2026-10-25T21:00:00+00:00",
+        "missing": ["draftkings player_points", "draftkings player_points_+_rebounds", "fanduel player_points"],
+        "unchecked_only": [], "failed_rows": 0}]}
+    lines, _ = report_script.render(report)
+    assert lines[-1] == ("- LAL@UTA (5:00 PM ET): no usable close: `draftkings` (all markets), "
+                         "`fanduel player_points`")
