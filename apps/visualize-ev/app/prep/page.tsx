@@ -18,6 +18,7 @@ type PrepGame = {
   sport: Sport;
   date: string;
   status: string;
+  gameStatus: number;
   time: string;
   away: string;
   home: string;
@@ -77,7 +78,11 @@ function normalizeGame(matchup: MatchupData): PrepGame {
     key: `${matchup.sport}:${matchup.gameId}`,
     sport: matchup.sport,
     date: matchup.date.slice(0, 10),
-    status: matchup.status,
+    status:
+      matchup.sport === "nba" && matchup.gameStatus === 2
+        ? formatNbaLiveStatus(matchup)
+        : matchup.status,
+    gameStatus: matchup.gameStatus,
     time: matchup.time,
     away: matchup.away.name || matchup.away.abbreviation,
     home: matchup.home.name || matchup.home.abbreviation,
@@ -103,9 +108,29 @@ function pitcherDisplayName(name?: string): string {
   return name.trim();
 }
 
+function formatNbaLiveStatus(
+  matchup: Extract<MatchupData, { sport: "nba" }>,
+): string {
+  // Preserve breaks rather than showing a stopped clock as ongoing play.
+  if (/half|end|break/i.test(matchup.status)) return matchup.status;
+  if (!matchup.period) return matchup.status || "Live";
+  const period =
+    matchup.period <= 4
+      ? `Q${matchup.period}`
+      : matchup.period === 5
+        ? "OT"
+        : `${matchup.period - 4}OT`;
+  const iso = /^PT(\d+)M([\d.]+)S$/.exec(matchup.gameClock || "");
+  const clock = iso
+    ? `${Number(iso[1])}:${Math.floor(Number(iso[2])).toString().padStart(2, "0")}`
+    : matchup.gameClock || "";
+  return `${period} ${clock}`.trim();
+}
+
 function formatGameStatus(game: PrepGame): string {
   const status = game.status || game.time || "Scheduled";
   if (game.sport !== "nba") return status;
+  if (game.gameStatus !== 1) return status;
 
   // The NBA feed supplies a 24-hour Eastern tip time separately from status.
   const clock = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(game.time);
