@@ -32,7 +32,7 @@ jobs:
       API_URL: ${{ secrets.API_URL }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check NFL and NBA windows on runner
         id: gate
@@ -64,6 +64,7 @@ jobs:
 
       # Runs even when nothing is eligible, so a league whose gate lookup
       # failed still fails the job. Collection requests are never retried.
+      # -u: unbuffered, so each log line is timestamped when it's printed.
       - name: Collect props
         if: steps.gate.outcome == 'success' && steps.wake.outcome != 'failure'
         timeout-minutes: 20
@@ -76,4 +77,4 @@ jobs:
           NBA_GATE_OK: ${{ steps.gate.outputs.nba_gate_ok }}
           NBA_ELIGIBLE: ${{ steps.gate.outputs.nba_eligible }}
           NBA_DEADLINE: ${{ steps.gate.outputs.nba_deadline }}
-        run: python3 scripts/run_props_collection.py
+        run: python3 -u scripts/run_props_collection.py
