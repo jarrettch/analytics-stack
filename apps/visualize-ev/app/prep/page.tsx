@@ -103,6 +103,20 @@ function pitcherDisplayName(name?: string): string {
   return name.trim();
 }
 
+function formatGameStatus(game: PrepGame): string {
+  const status = game.status || game.time || "Scheduled";
+  if (game.sport !== "nba") return status;
+
+  // The NBA feed supplies a 24-hour Eastern tip time separately from status.
+  const clock = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(game.time);
+  if (!clock) return status;
+  const hour = Number(clock[1]);
+  const tip = `${hour % 12 || 12}:${clock[2]} ${hour >= 12 ? "PM" : "AM"} ET`;
+  return game.status && game.status !== game.time
+    ? `${tip} · ${game.status}`
+    : tip;
+}
+
 function formatAmericanOdds(value?: number | null): string | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return value > 0 ? `+${value}` : `${value}`;
@@ -558,7 +572,7 @@ export default function SlatePrepPage() {
                                     </span>
                                     <span className="mt-1 block text-[11px] text-muted-foreground">
                                       {game.isPreseason ? "PRESEASON · " : ""}
-                                      {game.status || game.time || "Scheduled"}
+                                      {formatGameStatus(game)}
                                       {!selected ? " · EXCLUDED" : ""}
                                     </span>
                                   </span>
