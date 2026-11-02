@@ -87,7 +87,7 @@ jobs:
 
       # The coverage report explains a failure above (which games a cancelled
       # run cost), so it runs whatever the run checks found.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: ${{ !cancelled() }}
 
       - name: Wake Render

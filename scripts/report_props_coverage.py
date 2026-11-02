@@ -56,6 +56,20 @@ def render(report: dict) -> tuple[list[str], str | None]:
     return lines, warning
 
 
+def _cells(cells: list[str], markets: list[str]) -> str:
+    """'book market' cells as code spans, so GitHub doesn't read `_+_` as
+    emphasis, with a book missing every market collapsed to one entry."""
+    by_book: dict[str, list[str]] = {}
+    for cell in cells:
+        book, market = cell.split(" ", 1)
+        by_book.setdefault(book, []).append(market)
+    return ", ".join(
+        f"`{book}` (all markets)" if set(found) == set(markets)
+        else ", ".join(f"`{book} {market}`" for market in found)
+        for book, found in by_book.items()
+    )
+
+
 def _coverage_lines(report: dict) -> list[str]:
     day, gaps = report["game_date"], report["game_gaps"]
     books = list(report["matrix"])
@@ -69,7 +83,7 @@ def _coverage_lines(report: dict) -> list[str]:
         "|---" * (len(books) + 1) + "|",
     ]
     for market in markets:
-        lines.append(f"| {market} | " + " | ".join(
+        lines.append(f"| `{market}` | " + " | ".join(
             f"{report['matrix'][book][market]}/{report['games']}" for book in books) + " |")
     if gaps:
         lines += ["", "Games with gaps:"]
@@ -77,9 +91,9 @@ def _coverage_lines(report: dict) -> list[str]:
         tip = datetime.fromisoformat(gap["starts_at"]).astimezone(ET)
         parts = []
         if gap["missing"]:
-            parts.append("no usable close: " + ", ".join(gap["missing"]))
+            parts.append("no usable close: " + _cells(gap["missing"], markets))
         if gap["unchecked_only"]:
-            parts.append("unchecked combos only: " + ", ".join(gap["unchecked_only"]))
+            parts.append("unchecked combos only: " + _cells(gap["unchecked_only"], markets))
         if gap["failed_rows"]:
             parts.append(f"{gap['failed_rows']} failed combo rows")
         lines.append(f"- {gap['matchup_key']} ({tip:%-I:%M %p} ET): " + "; ".join(parts))

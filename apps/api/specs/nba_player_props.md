@@ -512,7 +512,8 @@ combined run's failure would also hide whether NFL collected.
    recall a dispatch the old job already sent.
 5. After a day of clean scheduled runs, a follow-up change deletes
    `fetch-nfl-player-props.yml` and `scripts/nfl_props_schedule_gate.py`.
-   Until step 4, pg_cron still dispatches the NFL workflow by name.
+   Until step 4, pg_cron still dispatches the NFL workflow by name. Done
+   2026-11-01, after six clean days.
 
 ## Out of scope
 

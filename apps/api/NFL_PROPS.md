@@ -35,11 +35,6 @@ collection request. Each league gets 540 seconds. Read the job summary to see
 whether rows were saved for each league. A collection request timeout can
 have an unknown database outcome; verify the collection before retrying.
 
-Until the pg_cron switch in the NBA spec's rollout order is applied, pg_cron
-still dispatches the NFL-only `fetch-nfl-player-props.yml` and its gate,
-`scripts/nfl_props_schedule_gate.py`. Both are deleted once the combined job
-has run cleanly for a day.
-
 The API repeats the schedule check using the gate's timestamp. `schedule_ok`
 must be true before an empty window is treated as a successful no-op. If server
 warm-up leaves less than the ten-minute guard, collection fails before
