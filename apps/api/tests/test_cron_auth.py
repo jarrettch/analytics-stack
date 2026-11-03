@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from main import app
-from routers import auth, mlb, nba, ncaaf, nfl, nhl, ufc, wnba
+from routers import auth, mlb, nba, ncaab, ncaaf, nfl, nhl, ufc, wnba
 
 SECRET = "test-cron-secret"
 
@@ -21,6 +21,7 @@ CRON_ROUTES = [
     pytest.param("/api/wnba/cron/fetch-odds", wnba, id="wnba"),
     pytest.param("/api/nfl/cron/fetch-odds", nfl, id="nfl"),
     pytest.param("/api/ncaaf/cron/fetch-odds", ncaaf, id="ncaaf"),
+    pytest.param("/api/ncaab/cron/fetch-odds", ncaab, id="ncaab"),
 ]
 PROTECTED_CRON_ROUTES = [
     *CRON_ROUTES,

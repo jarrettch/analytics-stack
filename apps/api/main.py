@@ -9,6 +9,7 @@ from routers import (
     nba,
     nba_player_props,
     ncaaf,
+    ncaab,
     nfl,
     nfl_player_props,
     nhl,
@@ -48,6 +49,7 @@ app.include_router(wnba.router)
 app.include_router(nfl.router)
 app.include_router(nfl_player_props.router)
 app.include_router(ncaaf.router)
+app.include_router(ncaab.router)
 app.include_router(ufc.router)
 app.include_router(usage.router)
 

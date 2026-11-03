@@ -4,9 +4,8 @@ Keyless and uncapped, but pregame only: ESPN drops a competition's `odds`
 block at kickoff, so a line not captured before then is unrecoverable. See
 specs/odds_providers.md and specs/ncaaf_dashboard.md.
 
-Wired only to NCAAF. The extractor is generic so another sport can move onto
-it later, but the SGO sports depend on de-vigged `fairOdds`, which ESPN does
-not publish.
+Wired to NCAAF and NCAAB. The SGO sports depend on de-vigged `fairOdds`,
+which ESPN does not publish.
 """
 from __future__ import annotations
 
@@ -241,9 +240,18 @@ async def fetch_espn_odds(
         collection_stats.clear()
         collection_stats.update(stats)
 
-    odds_map = load_persisted_odds(table_name=table_name)
     scoreboard = await fetch_espn_scoreboard(scoreboard_url, target, scoreboard_params)
     events = scoreboard.get("events", [])
+    # A tomorrow scoreboard can include a tip two ET calendar days from now.
+    # Load its actual dates before merging, or a missing market would erase a
+    # previously saved leg outside the default yesterday/today/tomorrow window.
+    game_dates = sorted({
+        game_date for event in events
+        if (game_date := _event_date(event)[0]) is not None
+    })
+    odds_map: dict = {}
+    for game_date in game_dates:
+        odds_map.update(load_persisted_odds(game_date, table_name=table_name))
     fresh, snapshots = extract_espn_odds(
         events, odds_map, sport=sport, tricode_for=tricode_for
     )

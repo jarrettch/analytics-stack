@@ -1,0 +1,321 @@
+{
+  "_source": {
+    "url": "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?dates=20261102&groups=50&limit=400",
+    "captured_at": "2026-11-03T01:22:32Z",
+    "notes": "Trimmed real ESPN browser capture. Retained event identity, dates, season, status, teams, overall records, venue name, broadcasts and market legs; removed unrelated fields. No retained values changed. Spread-only and pregame Hawaii variations are constructed explicitly in tests."
+  },
+  "events": [
+    {
+      "id": "401906769",
+      "date": "2026-11-02T23:00Z",
+      "name": "Miami Hurricanes at Florida Gators",
+      "season": {
+        "slug": "regular-season",
+        "type": 2,
+        "year": 2027
+      },
+      "competitions": [
+        {
+          "id": "401906769",
+          "date": "2026-11-02T23:00Z",
+          "status": {
+            "clock": 244,
+            "displayClock": "4:04",
+            "period": 2,
+            "type": {
+              "completed": false,
+              "description": "In Progress",
+              "detail": "4:04 - 2nd Half",
+              "id": "2",
+              "name": "STATUS_IN_PROGRESS",
+              "shortDetail": "4:04 - 2nd",
+              "state": "in"
+            }
+          },
+          "venue": {
+            "fullName": "Benchmark International Arena"
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "ESPN2",
+                "ESPNEWS"
+              ]
+            }
+          ],
+          "competitors": [
+            {
+              "homeAway": "home",
+              "score": "71",
+              "curatedRank": {
+                "current": 1
+              },
+              "records": [
+                {
+                  "name": "overall",
+                  "summary": "0-0",
+                  "type": "total"
+                }
+              ],
+              "team": {
+                "id": "57",
+                "abbreviation": "FLA",
+                "displayName": "Florida Gators",
+                "conferenceId": "23"
+              }
+            },
+            {
+              "homeAway": "away",
+              "score": "62",
+              "curatedRank": {
+                "current": 14
+              },
+              "records": [
+                {
+                  "name": "overall",
+                  "summary": "0-0",
+                  "type": "total"
+                }
+              ],
+              "team": {
+                "id": "2390",
+                "abbreviation": "MIA",
+                "displayName": "Miami Hurricanes",
+                "conferenceId": "2"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401926771",
+      "date": "2026-11-03T03:30Z",
+      "name": "Milwaukee Panthers at USC Trojans",
+      "season": {
+        "slug": "regular-season",
+        "type": 2,
+        "year": 2027
+      },
+      "competitions": [
+        {
+          "id": "401926771",
+          "date": "2026-11-03T03:30Z",
+          "status": {
+            "clock": 0,
+            "displayClock": "0:00",
+            "period": 0,
+            "type": {
+              "completed": false,
+              "description": "Scheduled",
+              "detail": "Mon, November 2nd at 10:30 PM EST",
+              "id": "1",
+              "name": "STATUS_SCHEDULED",
+              "shortDetail": "11/2 - 10:30 PM EST",
+              "state": "pre"
+            }
+          },
+          "venue": {
+            "fullName": "Galen Center"
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "B1G+"
+              ]
+            }
+          ],
+          "competitors": [
+            {
+              "homeAway": "home",
+              "score": "0",
+              "curatedRank": {
+                "current": 21
+              },
+              "records": [
+                {
+                  "name": "overall",
+                  "summary": "0-0",
+                  "type": "total"
+                }
+              ],
+              "team": {
+                "id": "30",
+                "abbreviation": "USC",
+                "displayName": "USC Trojans",
+                "conferenceId": "7"
+              }
+            },
+            {
+              "homeAway": "away",
+              "score": "0",
+              "curatedRank": {
+                "current": 99
+              },
+              "records": [
+                {
+                  "name": "overall",
+                  "summary": "0-0",
+                  "type": "total"
+                }
+              ],
+              "team": {
+                "id": "270",
+                "abbreviation": "MILW",
+                "displayName": "Milwaukee Panthers",
+                "conferenceId": "45"
+              }
+            }
+          ],
+          "odds": [
+            {
+              "provider": {
+                "id": "100",
+                "name": "Draft Kings"
+              },
+              "moneyline": {
+                "away": {
+                  "open": {
+                    "odds": "+2500"
+                  },
+                  "close": {
+                    "odds": "+3500"
+                  }
+                },
+                "home": {
+                  "open": {
+                    "odds": "-9000"
+                  },
+                  "close": {
+                    "odds": "-20000"
+                  }
+                }
+              },
+              "pointSpread": {
+                "away": {
+                  "open": {
+                    "line": "+25.5",
+                    "odds": "-105"
+                  },
+                  "close": {
+                    "line": "+26.5",
+                    "odds": "-115"
+                  }
+                },
+                "home": {
+                  "open": {
+                    "line": "-25.5",
+                    "odds": "-115"
+                  },
+                  "close": {
+                    "line": "-26.5",
+                    "odds": "-105"
+                  }
+                }
+              },
+              "total": {
+                "over": {
+                  "open": {
+                    "line": "o156.5",
+                    "odds": "-105"
+                  },
+                  "close": {
+                    "line": "o160.5",
+                    "odds": "-105"
+                  }
+                },
+                "under": {
+                  "open": {
+                    "line": "u156.5",
+                    "odds": "-115"
+                  },
+                  "close": {
+                    "line": "u160.5",
+                    "odds": "-115"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401920122",
+      "date": "2026-11-03T03:30Z",
+      "name": "Cal State San Marcos Cougars at Cal Poly Mustangs",
+      "season": {
+        "slug": "regular-season",
+        "type": 2,
+        "year": 2027
+      },
+      "competitions": [
+        {
+          "id": "401920122",
+          "date": "2026-11-03T03:30Z",
+          "status": {
+            "clock": 0,
+            "displayClock": "0:00",
+            "period": 0,
+            "type": {
+              "completed": false,
+              "description": "Scheduled",
+              "detail": "Mon, November 2nd at 10:30 PM EST",
+              "id": "1",
+              "name": "STATUS_SCHEDULED",
+              "shortDetail": "11/2 - 10:30 PM EST",
+              "state": "pre"
+            }
+          },
+          "venue": {
+            "fullName": "Mott Athletics Center"
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "ESPN+"
+              ]
+            }
+          ],
+          "competitors": [
+            {
+              "homeAway": "home",
+              "score": "0",
+              "curatedRank": {
+                "current": 99
+              },
+              "records": [
+                {
+                  "name": "overall",
+                  "summary": "0-0",
+                  "type": "total"
+                }
+              ],
+              "team": {
+                "id": "13",
+                "abbreviation": "CP",
+                "displayName": "Cal Poly Mustangs",
+                "conferenceId": "9"
+              }
+            },
+            {
+              "homeAway": "away",
+              "score": "0",
+              "curatedRank": {
+                "current": 99
+              },
+              "team": {
+                "id": "3182",
+                "abbreviation": "CSSM",
+                "displayName": "Cal State San Marcos Cougars"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
