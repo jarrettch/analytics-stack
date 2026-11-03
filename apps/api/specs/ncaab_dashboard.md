@@ -2,6 +2,7 @@
 
 _Created: 2026-11-02 (scope; not yet implemented)_
 _Revised: 2026-11-02 after review: nullable projections, a slate-date rule for post-midnight tips, ranked-toggle selection rules, the pre-10am collection limit, and dashboard ranked-only by default. Second review the same day: persisted rows load for the scoreboard's own dates, and each collection runs as its own guarded step_
+_Revised: 2026-11-02 to add tournament round labels and seeds (Phase 4), with the women's and bracket findings under Deferred_
 
 Men's Division I college basketball, built the way NCAAF was
 (`ncaaf_dashboard.md`). ESPN supplies the slate and DraftKings odds in one
@@ -430,6 +431,160 @@ that's a separate one-line change, not part of this work.
 `groupHeading` falls through to "NCAAB". `normalizeGame` needs no live-status
 branch because the server already formats halves.
 
+## Tournaments: round labels and seeds (Phase 4)
+
+_Added 2026-11-02 from ESPN's March 2025 and March 2026 scoreboards._
+
+This has to ship before conference tournaments start, around 2027-03-03. The
+NCAA tournament's First Four follows about two weeks later. It needs Phase 3
+merged first, because the ranked rule below changes Phase 3's prep filter.
+
+### What ESPN gives us
+
+Every tournament game has `competitions[0].type.abbreviation == "TRNMNT"`.
+Regular-season games have `"STD"`, and early March has both on the same day.
+
+`competitions[0].tournamentId` names the event:
+
+| id | event | `season.type` |
+|---|---|---|
+| 22 | NCAA tournament (2025 and 2026) | 3 |
+| 21 | NIT | 3 |
+| 161 | College Basketball Crown | 3 |
+| 1-41 | conference tournaments: 2 A-10, 3 ACC, 9 Big Ten, 27 SEC, and so on | 2 |
+
+Conference tournaments count as regular season (`season.type == 2`), so
+`season.type` alone can't find them. Use `type.abbreviation`.
+
+`competitions[0].notes[0].headline` holds the round:
+
+```text
+T. Rowe Price ACC Tournament - Quarterfinal
+Phillips 66 Big 12 Tournament - Semifinal
+NIT - Championship
+NCAA Men's Basketball Championship - West Region - 1st Round   (2026)
+Men's Basketball Championship - South Region - First Four      (2025)
+NCAA Men's Basketball Championship - Final Four
+College Basketball Crown Championship Game                     (no separator)
+```
+
+The tournament name in front is unreliable. Sponsors come and go ("Barbasol
+Horizon League Championship", "Ivy League Tournament pres. by TIAA"), and the
+NCAA's own prefix changed between 2025 and 2026. **Identify the NCAA
+tournament by `tournamentId == 22` only. Never key on the name.** Read the
+round from the last ` - ` segment, and the region from the segment before it
+when that segment ends in "Region".
+
+Round suffixes seen across both seasons: `1st Round`, `2nd Round`,
+`3rd Round`, `Quarterfinal`, `Semifinal`, `Semifinals`, `Final`,
+`Championship`, `First Four`, `Sweet 16`, `Elite 8`, `Final Four`,
+`National Championship`.
+
+### Seeds: ESPN reuses the rank field
+
+The scoreboard has no `seed` field, and neither does the summary header.
+Instead, **in NCAA tournament games `curatedRank.current` is the tournament
+seed, not the AP rank.** Examples:
+
+| game | `curatedRank` |
+|---|---|
+| Arizona vs LIU, West 1st Round | 1, 16 |
+| Lehigh vs Prairie View, South First Four | 16, 16 |
+| NC State vs Texas, West First Four | 11, 11 |
+| Duke vs FSU, ACC Quarterfinal | 1, 99 (AP rank, unchanged) |
+| NIT and Crown finals | 99, 99 |
+
+Shipped Phases 1-3 read that field as AP rank, so without this phase March
+breaks quietly:
+
+- the card puts LIU's seed `16` where an AP rank goes;
+- prep copies it as `#16 LIU`, which reads as the AP's 16th-ranked team;
+- ranked-only lets through every NCAA tournament game, because every team
+  has a "rank".
+
+Conference tournament seeds aren't on the scoreboard. Those games get round
+labels and keep AP ranks, with no seeds.
+
+### API rules
+
+On `NCAABMatchupData`:
+
+- `roundLabel: string | null`. `null` for every non-tournament game.
+- `neutralSite: boolean`, from `competitions[0].neutralSite`.
+
+On `NCAABTeamData`:
+
+- `seed: number | null`. Only for `tournamentId == 22`: `seed` is
+  `curatedRank.current` (0 and 99 become `null`) and `rank` is `null`, since
+  ESPN gives no AP rank in those games. Everywhere else `seed` is `null` and
+  `rank` works as it does today.
+
+`roundLabel` format, uppercase:
+
+| game | label |
+|---|---|
+| NCAA, First Four through Elite 8 | `{REGION} · {ROUND}`: `WEST · FIRST FOUR`, `EAST · R64`, `SOUTH · R32`, `MIDWEST · SWEET 16`, `WEST · ELITE 8` |
+| NCAA, Final Four | `FINAL FOUR` |
+| NCAA, National Championship | `TITLE GAME` |
+| conference tournament | `{CONF} {ROUND}`: `ACC QF`, `BIG TEN SF`, `SEC FINAL` |
+| NIT | `NIT {ROUND}` |
+| Crown | `CROWN {ROUND}`, and `CROWN FINAL` for the headline with no separator |
+
+Round abbreviations: `1st Round` R1, `2nd Round` R2, `3rd Round` R3,
+`Quarterfinal` QF, `Semifinal`/`Semifinals` SF, `Final`/`Championship` FINAL.
+The NCAA tournament uses R64 and R32 rather than R1 and R2, because that's
+what bettors call those rounds.
+
+`{CONF}` is the conference short name we already get from standings
+(`ACC`, `Big Ten`, `Mountain West`). Use it only when both teams have the same
+conference. Otherwise use `CONF`.
+
+**An unrecognized round is never dropped.** If the suffix doesn't match the
+table, the label is the raw suffix in uppercase. A missing headline on a
+`TRNMNT` game gives `TOURNAMENT`. New sponsors and renamed rounds should
+degrade to an ugly label, never a blank one.
+
+### Ranked-only in March
+
+Ranked-only passes a game when either team has a `rank` **or a `seed`**.
+During the NCAA tournament that shows every NCAA game and hides the NIT and
+Crown, unless an AP-ranked team plays in one. That rule goes in the shared
+`collegeFilters` (dashboard) and `slatePrep` (prep) modules. The toggle keeps
+its "Ranked" label.
+
+NCAAF doesn't change. CFP games keep reading `curatedRank` as rank, as
+`MatchupCard`'s comment explains, and NCAAF teams have no `seed` field.
+
+### Display
+
+- **Card:** show `roundLabel` in the same place NCAAF shows its week label.
+  The team marker shows a seed as `(1)` and an AP rank as a plain `1`. A team
+  never has both.
+- **Prep copy:** seeds as `(1) Arizona`, AP ranks as `#5 Duke`. Neutral-site
+  games use `vs` instead of `@`, since every tournament game is neutral-site
+  and ESPN's home/away there is arbitrary. The round label goes before the
+  matchup in brackets:
+  `[EAST · R64] (1) Duke vs (16) Siena — Spread ...`.
+- `matchup_key` stays `AWAY@HOME` from ESPN. `neutralSite` only changes the
+  display, never the persistence key.
+
+### Tests
+
+Build the fixtures from real March 2026 scoreboards (`dates=20260312`,
+`20260317`, `20260319`, `20260326`, `20260404`, `20260406`), plus one March
+2025 First Four event for the old `Men's Basketball Championship` prefix.
+Cover:
+
+- ACC quarterfinal: `ACC QF`, AP rank kept, `seed` null;
+- First Four: both teams seeded, `rank` null, `SOUTH · FIRST FOUR`;
+- Round of 64, Sweet 16, Final Four, title game;
+- NIT final and the Crown title game with no separator;
+- an unknown suffix and a missing headline;
+- a regular-season game on a March date: no label;
+- ranked-only passing a 16-vs-16 First Four game and hiding an unranked NIT
+  game, in both the dashboard filter and prep;
+- the prep copy line with brackets, parentheses and `vs`.
+
 ## Phases
 
 1. **Collection.** Migration, `routers/ncaab.py` with `/cron/fetch-odds`
@@ -448,13 +603,21 @@ branch because the server already formats halves.
    no leader highlight.
 3. **Slate prep.** Ranked default with the visibility rules, rank prefix,
    `slateDate` filtering for NCAAB and NCAAF.
+4. **Tournaments.** `roundLabel`, `seed`, `neutralSite`; ranked-or-seeded in
+   both filters; card and prep display. One PR touching API and UI, after
+   Phase 3 merges and before 2027-03-03.
 
 ## Deferred
 
-- Women's basketball. It plays quarters and needs its own status mapping.
-- Conference tournament and NCAA tournament labels and seeds. ESPN's
-  `season.type == 3` and the event's `notes` headline carry the round. This
-  has to land before conference tournaments start in early March.
+- Women's college basketball. ESPN carries no lines for it: 0 of 82 pregame
+  games priced on Nov 2-4, 2026. SharpAPI lists `ncaaw` as a league, but its
+  free tier returned no DraftKings or FanDuel rows on 2026-11-02
+  (`reason: no_match`), while `ncaab` returned 44 games. Re-check closer to
+  conference play. It also plays quarters and would need its own status
+  mapping.
+- An interactive tournament bracket (D3). Separate project; needs its own
+  check of whether ESPN exposes bracket data.
+- Conference tournament seeds. They aren't on the scoreboard.
 - Game detail page and box scores.
 - A second sportsbook via SharpAPI and cross-book de-vigging.
 - KenPom/BPI/NET-style ratings.
