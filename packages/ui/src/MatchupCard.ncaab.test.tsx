@@ -38,23 +38,23 @@ describe("NCAAB matchup card", () => {
       matchup.projectedTotal = null
       const { html, scores } = render(matchup)
       expect(html).toContain("Projected Score")
-      expect(scores.map((score) => score.text)).toEqual([away == null ? "--" : String(away), home == null ? "--" : String(home)])
+      expect(scores.map((score) => score.text)).toEqual([away == null ? "--" : String(Math.round(away)), home == null ? "--" : String(Math.round(home))])
       for (const score of scores) expect(score.className).not.toContain("text-emerald-400")
     },
   )
 
-  it("preserves half-point projections and highlights only the higher score", () => {
+  it("rounds half-point projections to whole numbers and highlights only the higher score", () => {
     const { scores } = render(ncaab())
-    expect(scores.map((score) => score.text)).toEqual(["69", "76.5"])
+    expect(scores.map((score) => score.text)).toEqual(["69", "77"])
     expect(scores[0]?.className).not.toContain("text-emerald-400")
     expect(scores[1]?.className).toContain("text-emerald-400")
   })
 
-  it("displays at most one decimal without adding a trailing zero", () => {
+  it("rounds fractional projections to the nearest whole number", () => {
     const matchup = ncaab()
-    matchup.away.predictedScore = 68.75
+    matchup.away.predictedScore = 68.4
     const { scores } = render(matchup)
-    expect(scores.map((score) => score.text)).toEqual(["68.8", "76.5"])
+    expect(scores.map((score) => score.text)).toEqual(["68", "77"])
   })
 
   it.each(["2H 5:12", "Halftime", "OT 3:21", "2OT 0:42"])(

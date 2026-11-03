@@ -876,7 +876,7 @@ export function MatchupCard({
   const { away, home } = matchup
   const projectedScore = (score: number | null) => score == null
     ? "--"
-    : matchup.sport === "ncaab" ? Number(score.toFixed(1)) : score
+    : matchup.sport === "ncaab" ? Math.round(score) : score
   const hasWinProb = away.winProbability !== null && home.winProbability !== null
   const awayProbPct = hasWinProb ? (away.winProbability as number) * 100 : 0
   const homeProbPct = hasWinProb ? (home.winProbability as number) * 100 : 0
