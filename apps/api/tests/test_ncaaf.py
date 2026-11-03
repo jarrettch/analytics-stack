@@ -181,11 +181,11 @@ def test_game_without_odds_block_is_absent_from_fresh_map():
 # --- /today -----------------------------------------------------------------
 
 
-def _run_today(scoreboard: dict, persisted: dict, standings: dict | None = None):
+def _run_today(scoreboard: dict, persisted: dict, standings: dict | None = None, *, slate=SLATE):
     with (
         patch.object(utils, "supabase", MagicMock()),
         patch.object(ncaaf, "cache", _fresh_cache()),
-        patch.object(ncaaf, "slate_date_et", return_value=SLATE),
+        patch.object(ncaaf, "slate_date_et", return_value=slate),
         patch.object(ncaaf, "fetch_espn_scoreboard", AsyncMock(return_value=scoreboard)) as fetch,
         patch.object(ncaaf, "load_persisted_odds", return_value=persisted),
         patch.object(ncaaf, "_standings_for_season", AsyncMock(return_value=standings or {})),
@@ -218,6 +218,37 @@ def test_unranked_99_normalizes_to_null():
     illinois = games[1]["away"]
     assert illinois["abbreviation"] == "ILL"
     assert illinois["rank"] is None
+
+
+@pytest.mark.parametrize("now", [datetime(2026, 11, 9, 23, tzinfo=ET), datetime(2026, 11, 10, 1, tzinfo=ET)])
+def test_post_midnight_kickoff_stays_on_previous_slate(now):
+    # Replay the Hawai'i timing case with the football fixture: the Nov 9
+    # scoreboard carries a 1am ET Nov 10 kickoff, with odds keyed by tip date.
+    scoreboard = _scoreboard()
+    event = scoreboard["events"][0]
+    scoreboard["events"] = [event]
+    event["date"] = "2026-11-10T06:00Z"
+    competition = _competition(scoreboard)
+    competition["date"] = event["date"]
+    del competition["odds"]
+    competition["status"] = {
+        "period": 1 if now.hour == 1 else 0,
+        "displayClock": "15:00",
+        "type": {"state": "in" if now.hour == 1 else "pre"},
+    }
+    with patch.object(utils, "datetime", _frozen_at(now)):
+        slate = ncaaf.slate_date_et()
+
+    games, fetch = _run_today(
+        scoreboard, {("2026-11-10", "TEX@TENN"): {"overUnder": 54.5}}, slate=slate,
+    )
+
+    assert fetch.await_args.args[1] == date(2026, 11, 9)
+    assert len(games) == 1
+    assert games[0]["date"] == "2026-11-10"
+    assert games[0]["slateDate"] == "2026-11-09"
+    assert games[0]["overUnder"] == 54.5
+    assert games[0]["gameStatus"] == (2 if now.hour == 1 else 1)
 
 
 def test_kicked_off_game_stays_on_board_through_persisted_odds():

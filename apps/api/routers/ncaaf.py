@@ -198,6 +198,7 @@ def _matchup(event: dict, odds: dict, standings: dict, slate_date: date) -> dict
         "period": period,
         "gameClock": game_clock,
         "date": game_date.isoformat(),
+        "slateDate": slate_date.isoformat(),
         "time": format_et_time(starts_at),
         "venue": (competition.get("venue") or {}).get("fullName", "TBD"),
         "broadcast": ", ".join(broadcasts) or "N/A",

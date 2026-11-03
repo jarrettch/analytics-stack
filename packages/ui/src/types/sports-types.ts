@@ -154,6 +154,7 @@ export interface NFLMatchupData extends BaseMatchupData {
 // NFLTeamData, and an extends clause can't narrow either.
 export interface NCAAFMatchupData extends BaseMatchupData {
   sport: "ncaaf"
+  slateDate?: string
   gameStatus: number
   period: number
   gameClock: string | null
