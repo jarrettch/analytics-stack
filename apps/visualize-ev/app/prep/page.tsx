@@ -5,7 +5,9 @@ import Link from "next/link";
 import { Clipboard, ClipboardCheck, Plus, X } from "lucide-react";
 import { type MatchupData, type Sport, SPORT_LABELS } from "@repo/ui";
 
-const SUPPORTED_SPORTS: Sport[] = ["mlb", "wnba", "nfl", "ncaaf", "nba", "nhl"];
+const SUPPORTED_SPORTS = ["mlb", "wnba", "nfl", "ncaaf", "nba", "nhl"] as const satisfies readonly Sport[];
+// Prep only tracks its supported sports; dashboard additions do not enable them here.
+type PrepSport = (typeof SUPPORTED_SPORTS)[number];
 
 type LoadState =
   | { kind: "idle"; games: PrepGame[] }
@@ -56,7 +58,7 @@ function easternDateKey(now = new Date()): string {
   return `${value.year}-${value.month}-${value.day}`;
 }
 
-function emptyLoadStates(): Record<Sport, LoadState> {
+function emptyLoadStates(): Record<PrepSport, LoadState> {
   return {
     mlb: { kind: "idle", games: [] },
     wnba: { kind: "idle", games: [] },
@@ -225,9 +227,9 @@ function groupHeading(sport: Sport, games: PrepGame[]): string {
 }
 
 function toSlateText(
-  sports: Sport[],
+  sports: PrepSport[],
   selectedGames: Set<string>,
-  states: Record<Sport, LoadState>,
+  states: Record<PrepSport, LoadState>,
 ): string {
   return sports
     .flatMap((sport) => {
@@ -291,10 +293,10 @@ async function fetchSport(sport: Sport): Promise<PrepGame[]> {
 }
 
 export default function SlatePrepPage() {
-  const [activeSports, setActiveSports] = useState<Sport[]>([]);
-  const activeSportsRef = useRef<Sport[]>([]);
+  const [activeSports, setActiveSports] = useState<PrepSport[]>([]);
+  const activeSportsRef = useRef<PrepSport[]>([]);
   const [states, setStates] =
-    useState<Record<Sport, LoadState>>(emptyLoadStates);
+    useState<Record<PrepSport, LoadState>>(emptyLoadStates);
   const [selectedGames, setSelectedGames] = useState<Set<string>>(
     () => new Set(),
   );
@@ -308,12 +310,12 @@ export default function SlatePrepPage() {
     0,
   );
 
-  function setSports(next: Sport[]) {
+  function setSports(next: PrepSport[]) {
     activeSportsRef.current = next;
     setActiveSports(next);
   }
 
-  async function addSport(sport: Sport) {
+  async function addSport(sport: PrepSport) {
     if (activeSportsRef.current.includes(sport)) return;
     setSports([...activeSportsRef.current, sport]);
     setCopyState("idle");
@@ -354,7 +356,7 @@ export default function SlatePrepPage() {
     }
   }
 
-  function removeSport(sport: Sport) {
+  function removeSport(sport: PrepSport) {
     setSports(activeSportsRef.current.filter((item) => item !== sport));
     setSelectedGames((previous) => {
       const next = new Set(previous);
