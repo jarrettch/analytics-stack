@@ -1,11 +1,11 @@
-name: Fetch NCAAF Odds
+name: Fetch College Odds
 
-# NCAAF odds come from ESPN at zero SGO cost, so this stays out of
+# NCAAF and NCAAB odds come from ESPN at zero SGO cost, so this stays out of
 # fetch-odds.yml, which is the SGO entity-budget surface.
 #
-# ESPN drops a game's odds at kickoff. The morning run is the only chance to
-# price an early kickoff: if it fails, re-dispatch it rather than waiting for
-# the evening run, which catches late kickoffs only.
+# ESPN drops odds at tipoff/kickoff. Collect NCAAB today and tomorrow to
+# also capture posted lines for pre-10am ET tips. Each collection is attempted
+# even when wake-up or an earlier collection fails. Keep this filename for pg_cron.
 #
 # Scheduled by Supabase pg_cron, since GitHub's schedule ran hours late:
 # supabase/migrations/20261023000000_schedule_collectors_with_pg_cron.sql
@@ -20,7 +20,9 @@ jobs:
       API_URL: ${{ secrets.API_URL }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
     steps:
-      - name: Fetch NCAAF odds
+      - uses: actions/checkout@v4
+
+      - name: Wake Render
         run: |
           echo "Waking up server..."
 
@@ -40,41 +42,14 @@ jobs:
             sleep 15
           done
 
-          echo "Fetching NCAAF odds..."
-          if response=$(curl \
-            --retry 4 \
-            --retry-delay 15 \
-            --retry-max-time 180 \
-            --silent \
-            --show-error \
-            --fail \
-            --max-time 120 \
-            --request POST \
-            --header "Authorization: Bearer ${CRON_SECRET}" \
-            "$API_URL/api/ncaaf/cron/fetch-odds"); then
-            printf 'Response: %s\n' "$response"
-          else
-            curl_status=$?
-            printf 'Request failed:\n%s\n' "$response" >&2
-            exit "$curl_status"
-          fi
+      - name: Fetch NCAAF odds (today)
+        if: ${{ !cancelled() }}
+        run: scripts/collect_espn_odds.sh ncaaf 0
 
-          # Still required: collector failures come back as HTTP 200.
-          if ! jq -e '.success == true' >/dev/null <<<"$response"; then
-            printf 'Failed to fetch NCAAF odds:\n%s\n' "$response" >&2
-            exit 1
-          fi
+      - name: Fetch NCAAB odds (today)
+        if: ${{ !cancelled() }}
+        run: scripts/collect_espn_odds.sh ncaab 0
 
-          fresh=$(jq -r '.fresh_from_api // 0' <<<"$response")
-          candidates=$(jq -r '.pregame_snapshot_candidates // 0' <<<"$response")
-          inserted=$(jq -r '.snapshots_inserted // 0' <<<"$response")
-          deduplicated=$(jq -r '.snapshots_deduplicated // 0' <<<"$response")
-          persistence_ok=$(jq -r '.snapshot_persistence_ok // false' <<<"$response")
-
-          echo "NCAAF odds: fresh=${fresh} candidates=${candidates} inserted=${inserted} deduplicated=${deduplicated}"
-          # fresh=0 is normal on days without FBS games.
-
-          if [ "$candidates" -gt 0 ] && [ "$persistence_ok" != "true" ]; then
-            echo "NCAAF odds history persistence failed" >&2
-            exit 1
-          fi
+      - name: Fetch NCAAB odds (tomorrow)
+        if: ${{ !cancelled() }}
+        run: scripts/collect_espn_odds.sh ncaab 1

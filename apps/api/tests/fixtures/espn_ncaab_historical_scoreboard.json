@@ -1,0 +1,266 @@
+{
+  "_source": {
+    "url": "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?dates=20251109&groups=50&limit=400",
+    "captured_on": "2026-11-03",
+    "notes": "Trimmed real ESPN browser capture. Retained event identity, dates, season, status, teams, overall records, venue name, broadcasts and market legs; removed unrelated fields. No retained values changed. Spread-only and pregame Hawaii variations are constructed explicitly in tests."
+  },
+  "events": [
+    {
+      "id": "401818548",
+      "date": "2025-11-09T19:00Z",
+      "name": "Vermont Catamounts at Brown Bears",
+      "season": {
+        "slug": "regular-season",
+        "type": 2,
+        "year": 2026
+      },
+      "competitions": [
+        {
+          "id": "401818548",
+          "date": "2025-11-09T19:00Z",
+          "status": {
+            "clock": 0,
+            "displayClock": "0:00",
+            "period": 4,
+            "type": {
+              "altDetail": "2OT",
+              "completed": true,
+              "description": "Final",
+              "detail": "Final/2OT",
+              "id": "3",
+              "name": "STATUS_FINAL",
+              "shortDetail": "Final/2OT",
+              "state": "post"
+            }
+          },
+          "venue": {
+            "fullName": "Pizzitola Sports Center"
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "ESPN+"
+              ]
+            }
+          ],
+          "competitors": [
+            {
+              "homeAway": "home",
+              "score": "84",
+              "curatedRank": {
+                "current": 99
+              },
+              "records": [
+                {
+                  "name": "overall",
+                  "summary": "0-2",
+                  "type": "total"
+                }
+              ],
+              "team": {
+                "id": "225",
+                "abbreviation": "BRWN",
+                "displayName": "Brown Bears",
+                "conferenceId": "12"
+              }
+            },
+            {
+              "homeAway": "away",
+              "score": "89",
+              "curatedRank": {
+                "current": 99
+              },
+              "records": [
+                {
+                  "name": "overall",
+                  "summary": "3-0",
+                  "type": "total"
+                }
+              ],
+              "team": {
+                "id": "261",
+                "abbreviation": "UVM",
+                "displayName": "Vermont Catamounts",
+                "conferenceId": "1"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401827257",
+      "date": "2025-11-09T23:30Z",
+      "name": "Southern Miss Golden Eagles at South Carolina Gamecocks",
+      "season": {
+        "slug": "regular-season",
+        "type": 2,
+        "year": 2026
+      },
+      "competitions": [
+        {
+          "id": "401827257",
+          "date": "2025-11-09T23:30Z",
+          "status": {
+            "clock": 0,
+            "displayClock": "0:00",
+            "period": 3,
+            "type": {
+              "altDetail": "OT",
+              "completed": true,
+              "description": "Final",
+              "detail": "Final/OT",
+              "id": "3",
+              "name": "STATUS_FINAL",
+              "shortDetail": "Final/OT",
+              "state": "post"
+            }
+          },
+          "venue": {
+            "fullName": "Colonial Life Arena"
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "SEC Network"
+              ]
+            }
+          ],
+          "competitors": [
+            {
+              "homeAway": "home",
+              "score": "83",
+              "curatedRank": {
+                "current": 99
+              },
+              "records": [
+                {
+                  "name": "overall",
+                  "summary": "2-0",
+                  "type": "total"
+                }
+              ],
+              "team": {
+                "id": "2579",
+                "abbreviation": "SC",
+                "displayName": "South Carolina Gamecocks",
+                "conferenceId": "23"
+              }
+            },
+            {
+              "homeAway": "away",
+              "score": "79",
+              "curatedRank": {
+                "current": 99
+              },
+              "records": [
+                {
+                  "name": "overall",
+                  "summary": "1-2",
+                  "type": "total"
+                }
+              ],
+              "team": {
+                "id": "2572",
+                "abbreviation": "USM",
+                "displayName": "Southern Miss Golden Eagles",
+                "conferenceId": "27"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401824896",
+      "date": "2025-11-10T06:00Z",
+      "name": "East Texas A&M Lions at Hawai'i Rainbow Warriors",
+      "season": {
+        "slug": "regular-season",
+        "type": 2,
+        "year": 2026
+      },
+      "competitions": [
+        {
+          "id": "401824896",
+          "date": "2025-11-10T06:00Z",
+          "status": {
+            "clock": 0,
+            "displayClock": "0:00",
+            "period": 2,
+            "type": {
+              "completed": true,
+              "description": "Final",
+              "detail": "Final",
+              "id": "3",
+              "name": "STATUS_FINAL",
+              "shortDetail": "Final",
+              "state": "post"
+            }
+          },
+          "venue": {
+            "fullName": "Stan Sheriff Center"
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "ESPN+"
+              ]
+            },
+            {
+              "market": "home",
+              "names": [
+                "Spectrum Sports Net"
+              ]
+            }
+          ],
+          "competitors": [
+            {
+              "homeAway": "home",
+              "score": "100",
+              "curatedRank": {
+                "current": 99
+              },
+              "records": [
+                {
+                  "name": "overall",
+                  "summary": "1-1",
+                  "type": "total"
+                }
+              ],
+              "team": {
+                "id": "62",
+                "abbreviation": "HAW",
+                "displayName": "Hawai'i Rainbow Warriors",
+                "conferenceId": "9"
+              }
+            },
+            {
+              "homeAway": "away",
+              "score": "74",
+              "curatedRank": {
+                "current": 99
+              },
+              "records": [
+                {
+                  "name": "overall",
+                  "summary": "1-2",
+                  "type": "total"
+                }
+              ],
+              "team": {
+                "id": "2837",
+                "abbreviation": "ETAM",
+                "displayName": "East Texas A&M Lions",
+                "conferenceId": "25"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

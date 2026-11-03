@@ -358,8 +358,9 @@ def test_cron_collects_the_calendar_date_and_reports_stats():
 
 
 def test_cron_reports_failure_when_persisted_read_raises():
-    with patch.object(
-        espn_odds, "load_persisted_odds", side_effect=RuntimeError("supabase down")
+    with (
+        patch.object(espn_odds, "fetch_espn_scoreboard", AsyncMock(return_value=_scoreboard())),
+        patch.object(espn_odds, "load_persisted_odds", side_effect=RuntimeError("supabase down")),
     ):
         result = asyncio.run(ncaaf.cron_fetch_odds(offset=0))
 

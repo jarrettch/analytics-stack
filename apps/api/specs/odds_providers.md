@@ -135,7 +135,7 @@ so anything not captured pregame is unrecoverable, and any route that filters on
 "has a line" must count persisted values or live games will vanish from the
 board mid-game.
 
-Backs **NCAAF** (see `ncaaf_dashboard.md`).
+Backs **NCAAF** and **NCAAB** (see `ncaaf_dashboard.md` and `ncaab_dashboard.md`).
 
 ## Choosing for a new sport
 
