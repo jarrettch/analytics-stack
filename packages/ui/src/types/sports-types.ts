@@ -1,4 +1,4 @@
-export type Sport = "nba" | "nfl" | "mlb" | "nhl" | "wnba" | "ncaaf"
+export type Sport = "nba" | "nfl" | "mlb" | "nhl" | "wnba" | "ncaaf" | "ncaab"
 
 export interface BaseTeamData {
   name: string
@@ -10,7 +10,7 @@ export interface BaseTeamData {
   division?: string
   conference: string
   streak: string
-  predictedScore: number
+  predictedScore: number | null
   winProbability: number | null  // null when no odds available — render rule: hide the bar, don't render an even split
 }
 
@@ -48,6 +48,15 @@ export interface NCAAFTeamData extends BaseTeamData {
   conferenceId: string       // ESPN team.conferenceId
 }
 
+// Men's college basketball uses standings averages, not NBA efficiency ratings.
+export interface NCAABTeamData extends BaseTeamData {
+  score: number
+  pointsFor: number | null
+  pointsAgainst: number | null
+  rank: number | null
+  conferenceId: string
+}
+
 // MLB-specific team data
 export interface MLBTeamData extends BaseTeamData {
   score: number        // Live/final score
@@ -83,7 +92,7 @@ export interface BaseMatchupData {
   spreadResult?: boolean | "push" | null  // Result for the displayed favorite
   overUnder?: number | null      // Market total from odds API
   totalResult?: "over" | "under" | "push" | null  // Result vs O/U line
-  projectedTotal?: number        // Model's projected total
+  projectedTotal?: number | null // Model's projected total
   model: string
 }
 
@@ -163,6 +172,25 @@ export interface NCAAFMatchupData extends BaseMatchupData {
   awayMoneyline?: number | null
 }
 
+export interface NCAABMatchupData extends BaseMatchupData {
+  sport: "ncaab"
+  slateDate?: string
+  gameStatus: number
+  period: number
+  gameClock: string | null
+  away: NCAABTeamData
+  home: NCAABTeamData
+  seasonType: string
+  statsSeason: number
+  pregameSpread?: number | null
+  spreadOddsHome?: number | null
+  spreadOddsAway?: number | null
+  overOdds?: number | null
+  underOdds?: number | null
+  homeMoneyline?: number | null
+  awayMoneyline?: number | null
+}
+
 export interface MLBMatchupData extends BaseMatchupData {
   sport: "mlb"
   gameNumber?: number
@@ -199,7 +227,7 @@ export interface NHLMatchupData extends BaseMatchupData {
 
 export type MatchupData =
   | NBAMatchupData | NFLMatchupData | MLBMatchupData
-  | NHLMatchupData | WNBAMatchupData | NCAAFMatchupData
+  | NHLMatchupData | WNBAMatchupData | NCAAFMatchupData | NCAABMatchupData
 
 export const SPORT_LABELS: Record<Sport, string> = {
   nba: "NBA",
@@ -208,6 +236,7 @@ export const SPORT_LABELS: Record<Sport, string> = {
   nhl: "NHL",
   wnba: "WNBA",
   ncaaf: "NCAAF",
+  ncaab: "NCAAB",
 }
 
 export const SPORT_MODELS: Record<Sport, string> = {
@@ -217,4 +246,5 @@ export const SPORT_MODELS: Record<Sport, string> = {
   nhl: "xG v5.0",
   wnba: "EV-MODEL-V1",
   ncaaf: "MARKET (DK)",
+  ncaab: "MARKET (DK)",
 }

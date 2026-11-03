@@ -2,13 +2,24 @@
 
 import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
-import { SportsDashboard, type Sport, type MatchupData, SPORT_LABELS, SPORT_MODELS } from "@repo/ui";
+import {
+  SportsDashboard,
+  type Sport,
+  type MatchupData,
+  SPORT_LABELS,
+  SPORT_MODELS,
+  collegeFilterForSlate,
+  conferenceOptions,
+  createCollegeFilters,
+  passesCollegeFilters,
+  updateCollegeFilters,
+} from "@repo/ui";
 import { Activity, ClipboardList, Crosshair, Swords } from "lucide-react";
 
 const FALLBACK_VISIBLE_SPORTS: Sport[] = ["mlb", "wnba"];
 
 // Sports with a live backend endpoint (others fall through to "coming soon").
-const LIVE_SPORTS: Sport[] = ["nba", "wnba", "nfl", "mlb", "nhl", "ncaaf"];
+const LIVE_SPORTS: Sport[] = ["nba", "wnba", "nfl", "mlb", "nhl", "ncaaf", "ncaab"];
 const LAST_SELECTED_SPORT_KEY = "sports-dashboard:last-selected-sport";
 
 function storedSport(): Sport | null {
@@ -30,37 +41,6 @@ function rememberSport(sport: Sport) {
 
 function hasGameStatus(matchup: MatchupData): matchup is MatchupData & { gameStatus: number } {
   return "gameStatus" in matchup && typeof matchup.gameStatus === "number";
-}
-
-type NCAAFMatchup = Extract<MatchupData, { sport: "ncaaf" }>;
-
-function isNcaaf(matchup: MatchupData): matchup is NCAAFMatchup {
-  return matchup.sport === "ncaaf";
-}
-
-// Conference and ranked filters only narrow what's already loaded; there's no
-// endpoint behind them.
-function conferenceOptions(matchups: MatchupData[]): [string, string][] {
-  const options = new Map<string, string>();
-  for (const matchup of matchups.filter(isNcaaf)) {
-    for (const team of [matchup.away, matchup.home]) {
-      if (team.conferenceId && team.conference !== "N/A") {
-        options.set(team.conferenceId, team.conference);
-      }
-    }
-  }
-  return [...options].sort((a, b) => a[1].localeCompare(b[1]));
-}
-
-function passesNcaafFilters(
-  matchup: MatchupData,
-  conferenceId: string,
-  rankedOnly: boolean,
-): boolean {
-  if (!isNcaaf(matchup)) return true;
-  const teams = [matchup.away, matchup.home];
-  if (rankedOnly && !teams.some((team) => team.rank != null)) return false;
-  return !conferenceId || teams.some((team) => team.conferenceId === conferenceId);
 }
 
 async function fetchSportSlate(sport: Sport): Promise<MatchupData[]> {
@@ -85,8 +65,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [preferenceReady, setPreferenceReady] = useState(false);
   const [now, setNow] = useState<Date | null>(null);
-  const [ncaafConference, setNcaafConference] = useState("");
-  const [ncaafRankedOnly, setNcaafRankedOnly] = useState(false);
+  const [collegeFilters, setCollegeFilters] = useState(createCollegeFilters);
   const lastDataRef = useRef<string>("");
   const preferredSportRef = useRef<Sport | null>(null);
   const userSelectedSportRef = useRef(false);
@@ -195,17 +174,20 @@ export default function Home() {
     };
   }, [activeSport, preferenceReady]);
 
-  const conferences = useMemo(() => conferenceOptions(matchups), [matchups]);
-  // A remembered conference that isn't on today's slate would filter
-  // invisibly: the select can't show it. Only apply one it can show.
-  const activeConference = conferences.some(([id]) => id === ncaafConference)
-    ? ncaafConference
-    : "";
+  const collegeSport = activeSport === "ncaaf" || activeSport === "ncaab" ? activeSport : null;
+  const conferences = useMemo(
+    () => collegeSport ? conferenceOptions(matchups, collegeSport) : [],
+    [matchups, collegeSport],
+  );
+  const activeCollegeFilter = useMemo(
+    () => collegeSport ? collegeFilterForSlate(collegeFilters, collegeSport, conferences) : null,
+    [collegeFilters, collegeSport, conferences],
+  );
   const displayedMatchups = useMemo(
-    () => matchups.filter((matchup) =>
-      passesNcaafFilters(matchup, activeConference, ncaafRankedOnly),
-    ),
-    [matchups, activeConference, ncaafRankedOnly],
+    () => activeCollegeFilter
+      ? matchups.filter((matchup) => passesCollegeFilters(matchup, activeCollegeFilter))
+      : matchups,
+    [matchups, activeCollegeFilter],
   );
   const gameCount = displayedMatchups.length;
   // Reads the filtered view, like the game count beside it: LIVE means a live
@@ -299,13 +281,15 @@ export default function Home() {
 
           <div className="mt-4 h-px w-full bg-border" />
 
-          {activeSport === "ncaaf" && matchups.length > 0 && (
+          {collegeSport && activeCollegeFilter && matchups.length > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               <label className="flex items-center gap-1.5">
                 Conf
                 <select
-                  value={activeConference}
-                  onChange={(event) => setNcaafConference(event.target.value)}
+                  value={activeCollegeFilter.conferenceId}
+                  onChange={(event) => setCollegeFilters((previous) =>
+                    updateCollegeFilters(previous, collegeSport, { conferenceId: event.target.value }),
+                  )}
                   className="rounded-sm border border-border bg-secondary px-1.5 py-0.5 text-foreground"
                 >
                   <option value="">All</option>
@@ -317,8 +301,10 @@ export default function Home() {
               <label className="flex items-center gap-1.5">
                 <input
                   type="checkbox"
-                  checked={ncaafRankedOnly}
-                  onChange={(event) => setNcaafRankedOnly(event.target.checked)}
+                  checked={activeCollegeFilter.rankedOnly}
+                  onChange={(event) => setCollegeFilters((previous) =>
+                    updateCollegeFilters(previous, collegeSport, { rankedOnly: event.target.checked }),
+                  )}
                 />
                 Ranked involved
               </label>
@@ -368,7 +354,7 @@ export default function Home() {
         <div className="h-px w-full bg-border" />
         <div className="flex items-center justify-between pt-2">
           <span className="font-mono text-[10px] text-muted-foreground">
-            Models: EV-MODEL-V1 (NBA/WNBA) &bull; Market + team stats (NFL) &bull; Market, DraftKings only (NCAAF) &bull; PECOTA v2.8 (MLB) &bull; xG v5.0 (NHL)
+            Models: EV-MODEL-V1 (NBA/WNBA) &bull; Market + team stats (NFL) &bull; Market, DraftKings only (NCAAF/NCAAB) &bull; PECOTA v2.8 (MLB) &bull; xG v5.0 (NHL)
           </span>
           <span className="min-w-64 text-right font-mono text-[10px] tabular-nums text-muted-foreground">
             {now

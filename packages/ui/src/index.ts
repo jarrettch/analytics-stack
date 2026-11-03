@@ -9,3 +9,4 @@ export * from "./types/ufc-types";
 export * from "./lib/utils"; // Highly recommended to export this too
 export * from "./lib/winProb";
 export * from "./lib/usageWindow";
+export * from "./lib/collegeFilters";
