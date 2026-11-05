@@ -1,135 +1,54 @@
-# Turborepo starter
+# Analytics Stack
 
-This Turborepo starter is maintained by the Turborepo core team.
+A full-stack sports analytics monorepo. Its flagship app, **Visualize EV**, brings live scores, game schedules, and sportsbook odds into one dashboard so you can follow a slate and see how lines moved before a game.
 
-## Using this example
+**Explore Visualize EV** · [Live dashboard](https://www.visualize-ev.gg/) · [Slate prep](https://www.visualize-ev.gg/prep) · [MLB pitcher strikeout odds](https://www.visualize-ev.gg/mlb/pitcher-strikeout-odds)
 
-Run the following command:
+## What’s in the app
+
+- **Multi-sport dashboard** for MLB, NBA, WNBA, NFL, NHL, and college football and basketball. Game detail pages show play-by-play and win probability where supported.
+- **Slate prep** groups upcoming matchups by date and sport, with start times, game status, and available spreads, totals, and moneylines.
+- **MLB pitcher strikeout board** compares prices across sportsbooks and shows how archived lines settled against actual strikeout totals.
+
+## How the data gets there
+
+Next.js and React power the frontend. The Python/FastAPI backend combines scoreboard feeds and sportsbook data, matches events across providers, and serves current game data alongside odds snapshots stored in Supabase/PostgreSQL. Supabase `pg_cron` dispatches GitHub Actions workflows that call authenticated collection endpoints on Render.
+
+| Area            | What to look for                                                                                                                               | Source                                                                                                                |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Live dashboard  | Polling for live game state and rendering different sports through shared, typed matchup components                                            | [Dashboard](apps/visualize-ev/app/page.tsx) · [Matchup card](packages/ui/src/MatchupCard.tsx)                         |
+| Slate dates     | Handling late-night college games whose ESPN scoreboard date and Eastern Time calendar date differ                                             | [Slate prep](apps/visualize-ev/app/prep/page.tsx) · [College basketball API](apps/api/routers/ncaab.py)               |
+| Odds collection | Timing NBA and NFL prop collection around tipoff or kickoff, archiving snapshots, and tracking usable closing prices by game, book, and market | [Collection workflow](.github/workflows/fetch-player-props.yml) · [Coverage report](scripts/report_props_coverage.py) |
+
+The workspace also includes a Dodgers roster and player browser, shared UI and configuration packages, and database migrations and SQL tests. [Dodgermetrics](apps/dodgermetrics) · [Shared packages](packages) · [Supabase](supabase)
+
+## Run locally
+
+Use **Node.js 20.9+**, **pnpm 9**, and **Python 3.11**.
+
+Install dependencies and start FastAPI from the repository root.
 
 ```sh
-npx create-turbo@latest
+pnpm install --frozen-lockfile
+cd apps/api
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m uvicorn main:app --reload --port 8000
 ```
 
-## What's inside?
+In a second terminal at the repository root, start Visualize EV.
 
-This Turborepo includes the following packages/apps:
-
-### Apps and Packages
-
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
-
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build
-
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build
-yarn dlx turbo build
-pnpm exec turbo build
+```sh
+NEXT_PUBLIC_API_URL=http://localhost:8000 pnpm --filter visualize-ev dev
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+[Local dashboard](http://localhost:3002) · [Interactive API docs](http://localhost:8000/docs)
 
+The API can start without credentials. To enable sportsbook feeds and persisted odds history, copy `.env.example` to `apps/api/.env` and fill in the relevant provider and database settings. [API environment example](apps/api/.env.example)
+
+Run the Python and shared UI tests from the repository root. The Python suite uses a loopback HTTP server for collector integration tests.
+
+```sh
+PYTHONPATH=apps/api apps/api/.venv/bin/python -m pytest apps/api/tests -q
+pnpm --filter @repo/ui test
 ```
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build --filter=docs
-
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build --filter=docs
-yarn exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-```
-
-### Develop
-
-To develop all apps and packages, run the following command:
-
-```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
-turbo dev
-
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo dev
-yarn exec turbo dev
-pnpm exec turbo dev
-```
-
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
-
-```
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
-turbo dev --filter=web
-
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo dev --filter=web
-yarn exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
-
-### Remote Caching
-
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
-turbo login
-
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo login
-yarn exec turbo login
-pnpm exec turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-```
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
-turbo link
-
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo link
-yarn exec turbo link
-pnpm exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
