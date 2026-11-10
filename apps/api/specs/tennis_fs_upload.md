@@ -1,7 +1,8 @@
 # Tennis PrizePicks Upload
 
 _Created: 2026-11-02 (scope; not yet implemented). Updated 2026-11-06: Total
-Games and Total Games Won, mixture fit, strategy-rule flags, live-row filter._
+Games and Total Games Won, mixture fit, strategy-rule flags, live-row filter.
+2026-11-09: measured bias, tour-specific bias check, stray DK set total._
 
 Price a PrizePicks tennis board pasted or dropped into the site, from any
 device, instead of from scripts on the Mac. Three stat types are priced:
@@ -116,6 +117,12 @@ Refresh = `fetch_sharp_odds(league, market, sweep=...)` from
 | `player_aces` | FD ladder (over-only) | ace rate |
 | `player_games_won` | DK main only, both sides | Total Games Won book line |
 
+`total_games` also carries a stray set-sized DK market, always 11.5, with its
+own `market_id`. It is usually flagged alternate, but on 11-07 it was the only
+`is_main_line` row for Michelsen–Hanfmann and took over that match's fit. Drop
+total lines under 15 (no best-of-3 match total is that low). When no main
+remains, use the ladder rung whose de-vigged price is closest to even.
+
 Do **not** pull `player_total_games`: despite the name, SharpAPI's DK rows for
 it are "Break On Opponent's Serve" (`player_name` says so; checked 11-05).
 
@@ -221,7 +228,7 @@ FS only:
 | `spread` | DK game spread for the player |
 | `aces_src` | `FD <line> <odds>`, `PP ladder ~x`, or `assumed <rate>` |
 | `model_median` | FS distribution |
-| `p_side_at_minus2` | the lean's side repriced as if the model ran 2 points low (Bias check) |
+| `p_under_bias` | P(under) with the line moved `BIAS_SHIFT[tour]` against it (Bias check) |
 | `rule_fs` | the strategy notes' rule of thumb, for reference only: favorite `13 + |spread| + 0.5 × aces`, underdog `7 − spread + 0.5 × aces`. Not a lean; shown so disagreement with the model is visible (Stefanini 11-05: rule 14.8 vs line 13, model under 0.56) |
 
 Total Games only:
@@ -243,7 +250,7 @@ Flags:
   read 86% on the default, then 60% once FanDuel posted her ladder). Big
   servers are badly served by the default: Rybakina u20 read 0.72 at 0.22
   aces/service game, 0.59–0.64 at a realistic 0.45–0.6 (11-05).
-- `fails_bias_check` (FS): the lean drops under 50% at `p_side_at_minus2`.
+- `fails_bias_check` (FS): an under lean whose `p_under_bias` is below 50%.
 - `ml_only` (TG/TGW): no DK total, so the match is fit to the moneyline alone
   at a tour-average serve level and typical mixture spread. The total is not
   market-pinned; show the row, never as a lean. On 11-06 these read 0.65 over
@@ -305,10 +312,11 @@ c (0.50 vs 0.56 moves mean games by 0.1).
 
 Evidence it is the right fix: the mixed fit reproduces DK's alt-total ladder at
 lines it was not fit to (Montgomery o18.5: model 0.577, DK 0.567; iid gave
-0.706). It raises WTA favorites' FS 1–1.5 points, in the direction of the
-bias check's suspected 2-point shortfall. Cirstea u21 on 11-04 (won 7-5 6-1,
-base 23) read 0.744 under iid and 0.650 mixed, and would have failed the bias
-check mixed (0.501).
+0.706). It changes the shape of the distribution more than its mean: across
+52 graded WTA favorites it raised the expected base score by only 0.3 points
+on average (`measure_fs_bias.py`, 11-09), though single matches move more
+(Cirstea u21 on 11-04, won 7-5 6-1 with base 23, read 0.744 under iid and
+0.650 mixed).
 
 Not yet shown: that it grades better. The only graded board with a saved
 snapshot (10-31) is mostly ATP and can't separate the two. `TENNIS_FIT=iid`
@@ -320,6 +328,8 @@ forces the old behaviour in the script for comparisons.
   players differently ("Daniel Merida" vs "Daniel Merida Aguilar").
 - Ace ladders and games-won lines are matched to a player by surname suffix.
 - FD `player_aces` is over-only: divide by `ONE_SIDED_MARGIN = 1.045`.
+- Total lines under 15 are dropped; with no main left, the most even ladder rung
+  stands in (Odds).
 - DK sometimes posts identical templated total ladders for near-even WTA
   matches (Shubladze–Liu and Eala–Sakkari, 11-06). Identical rows across two
   matches are expected, not a cache bug.
@@ -348,25 +358,34 @@ Fixtures saved from real inputs, committed under
 
 ## Bias check
 
-Applies to FS only. Graded boards (10-24, 10-25, 10-31) suggest the model's
-mean FS runs about 2 points low. That's unconfirmed, about 1.5 SE. A
-favorite's under can look strong only because of that bias.
-`p_side_at_minus2` reprices each lean with the line moved 2 points against it:
+Applies to FS under leans. A favorite's under can look strong only because
+the model underrates how much favorites score. `p_under_bias` reprices the
+under with the line moved `BIAS_SHIFT[tour]` points against it; an under lean
+fails when that drops below 50%. Overs are not checked.
 
-- under at line L: P(under at L − 2), the question being whether the lean
-  survives if the model is 2 points low.
-- over at line L: the suspected bias already works for overs, so
-  `p_side_at_minus2` is just P(over at L) and overs never fail the check.
+| Tour | `BIAS_SHIFT` | Why |
+|---|---|---|
+| WTA | 2.0 | WTA favorites scored 1.9 points above the model (SE 1.3, n 52) |
+| ATP | 0.0 | ATP favorites scored 1.95 points *below* it (SE 1.2, n 57) |
 
-On 10-31 every lean that passed this check hit (Tagger, Lehecka, Machac,
-Zverev). Alcaraz u19.5 couldn't be checked and missed. On 11-05 the three
-passing overs went 2 of 3. Strong-favorite unders keep failing it (Eala u21,
-Alcaraz u20.5 on 11-05; Alcaraz u23, Shelton u24 on 11-06). The page sorts
-passing leans first.
+Measured 2026-11-09 with `sports/projections/scripts/measure_fs_bias.py` over
+119 graded player-matches (10-24 to 11-08): actual base (10 + game diff +
+3 × set diff) minus the model's expected base. Pooled, the model is close to
+unbiased (+0.4, SE 0.8), so the original flat 2-point shift (from the
+WTA-heavy 10-24/10-25/10-31 boards) was the WTA effect read as a general one.
+It is not a game-spread misfit: the model's spread cover probability matches
+DK's on both tours. The ace part shows no bias (n 8, the close lines whose
+aces were entered).
 
-The 2-point figure was measured on iid runs. Once mixed runs have been graded,
-re-measure it per tour: the mixture may have removed part of the WTA bias, in
-which case the check is too strict there.
+Each tour's effect is only 1.5–1.7 SE, and the graded leans don't confirm the
+split yet: under the old flat check, rejected ATP unders went 2–3 and WTA
+unders 3–1 (11-05 to 11-08). Underdogs are barely measured (n 10). Rerun
+`measure_fs_bias.py` as boards are graded (about 90 s) and update
+`BIAS_SHIFT` from it; the port should read it from config, not hard-code it.
+
+Earlier record under the flat check: on 10-31 every passing lean hit
+(Tagger, Lehecka, Machac, Zverev); on 11-05 the three passing overs went 2 of
+3. The page sorts passing leans first.
 
 ## Storage
 
@@ -409,7 +428,7 @@ mix rows from two pulls into one model run.
 - Secret entered once, kept in `localStorage` (wrapped in try/catch; the page
   works if storage is unavailable by asking again).
 - Tabs or a filter by stat. Columns per stat:
-  - FS: start time (local), player, line, type, lean, P, P at −2, rule FS,
+  - FS: start time (local), player, line, type, lean, P, P under (bias), rule FS,
     aces source, flags.
   - Total Games: start, match, line, type, lean, P, DK P at line, fav ML,
     flags.
@@ -423,7 +442,8 @@ mix rows from two pulls into one model run.
 ## Later
 
 - **Grading (v2):** a nightly job settles `tennis_runs` from ESPN set scores
-  with `grade_tennis_fs.py` logic. Total Games and Games Won settle from set
+  with `grade_tennis_fs.py` (FS) and `grade_tennis_games.py` (Total Games,
+  Games Won) logic. Total Games and Games Won settle from set
   scores alone. ESPN has no tennis aces, so FS lines whose result depends on
   aces stay `needs_aces` until entered on the page. The morning grade has run
   before late matches finished (Cirstea 11-04 stayed "not final"); regrade
