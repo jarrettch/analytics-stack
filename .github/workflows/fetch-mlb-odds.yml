@@ -8,6 +8,8 @@ on:
 
 jobs:
   fetch-mlb-odds:
+    # Set the repository Actions variable to true when MLB collection resumes.
+    if: ${{ vars.MLB_ODDS_COLLECTION_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     environment: production
     env:

@@ -69,6 +69,7 @@ jobs:
           # lines may not yet be posted. Don't fail the job.
 
       - name: Fetch tomorrow's MLB odds
+        if: ${{ vars.MLB_ODDS_COLLECTION_ENABLED == 'true' }}
         run: |
           echo "Fetching tomorrow's MLB odds..."
           if response=$(curl \

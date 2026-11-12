@@ -23,6 +23,7 @@ jobs:
     environment: production
     env:
       GH_TOKEN: ${{ github.token }}
+      MLB_ODDS_COLLECTION_ENABLED: ${{ vars.MLB_ODDS_COLLECTION_ENABLED == 'true' }}
     steps:
       - name: Find collectors with no recent run
         shell: bash
@@ -57,7 +58,9 @@ jobs:
           # Daily collectors: 26 hours leaves slack for a late check.
           check fetch-odds.yml 26
           check fetch-tomorrow-odds.yml 26
-          check fetch-mlb-odds.yml 26
+          if [[ "$MLB_ODDS_COLLECTION_ENABLED" == true ]]; then
+            check fetch-mlb-odds.yml 26
+          fi
           check settle-mlb-pitcher-ks.yml 26
           check fetch-ncaaf-odds.yml 26
           check fetch-ufc-odds.yml 26
