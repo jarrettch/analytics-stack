@@ -67,6 +67,7 @@ jobs:
           fi
 
       - name: Fetch MLB odds
+        if: ${{ vars.MLB_ODDS_COLLECTION_ENABLED == 'true' }}
         run: |
           echo "Fetching MLB odds..."
           if response=$(curl \
