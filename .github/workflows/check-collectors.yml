@@ -60,8 +60,8 @@ jobs:
           check fetch-tomorrow-odds.yml 26
           if [[ "$MLB_ODDS_COLLECTION_ENABLED" == true ]]; then
             check fetch-mlb-odds.yml 26
+            check settle-mlb-pitcher-ks.yml 26
           fi
-          check settle-mlb-pitcher-ks.yml 26
           check fetch-ncaaf-odds.yml 26
           check fetch-ufc-odds.yml 26
           check fetch-player-props.yml 26

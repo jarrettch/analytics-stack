@@ -7,6 +7,7 @@ on:
 
 jobs:
   settle-pitcher-ks:
+    if: ${{ vars.MLB_ODDS_COLLECTION_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     environment: production
     env:
