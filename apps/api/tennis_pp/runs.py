@@ -75,6 +75,11 @@ class TennisRuns:
             snapshot_id=snapshot["id"] if usable else None,
             refresh_id=refresh["id"] if refresh else None,
         ))
+        # Pricing runs off the event loop, so the refresh can land before this run is stored
+        # and miss it. Reprice it here in that case.
+        landed = self.store.refresh(refresh["id"]) if refresh else None
+        if landed and landed["status"] == "done" and self.store.newer_run_id(run["id"]) is None:
+            await self._revise(run, landed["snapshot_id"])
         return self._view(run)
 
     def view(self, run_id: str) -> dict | None:
@@ -129,14 +134,19 @@ class TennisRuns:
             return
         for waiting in self.store.runs_waiting_on(refresh_id):
             try:
-                now = self._now()
-                results = await self._price(waiting["board"], snapshot_id, now, stale=False)
-                self.store.insert_run(self._run_row(
-                    now, waiting["board"], _parse(waiting["board_saved_at"]), results,
-                    snapshot_id=snapshot_id, refresh_id=None, revises=waiting["id"],
-                ))
+                await self._revise(waiting, snapshot_id)
             except Exception:  # noqa: BLE001
                 logger.exception("Repricing tennis run %s failed", waiting["id"])
+
+    async def _revise(self, run: dict, snapshot_id: int) -> None:
+        """Reprice a run on a new snapshot as a new run. The stored run is left as it was."""
+        now = self._now()
+        results = await self._price(run["board"], snapshot_id, now, stale=False)
+        if self.store.newer_run_id(run["id"]) is None:
+            self.store.insert_run(self._run_row(
+                now, run["board"], _parse(run["board_saved_at"]), results,
+                snapshot_id=snapshot_id, refresh_id=None, revises=run["id"],
+            ))
 
     # --- pricing ------------------------------------------------------------
 

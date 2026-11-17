@@ -2,7 +2,9 @@
 
 _Created: 2026-11-02 (scope; not yet implemented). Updated 2026-11-06: Total
 Games and Total Games Won, mixture fit, strategy-rule flags, live-row filter.
-2026-11-09: measured bias, tour-specific bias check, stray DK set total._
+2026-11-09: measured bias, tour-specific bias check, stray DK set total; then
+review pass: alt-line pulls, refresh lifecycle, immutable runs, event-scoped
+matching, fit acceptance, unsupported formats, result grouping._
 
 Price a PrizePicks tennis board pasted or dropped into the site, from any
 device, instead of from scripts on the Mac. Three stat types are priced:
@@ -51,7 +53,8 @@ v1:
 - On-demand SharpAPI refresh for ATP/WTA when the cached odds are stale.
 - `tennis_fs.py` and `tennis_games.py` ported into `apps/api` as one tested
   module.
-- `tennis_odds_snapshots` and `tennis_runs` tables.
+- `tennis_odds_snapshots`, `tennis_odds_refreshes` and `tennis_runs` tables.
+- An optional main-line filter on the shared `fetch_sharp_odds` (Odds).
 
 Out of scope for v1: grading, NBA/NFL/CFB/EPL boards, slip/EV math, payout
 entry, notifications, and every other tennis stat type (below).
@@ -78,15 +81,21 @@ phone/laptop browser                 API                              Supabase
 open PP projections URL
 (league_id=5), copy JSON
 paste/drop on /prep/tennis
-parse in browser, keep FS, TG, TGW + Aces rows
+parse in browser, keep tennis FS, TG, TGW + Aces rows
 POST /tennis/runs  --------------->  validate payload
-                                     latest snapshot older than 20 min?
-                                       yes -> background refresh ---> tennis_odds_snapshots
-                                     run model on freshest snapshot
+                                     snapshot fresh: price on it
+                                     stale: price on it, flag rows,
+                                       start or join a refresh ----->  tennis_odds_refreshes
+                                     none usable: run is pending
                                      store run -------------------->  tennis_runs
-                      <------------  run id, results, odds_age, refreshing?
-if refreshing: poll GET /runs/{id}   rerun when the new snapshot lands
+                      <------------  run (ready | pending), refresh state
+poll GET /runs/{id}                  refresh lands ---------------->  tennis_odds_snapshots
+                                     reprice waiting runs as new
+                                       revisions ------------------>  tennis_runs
+                      <------------  newer_run_id; page loads it
 ```
+
+See Refresh lifecycle for the states and failure cases.
 
 ## Odds: on-demand refresh, not a scheduled collector
 
@@ -97,25 +106,25 @@ every 20–30 minutes around the clock (ATP/WTA play in every time zone) would b
 the most expensive schedule in the repo, and most of its pulls would never be
 read.
 
-So v1 refreshes **on upload**:
+So v1 refreshes **on upload** (Refresh lifecycle, below).
 
-- If the newest `tennis_odds_snapshots` row is under `STALE_AFTER` (20 min),
-  run immediately on it.
-- Otherwise run immediately on the stale snapshot, flag every row with its
-  `odds_age`, and start a background refresh. The page polls; when the refresh
-  lands, the API reruns the same board and the page swaps the table.
-- One refresh at a time. A second upload during a refresh waits for it.
-
-Refresh = `fetch_sharp_odds(league, market, sweep=...)` from
+Refresh = `fetch_sharp_odds(league, market, sweep=..., main_only=...)` from
 `routers/sharp_odds.py` for leagues `atp`, `wta` and markets:
 
-| Market | Books | Used for |
-|---|---|---|
-| `moneyline` | DK, FD | p_win (de-vigged, averaged) |
-| `total_games` | DK main + alternates | fit target (main); ladder check at PP lines (alternates) |
-| `game_spread` | DK main | spread check, rule-of-thumb FS |
-| `player_aces` | FD ladder (over-only) | ace rate |
-| `player_games_won` | DK main only, both sides | Total Games Won book line |
+| Market | Books | `main_only` | Used for |
+|---|---|---|---|
+| `moneyline` | DK, FD | true | p_win (de-vigged, averaged) |
+| `total_games` | DK main + alternates | **false** | fit target (main); ladder check at PP lines (alternates) |
+| `game_spread` | DK main | true | spread check, rule-of-thumb FS |
+| `player_aces` | FD ladder (over-only) | **false** | ace rate |
+| `player_games_won` | DK main only, both sides | true | Total Games Won book line |
+
+`fetch_sharp_odds` hard-codes `is_main_line=true` today, which drops the alt
+total ladder and every FD ace rung but the one FD flags main (often a tail
+rung; see Model module). Add a keyword-only `main_only: bool = True`; with
+`False` the parameter is omitted. Existing callers don't change. The local
+`pull_sharp_tennis.py` never sent the filter, so the row counts below already
+include the ladders.
 
 `total_games` also carries a stray set-sized DK market, always 11.5, with its
 own `market_id`. It is usually flagged alternate, but on 11-07 it was the only
@@ -130,6 +139,55 @@ Measured: 1,064–1,327 rows across 51–60 events per pull before
 `player_games_won` (28–60 rows more on 11-05/11-06). At the free tier's 12
 requests/min (the client paces at 5 s), the ten market×league sweeps take
 about 1.5–2.5 minutes. Data is 60 s delayed.
+
+### Refresh lifecycle
+
+`tennis_odds_refreshes` has one row per refresh: `status` (`running`, `done`,
+`failed`), `started_at`, `finished_at`, `snapshot_id`, `error`. A partial
+unique index on `status = 'running'` allows one running refresh at a time.
+
+On `POST /tennis/runs`:
+
+| Newest snapshot | Run | Refresh |
+|---|---|---|
+| under `STALE_AFTER` (20 min) | `ready`, priced on it | none |
+| older, but under `MAX_SNAPSHOT_AGE` (6 h) | `ready`, priced on it, every row `stale_odds` | start one, or join the running one |
+| none, or older than `MAX_SNAPSHOT_AGE` | `pending`, no prices | start or join |
+
+`MAX_SNAPSHOT_AGE` is a guess, like `STALE_AFTER`. Past it, the matches on the
+board have mostly changed and stale prices mislead more than they help.
+
+- The request returns at once. The refresh runs as an `asyncio` task in the
+  API process, and the run records its `refresh_id`. A second upload during a
+  refresh joins it (its run gets the same `refresh_id`); no request waits.
+- A refresh is all ten league × market sweeps or nothing. If any sweep raises,
+  the refresh fails and writes no snapshot. `fetch_sharp_odds` already refuses
+  to return a partial market, and a snapshot is only used whole. An empty
+  market is not a failure; the WTA season ends in November.
+- On success the task inserts the snapshot, marks the refresh `done`, and
+  prices every run with that `refresh_id` on it. Each reprice is a **new run**
+  with `revises` set to the old run's id. A stored run never changes.
+- On failure the refresh is `failed` with its error. Waiting runs keep their
+  stale results, or stay `pending` with none. The page shows the error and a
+  Retry button: `POST /tennis/runs/{id}/refresh` starts or joins a refresh and
+  points the run's `refresh_id` at it.
+- A `running` refresh older than `REFRESH_LEASE` (6 min, about twice the
+  slowest measured pull) has lost its task to a deploy or restart. The next
+  request that sees it marks it `failed` (`abandoned`), which frees the index.
+
+Hosting: the API is a Render web service, a long-lived process, so the task
+outlives the response; deploys and restarts kill it, which the lease covers.
+A free instance sleeps after 15 minutes without requests, but the page polls
+during a refresh, which keeps it awake.
+
+Pricing is CPU-bound pure Python. On the Mac the scripts take 3.3 s (FS) and
+7.3 s (Total Games and Games Won, which reruns the FS script) for the 11-08
+board. Run `price_board` in `asyncio.to_thread` so the event loop keeps
+serving the dashboard. Fit each event once per snapshot, cached on
+`(snapshot_id, event_id)`, so repeat uploads against one snapshot don't refit.
+**Benchmark on Render before building the page.** If the 11-05 board takes
+more than about 30 s there, move pricing to a process pool or loosen the fit's
+bisection counts.
 
 Revisit: if waiting 1–2 minutes on a stale board becomes the common case, add
 a pg_cron job limited to the hours the user actually uploads, priced against
@@ -149,15 +207,23 @@ JSON in the browser and sends only what the models read:
 | `odds_type` | `standard` / `goblin` / `demon` |
 | `line` | `line_score` |
 | `start_time` | `start_time`. **Eastern with an offset, not UTC** |
+| `status` | `status` |
+| `projection_id` | `data[].id` |
+| `game_id` | `relationships.game.data.id`: PrizePicks' match id, shared by both players' rows |
+
+Keep only rows whose `relationships.league.data.id` is `5` (tennis). NBA and
+other boards carry `Fantasy Score` too, so the stat name alone would admit
+them. If no rows are tennis, the page says so and sends nothing.
 
 Drop rows whose `status` is not `pre_game`, and doubles (player name contains
-`/`). **Do not filter on `is_live` / `in_game`**: PrizePicks sets both true on
+`/`). The server rejects any row whose `status` isn't `pre_game`. That guards
+against a page bug, not a hostile client, which could send anything. **Do not filter on `is_live` / `in_game`**: PrizePicks sets both true on
 pre-match Total Games, Total Games Won and Total Sets rows that are also
 offered live (47 such rows on the 11-05 board, all `status: pre_game`).
 Filtering on them would drop most Games Won standards.
 
 `Total Games` is one line per match but may arrive under either player; the
-server dedupes on (match, odds_type, line).
+server dedupes on (`game_id`, `odds_type`, `line`).
 
 `Aces` rows are kept because the FS model uses PrizePicks' own ace
 goblin/demon ladder when FanDuel has no `player_aces` for that player
@@ -183,7 +249,8 @@ Body:
 { "board_saved_at": "2026-10-31T00:39:00-07:00",
   "rows": [ { "player": "Jiri Lehecka", "opponent": "Jan-Lennard Struff",
               "stat": "Fantasy Score", "odds_type": "demon", "line": 23,
-              "start_time": "2026-10-31T12:00:00-04:00" } ] }
+              "start_time": "2026-10-31T12:00:00-04:00", "status": "pre_game",
+              "projection_id": "7712345", "game_id": "202852" } ] }
 ```
 
 Validation (pydantic). The payload is untrusted. It comes from a third-party
@@ -197,13 +264,24 @@ page via the clipboard.
   They are matched and displayed, never interpolated into queries or HTML.
 - `start_time` must parse and fall within 4 days of now (WTA Finals lines were
   posted 3+ days out on 11-06).
+- `status` is `pre_game`. `projection_id` and `game_id` are digit strings of
+  at most 20 characters.
 
-Response: `{ run_id, odds_snapshot_at, odds_age_s, refreshing, results[] }`.
+Response: `{ run_id, status, board_saved_at, odds_snapshot_at, odds_age_s,
+refresh: { id, status, started_at, error } | null, results[] }`. `status` is
+`pending` or `ready`.
 
 ### `GET /tennis/runs/{id}`
 
-Same auth. Returns the run, rerun against the newest snapshot if one has landed
-since.
+Same auth. Returns the run as stored, its refresh's current state, and
+`newer_run_id` once a revision exists. It never reprices: an old run opened
+next week shows what it showed then. The page follows `newer_run_id` while it
+is polling.
+
+### `POST /tennis/runs/{id}/refresh`
+
+Same auth. Retry after a failed refresh: starts or joins one and points the
+run at it. Returns the same shape as `GET`.
 
 ### Result row
 
@@ -212,14 +290,17 @@ depend on `stat`.
 
 | Field | Meaning |
 |---|---|
-| `stat`, `player`, `opponent`, `tour`, `start_time`, `odds_type`, `line` | from the board |
+| `stat`, `player`, `opponent`, `tour`, `start_time`, `odds_type`, `line`, `projection_id`, `game_id` | from the board |
+| `event_id` | the matched SharpAPI event, or empty |
 | `p_win` | the row player's de-vigged moneyline, averaged over DK/FD |
 | `fav_ml` | shortest moneyline price in the match (blowout rule) |
 | `total` | DK main total games line |
 | `fit` | `iid`, `mix s=<x>`, or `ml_only` (Model) |
 | `model_mean` | mean of the priced quantity (FS, match games, or player games) |
-| `p_over`, `p_under`, `push` | at the line; over/under exclude the push |
-| `lean` | the side above 50%, or none. Goblin/demon rows can only lean over (below) |
+| `p_over`, `p_under` | at the line, **conditional on no push**: P(over \| not exactly the line). They sum to 1 |
+| `push` | P(landing exactly on the line), shown beside them whenever above 0. FS moves in half-points, so most FS lines can push; so can whole-number Total Games and Games Won lines |
+| `lean` | the side above 50%, or none. Goblin/demon rows can only lean over (below). A direction, not a value call: without payouts, 55% on a goblin and 55% on a standard aren't comparable (Open questions) |
+| `unpriced_reason` | set when the row has no probabilities: `no_book_line`, `ambiguous_match`, `unsupported_format` |
 
 FS only:
 
@@ -229,7 +310,7 @@ FS only:
 | `aces_src` | `FD <line> <odds>`, `PP ladder ~x`, or `assumed <rate>` |
 | `model_median` | FS distribution |
 | `p_under_bias` | P(under) with the line moved `BIAS_SHIFT[tour]` against it (Bias check) |
-| `rule_fs` | the strategy notes' rule of thumb, for reference only: favorite `13 + |spread| + 0.5 × aces`, underdog `7 − spread + 0.5 × aces`. Not a lean; shown so disagreement with the model is visible (Stefanini 11-05: rule 14.8 vs line 13, model under 0.56) |
+| `rule_fs` | the strategy notes' rule of thumb, for reference only: favorite `13 + |spread| + 0.5 × aces`, underdog `7 − spread + 0.5 × aces`. Not a lean; shown so disagreement with the model is visible (Stefanini 11-05: rule 14.8 vs line 13, model under 0.56). The FS script's `system` column differs (Intended differences) |
 
 Total Games only:
 
@@ -266,11 +347,20 @@ Flags:
 - `over_only`: goblin and demon rows can only be played over. Any under lean
   or `juice_under` on them is not playable and the page greys it out (most
   `juice_under` flags on 11-05/11-06 were 12.5 demons).
-- `whole_line` (TG): PP posted a whole number, so a push is possible.
 - `no_book_line`: no moneyline match (FS also needs a total). Row is shown,
   not priced.
+- `ambiguous_match`: more than one book event, or both or neither
+  participants, match the row (Matching). Shown, not priced.
+- `unsupported_format`: the match isn't best of three (Supported formats).
+  Shown, not priced.
+- `fit_miss`: the fit failed its acceptance check (Fit acceptance).
+  Probabilities shown, no lean.
 - `stale_odds`: snapshot older than `STALE_AFTER`.
-- `doubles_skipped` (run level): how many doubles rows were dropped.
+- `started`: `start_time` has passed, checked when the run is priced and again
+  when the page renders. Never actionable; PrizePicks pulls pre-match lines at
+  the start anyway.
+- `doubles_skipped`, `not_pre_game_skipped` (run level): how many rows the
+  page dropped.
 
 ## Model module
 
@@ -322,17 +412,89 @@ Not yet shown: that it grades better. The only graded board with a saved
 snapshot (10-31) is mostly ATP and can't separate the two. `TENNIS_FIT=iid`
 forces the old behaviour in the script for comparisons.
 
+### Matching board rows to book events
+
+The scripts match on names alone. Events are keyed on the two normalized names
+with suffix matching, sides and ace ladders on the last six letters, and
+games-won lines on the player across the whole pull. That works for a one-day
+board but breaks on shared endings (normalized Anderson and Henderson both end
+`derson`) and when a pull holds a player's next match too. The port matches in
+two steps:
+
+1. **Event.** A SharpAPI event (`event_id`) matches a PP `game_id` when both
+   PP names match its two participants (exact normalized name first, then
+   prefix or suffix as the scripts do) and its `event_start_time` is within
+   12 h of PP's `start_time` (order-of-play times drift). No candidate:
+   `no_book_line`. More than one: `ambiguous_match`, unpriced. Never take the
+   first.
+2. **Within the event.** Side, ace ladder and games-won line are looked up
+   among that event's rows only, by the same name rule. A PP name matching
+   both participants or neither is `ambiguous_match`.
+
+Moneyline prices keep the scripts' exact-then-prefix rule inside the event: DK
+and FD spell some players differently ("Daniel Merida" vs "Daniel Merida
+Aguilar").
+
+PrizePicks gives no tour, and SharpAPI's `league` (`atp`/`wta`) comes with the
+matched event, so tour isn't a match key.
+
+### Supported formats
+
+The match model is best of three sets with a 7-point tiebreak at 6-6. Any
+other match is `unsupported_format` and unpriced:
+
+- best of five (men's Grand Slams, from the Australian Open in January): an
+  ATP event whose `competition_ref.id` names a Slam, or any DK main total of
+  30 or more.
+
+A 10-point final-set tiebreak (all four Slams, both tours) still scores as one
+game at 7-6, so games and FS barely change; WTA Slam matches stay supported.
+`competition_ref` was missing on 276 of 685 rows in the 11-08 pull, so an
+`ml_only` match with no competition id is assumed best of three. Best-of-five
+support is in Later.
+
+### Fit acceptance
+
+`fit_dist` returns whatever its last bisection step gives; nothing checks it.
+The mixture's search bounds also allow serve probabilities out of range: at
+c = 0.64, delta at its 0.6 bound and s at its 0.35 cap give the top grid point
+a serve probability of 1.24. Real fits sit far inside the bounds, but nothing
+enforces it. After every fit, check:
+
+- every serve probability used, across the mixture grid, is in (0, 1)
+- the distribution sums to 1 within 1e-6
+- the fit's P(win) is within 0.01 of the de-vigged moneyline
+- the fit's P(over) at the DK main total is within 0.02 of DK's (skipped for
+  `ml_only`)
+
+A fit that fails any check is `fit_miss`: probabilities shown, no lean.
+
 ### Carry over the fixes already in the scripts
 
-- Moneyline names match exactly first, then by prefix. DK and FD spell some
-  players differently ("Daniel Merida" vs "Daniel Merida Aguilar").
-- Ace ladders and games-won lines are matched to a player by surname suffix.
 - FD `player_aces` is over-only: divide by `ONE_SIDED_MARGIN = 1.045`.
 - Total lines under 15 are dropped; with no main left, the most even ladder rung
-  stands in (Odds).
+  stands in (Odds). This applies to FS too (see below).
 - DK sometimes posts identical templated total ladders for near-even WTA
   matches (Shubladze–Liu and Eala–Sakkari, 11-06). Identical rows across two
   matches are expected, not a cache bug.
+
+### Intended differences from the scripts
+
+Where the port and the scripts disagree, the port follows this spec. The
+parity tests compare everything else and list the rows these change as
+expected diffs, so a parity pass can't lock in a script bug.
+
+- **`rule_fs`.** The FS script's `system` column is `13 − spread + 0.5 × aces
+  − 0.5 × expected DF` for both sides, with spread signed for the player. For
+  favorites that matches the rule apart from the DF term; for underdogs it
+  gives 13 − spread, not 7 − spread (Berrettini +1.5 on 11-04: script 16.4).
+  The port uses the strategy notes' formula above, with no DF term.
+- **Alt-total fallback in FS.** `tennis_games.py` falls back to the most even
+  ladder rung when DK flags no main; `tennis_fs.py` doesn't and returns no
+  book line. The port builds events once and both stats use the fallback.
+- **Event-scoped matching** (Matching). Can change rows where a suffix match
+  crossed players.
+- **Fit acceptance** and **unsupported formats** are new.
 
 ### Tests
 
@@ -353,8 +515,36 @@ Fixtures saved from real inputs, committed under
 - No DK total: FS gets `no_book_line`, TG/TGW get `ml_only`.
 - `pre_game` rows with `is_live: true` are kept; non-`pre_game` rows and
   doubles are rejected client-side and again server-side.
+- A board with no league-5 rows (an NBA board, which has Fantasy Score) is
+  refused by the page.
 - Total Games under both players' names prices once.
 - An under lean on a goblin/demon is flagged `over_only`.
+- Two events that both match a name pair: `ambiguous_match`. Games-won lines
+  for Anderson and Henderson in different events don't cross.
+- An ATP event with a Slam `competition_ref`, or a DK main total of 30 or
+  more: `unsupported_format`.
+- A fit pushed off its targets: `fit_miss`, no lean.
+- `rule_fs` for an underdog uses 7 − spread.
+
+Operational (`fetch_sharp_odds` mocked, as in `test_sharp_odds.py`):
+
+- `fetch_sharp_odds` still sends `is_main_line=true` by default and omits it
+  with `main_only=False`.
+- Cold start: no snapshot gives a `pending` run with no prices; when the
+  refresh lands, a revision with prices exists and `newer_run_id` points to it.
+- Refresh failure: one sweep raises; no snapshot is written, the refresh is
+  `failed` with its error, the run keeps its stale results, and the retry
+  endpoint starts a new refresh.
+- Concurrency: two uploads during one refresh make one refresh row, and both
+  runs get revisions when it lands.
+- Abandoned: a `running` refresh older than `REFRESH_LEASE` is marked failed
+  and a new one can start.
+- Reproducibility: `GET` on an old run after a newer snapshot lands returns
+  the stored results unchanged.
+- Started: a row whose `start_time` has passed is `started` and never in the
+  actionable group.
+- Snapshot cleanup deletes old unreferenced snapshots and keeps referenced
+  ones.
 
 ## Bias check
 
@@ -385,7 +575,7 @@ unders 3–1 (11-05 to 11-08). Underdogs are barely measured (n 10). Rerun
 
 Earlier record under the flat check: on 10-31 every passing lean hit
 (Tagger, Lehecka, Machac, Zverev); on 11-05 the three passing overs went 2 of
-3. The page sorts passing leans first.
+3. Failing leans drop out of the page's actionable group (Page).
 
 ## Storage
 
@@ -401,8 +591,14 @@ writes and reads, as with the props archives.
 | `rows` | jsonb: the flat SharpAPI rows for all five markets, as `pull_sharp_tennis.py` writes them |
 | `row_count`, `event_count` | int |
 
-Keep 7 days; a nightly delete is enough. A snapshot is only used whole: never
-mix rows from two pulls into one model run.
+A nightly job deletes snapshots older than 7 days **that no run references**.
+Referenced snapshots stay, so any run can be repriced exactly under a later
+model version. Snapshots are only written by a refresh, at most one per upload
+session, and jsonb is compressed on disk; the 11-08 pull is 0.9 MB as raw
+JSON. Revisit if the table passes ~200 MB. A snapshot is only used whole:
+never mix rows from two pulls into one model run.
+
+`tennis_odds_refreshes`: see Refresh lifecycle.
 
 `tennis_runs`
 
@@ -410,34 +606,75 @@ mix rows from two pulls into one model run.
 |---|---|
 | `id` | uuid |
 | `created_at` | timestamptz |
+| `status` | `pending` or `ready` |
 | `board_saved_at` | timestamptz (client-reported) |
-| `snapshot_id` | fk → `tennis_odds_snapshots` |
+| `snapshot_id` | fk → `tennis_odds_snapshots`; null while `pending` |
+| `refresh_id` | fk → `tennis_odds_refreshes`: the refresh this run is waiting on, if any |
+| `revises` | fk → `tennis_runs`: the run this one reprices, if any |
 | `board` | jsonb: the validated rows |
 | `results` | jsonb |
-| `model_version` | text: git sha of the module |
+| `model_version` | text: git sha of the module (`RENDER_GIT_COMMIT` on Render) |
+| `model_config` | jsonb: every tunable the run used (`BIAS_SHIFT`, `MIX_C`, `ML_ONLY_S`, `ACE_DEFAULT`, `DF_DEFAULT`, `ACE_K`, `ONE_SIDED_MARGIN`, `STALE_AFTER`, fit tolerances). Config changes independently of code |
+
+A run's `results` and `snapshot_id` never change, `pending` runs included:
+the refresh that prices one writes a revision. Only `refresh_id` moves, when
+Retry points the run at a new refresh.
 
 `board` is kept so v2 grading can settle every line, not just the ones played.
+Grade the newest revision of each board.
 
 ## Page
 
 `apps/visualize-ev/app/prep/tennis/page.tsx`:
 
-- Textarea plus file drop. Parse with `JSON.parse` in a try/catch, extract the
-  rows, and show "N Fantasy Score, M Total Games, K Games Won lines; J doubles
-  skipped" before sending.
-- Secret entered once, kept in `localStorage` (wrapped in try/catch; the page
-  works if storage is unavailable by asking again).
-- Tabs or a filter by stat. Columns per stat:
-  - FS: start time (local), player, line, type, lean, P, P under (bias), rule FS,
-    aces source, flags.
-  - Total Games: start, match, line, type, lean, P, DK P at line, fav ML,
-    flags.
-  - Games Won: start, player, line, type, lean, P, DK line and prices, flags.
-- Default sort: playable leans first (passes bias check, not `over_only`
-  under, not `ml_only`), then by P. Mobile layout, since phone use is the
-  point of this feature.
-- Banner when `stale_odds` or `refreshing`.
-- Render all strings as text, never as HTML.
+Phone use is the point of this feature, so the phone layout comes first.
+
+**Upload.** Textarea plus file picker/drop. Parse with `JSON.parse` in a
+try/catch, extract the rows, and show "N Fantasy Score, M Total Games, K Games
+Won lines; J doubles, L not pre-game skipped" before sending. Collapses to one
+line once a run exists. Secret entered once, kept in `localStorage` (wrapped in
+try/catch; the page works if storage is unavailable by asking again).
+
+**Status line.** Two times, kept separate: "Board copied 14:02" and "Odds
+13:40". Fresh odds don't make the board fresh: PrizePicks moves lines too, so
+a board over 60 minutes old gets a banner to copy it again. While refreshing:
+progress and elapsed time. On failure: the error and Retry.
+
+**Filters.** Stat tabs (Fantasy Score default), odds type (Standard default;
+Goblin, Demon, All), tour.
+
+**Grouping and order.** Rows fall into groups, in this order:
+
+1. Actionable: a lean that passes the bias check, on a playable side, not
+   `ml_only` or `fit_miss`, odds fresh, aces not assumed, not `started`.
+2. Provisional: would be actionable but for `stale_odds` or `assumed_aces`.
+   `assumed_aces` has been badly wrong (Tagger 0.86 → 0.60, 10-26).
+3. No lean, or not playable (`over_only` unders, failed bias check,
+   `ml_only`, `fit_miss`).
+4. Unpriced, with the reason in words ("no DK total", "two matches fit this
+   name", "best of five").
+5. Started.
+
+Within a group, by P. With "All" types selected, group by odds type first:
+without payouts, P on a goblin and P on a standard aren't comparable. The page
+labels the order "by model probability", not as a ranking.
+
+**Phone: cards.** Player vs opponent, local date and time, line and type,
+lean and P, push when above 0, flags as chips (`assumed_aces`, `stale_odds`
+and `fit_miss` visible without expanding). Tap to expand: book comparison (DK
+P at line, DK games-won line and prices, fav ML), `p_under_bias`, `rule_fs`,
+`aces_src`, model mean and median, fit label.
+
+**Desktop: compact sortable table.** Columns per stat:
+
+- FS: start (local), player, line, type, lean, P, push, P under (bias),
+  rule FS, aces source, flags.
+- Total Games: start, match, line, type, lean, P, push, DK P at line, fav ML,
+  flags.
+- Games Won: start, player, line, type, lean, P, push, DK line and prices,
+  flags.
+
+Render all strings as text, never as HTML.
 
 ## Later
 
@@ -457,6 +694,9 @@ mix rows from two pulls into one model run.
 - **More stat types:** 1st Set Total Games, Total Sets and Total Tie Breaks
   read straight off the match distribution; SharpAPI has
   `1st_set_total_games` and `total_sets` to check against.
+- **Best of five:** men's Slam matches are `unsupported_format` in v1. The
+  serve model extends directly (first to three sets); the fit targets and the
+  bias measurement would need redoing on five-set data.
 - **Other sports:** same upload, `pp_vs_books.py` instead of the tennis model.
   NBA and NFL player-prop odds are already archived in Supabase by the props
   collectors (`nba_player_props.md`, `nfl_player_props.md`), so those runs
@@ -465,9 +705,9 @@ mix rows from two pulls into one model run.
 
 ## Open questions
 
-1. Does the API host keep a background task alive for the 1.5–2.5 minute
-   refresh after the response returns, or does it sleep? If not, the refresh
-   runs inside the request and the page shows a spinner.
+1. ~~Does the API host keep a background task alive?~~ Yes: Render runs a
+   long-lived process (Refresh lifecycle). Still open: how fast pricing runs on
+   the Render instance's CPU. Benchmark first.
 2. Is copying a 1 MB JSON page from mobile Safari reliable?
 3. `STALE_AFTER = 20 min` is a guess. FD ace ladders appear close to match time
    and have moved a lot within a day (Medvedev ~9 → ~17 aces between 10-27 and
