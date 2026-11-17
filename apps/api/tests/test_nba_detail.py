@@ -208,6 +208,8 @@ class PlayByPlayTest(unittest.TestCase):
                 "period": {"number": 1},
                 "clock": {"displayValue": "11:20"},
                 "team": {"id": "8"},
+                "scoringPlay": True,
+                "scoreValue": 2,
             },
         ]
         matchup = {"away": {"abbreviation": "NYK", "pace": 100}, "home": {"abbreviation": "DET", "pace": 100}}
@@ -220,6 +222,8 @@ class PlayByPlayTest(unittest.TestCase):
         self.assertEqual(events[0]["id"], "4019090887")
         self.assertGreater(events[1]["winProbHome"], 50)
         self.assertEqual(len(win_probability), 2)
+        self.assertEqual([e["scoringPlay"] for e in events], [False, True])
+        self.assertEqual([e["scoringType"] for e in events], [None, "2PT"])
 
 
 def _play(play_id, clock, home_score=0):

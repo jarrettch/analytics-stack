@@ -211,6 +211,9 @@ def _nba_play_description(action: dict) -> str:
     return "Game event"
 
 
+_NBA_SCORING_TYPES = {1: "FT", 2: "2PT", 3: "3PT"}
+
+
 def _nba_pbp(
     actions: list[dict], matchup: dict, home_prob_by_action: dict[str, float] | None = None
 ) -> tuple[list[dict], list[dict]]:
@@ -252,6 +255,11 @@ def _nba_pbp(
             "event": _nba_play_description(action),
             "awayScore": away_score,
             "homeScore": home_score,
+            "scoringPlay": bool(action.get("scoringPlay")),
+            "scoringType": (
+                _NBA_SCORING_TYPES.get(int(_num(action.get("scoreValue"))))
+                if action.get("scoringPlay") else None
+            ),
             "winProbAway": round(away_prob * 100, 1),
             "winProbHome": round(home_prob * 100, 1),
             "sourceTimestamp": action.get("timeActual"),
@@ -405,6 +413,8 @@ def _espn_actions(plays: list[dict], tricode_by_team_id: dict[str, str]) -> list
             "teamTricode": tricode_by_team_id.get(str((play.get("team") or {}).get("id"))),
             "description": play.get("text"),
             "actionType": (play.get("type") or {}).get("text"),
+            "scoringPlay": play.get("scoringPlay"),
+            "scoreValue": play.get("scoreValue"),
             "timeActual": play.get("wallclock"),
         }
         for play in plays

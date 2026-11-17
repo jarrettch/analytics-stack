@@ -3,6 +3,7 @@ export * from "./components/ui/badge";
 export * from "./components/ui/separator";
 export * from "./MatchupCard";
 export * from "./GameDetailView";
+export * from "./ScoresStrip";
 export * from "./types/sports-types";
 export * from "./types/game-detail-types";
 export * from "./types/ufc-types";

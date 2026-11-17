@@ -12,6 +12,7 @@ from routers.nfl import (
     _assemble_slate,
     _early_window_count,
     _early_window_matchup_keys,
+    _play_by_play,
     _project_score,
     _quarter_score,
     _status,
@@ -201,6 +202,24 @@ class NFLParsingTest(unittest.TestCase):
         self.assertEqual(box["teamStats"]["penalties"], 5)
         self.assertEqual(box["passing"][0]["attempts"], 24)
         self.assertEqual(box["passing"][0]["sacks"], 3)
+
+    def test_play_by_play_carries_espn_scoring_flags(self):
+        summary = {"drives": {"previous": [{
+            "team": {"abbreviation": "MIN"},
+            "plays": [
+                {"id": "1", "sequenceNumber": "100", "text": "Run for 4 yards", "scoringPlay": False},
+                {
+                    "id": "2", "sequenceNumber": "200", "text": "34 yard field goal is GOOD",
+                    "scoringPlay": True, "scoringType": {"abbreviation": "FG"},
+                    "awayScore": 3, "homeScore": 0,
+                },
+            ],
+        }]}}
+        run, field_goal = _play_by_play(summary)
+        self.assertFalse(run["scoringPlay"])
+        self.assertIsNone(run["scoringType"])
+        self.assertTrue(field_goal["scoringPlay"])
+        self.assertEqual(field_goal["scoringType"], "FG")
 
     def test_partial_box_score_placeholders_do_not_raise(self):
         self.assertEqual(_to_float("-"), 0.0)
