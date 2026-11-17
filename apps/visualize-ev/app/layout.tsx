@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { ScoresStrip } from "@repo/ui";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -24,6 +25,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" style={{ colorScheme: 'dark' }}>
       <body className={`${geistSans.variable} ${geistMono.variable} bg-background text-foreground antialiased`}>
+        <ScoresStrip apiBaseUrl={process.env.NEXT_PUBLIC_API_URL} />
         {children}
       </body>
     </html>
