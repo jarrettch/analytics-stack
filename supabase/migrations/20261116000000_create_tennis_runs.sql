@@ -42,6 +42,8 @@ create table if not exists public.tennis_runs (
     revises        uuid references public.tennis_runs (id),
     board          jsonb       not null,
     results        jsonb       not null,
+    -- Book lines typed in for matches the odds feed doesn't carry, by PrizePicks game.
+    manual_lines   jsonb       not null default '[]'::jsonb,
     model_version  text        not null,
     model_config   jsonb       not null
 );

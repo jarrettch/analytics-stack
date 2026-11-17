@@ -139,6 +139,23 @@ export interface TennisResult {
   dk_gw_p_over?: number
 }
 
+/** Book lines typed in for one match the odds feed doesn't carry. Prices are American odds. */
+export interface TennisManualLine {
+  game_id: string
+  /** The player the moneyline and aces are read from. */
+  player: string
+  opponent?: string
+  tour: "atp" | "wta"
+  ml_player: number
+  ml_opponent: number
+  total_line: number | null
+  total_over: number | null
+  total_under: number | null
+  /** Expected aces for the match. */
+  aces_player: number | null
+  aces_opponent: number | null
+}
+
 export interface TennisRun {
   run_id: string
   status: "pending" | "ready"
@@ -149,6 +166,7 @@ export interface TennisRun {
   odds_age_s: number | null
   refresh: { id: number; status: "running" | "done" | "failed"; started_at: string; error: string | null } | null
   newer_run_id: string | null
+  manual_lines: TennisManualLine[]
   results: TennisResult[]
 }
 
@@ -156,7 +174,7 @@ export type TennisGroup = "actionable" | "provisional" | "no_play" | "unpriced" 
 
 export const TENNIS_GROUPS: { id: TennisGroup; label: string; hint: string }[] = [
   { id: "actionable", label: "Actionable", hint: "A lean on a playable side that passes every check, on fresh odds." },
-  { id: "provisional", label: "Provisional", hint: "Would be actionable but for stale odds or an assumed ace rate." },
+  { id: "provisional", label: "Provisional", hint: "Would be actionable but for stale odds, an assumed ace rate, or lines typed in by hand." },
   { id: "no_play", label: "No lean or not playable", hint: "No lean, a Games Won lean under 55%, an under on a goblin or demon, a failed bias check, or a fit that can't be trusted." },
   { id: "unpriced", label: "Unpriced", hint: "No book line to price against." },
   { id: "started", label: "Started", hint: "The match has begun." },
@@ -177,7 +195,64 @@ export function tennisGroup(result: TennisResult, now: Date): TennisGroup {
   const playable = result.lean === "over" || (result.lean === "under" && result.odds_type === "standard")
   if (!playable || flags.has("fails_bias_check") || flags.has("ml_only") || flags.has("fit_miss")) return "no_play"
   if ((tennisProbability(result) ?? 0) < (TENNIS_MIN_PROBABILITY[result.stat] ?? 0)) return "no_play"
-  return flags.has("stale_odds") || flags.has("assumed_aces") ? "provisional" : "actionable"
+  // Typed-in lines come from some other book, with a margin the model wasn't measured against.
+  return flags.has("stale_odds") || flags.has("assumed_aces") || flags.has("manual_odds") ? "provisional" : "actionable"
+}
+
+/** A match that can take typed-in lines: the feed has no line for it, or only a moneyline. */
+export interface TennisManualMatch {
+  game_id: string
+  player: string
+  opponent: string
+  start_time: string
+  tour: "atp" | "wta" | null
+  entered: TennisManualLine | null
+}
+
+/** Matches missing book lines, then those already entered by hand, each by start time. */
+export function tennisManualMatches(run: Pick<TennisRun, "results" | "manual_lines">, now: Date): TennisManualMatch[] {
+  const entered = new Map(run.manual_lines.map((line) => [line.game_id, line]))
+  const matches = new Map<string, TennisManualMatch>()
+  for (const result of run.results) {
+    const line = entered.get(result.game_id) ?? null
+    const missing = result.unpriced_reason === "no_book_line" || result.flags.includes("ml_only")
+    if (!line && !missing) continue
+    if (!line && new Date(result.start_time).getTime() <= now.getTime()) continue
+    const known = matches.get(result.game_id)
+    if (known) {
+      known.tour ??= result.tour ?? null
+      continue
+    }
+    matches.set(result.game_id, {
+      game_id: result.game_id,
+      // Keep the side the prices were entered from, so editing shows them where they were typed.
+      player: line?.player ?? result.player,
+      opponent: line ? (line.player === result.player ? result.opponent : result.player) : result.opponent,
+      start_time: result.start_time,
+      tour: line?.tour ?? result.tour ?? null,
+      entered: line,
+    })
+  }
+  return [...matches.values()].sort((a, b) =>
+    Number(a.entered != null) - Number(b.entered != null)
+    || a.start_time.localeCompare(b.start_time)
+    || a.player.localeCompare(b.player))
+}
+
+/** "+150", "-180" or "150" as a number; null for anything that isn't an American price. */
+export function parseAmericanOdds(text: string): number | null {
+  const trimmed = text.trim()
+  if (!/^[+-]?\d{3,5}$/.test(trimmed)) return null
+  const value = Number(trimmed)
+  return Math.abs(value) >= 100 && Math.abs(value) <= 10000 ? value : null
+}
+
+const impliedProbability = (american: number) => (american > 0 ? 100 / (american + 100) : -american / (-american + 100))
+
+/** The first side's probability with the book's margin split out of a two-way price. */
+export function devigAmerican(first: number, second: number): number {
+  const a = impliedProbability(first)
+  return a / (a + impliedProbability(second))
 }
 
 /** The model's probability for the lean, or for the likelier side when there is no lean. */
@@ -224,5 +299,6 @@ export const TENNIS_FLAG_LABELS: Record<string, string> = {
   juice_over: "DK juice over",
   juice_under: "DK juice under",
   over_only: "over only",
+  manual_odds: "manual odds",
   started: "started",
 }

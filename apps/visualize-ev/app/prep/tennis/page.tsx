@@ -7,11 +7,16 @@ import {
   TENNIS_GROUPS,
   TENNIS_STATS,
   TENNIS_UNPRICED_LABELS,
+  devigAmerican,
   extractTennisBoard,
   groupTennisResults,
+  parseAmericanOdds,
+  tennisManualMatches,
   tennisProbability,
   type TennisBoard,
   type TennisGroup,
+  type TennisManualLine,
+  type TennisManualMatch,
   type TennisOddsType,
   type TennisPricedStat,
   type TennisResult,
@@ -29,7 +34,7 @@ const STAT_LABELS: Record<TennisPricedStat, string> = {
 const TYPE_FILTERS: (TennisOddsType | "all")[] = ["standard", "goblin", "demon", "all"];
 const TOUR_FILTERS = ["all", "atp", "wta"] as const;
 // Flags that undercut a number, shown in the accent color so they read before the row is opened.
-const WARNING_FLAGS = new Set(["assumed_aces", "stale_odds", "fit_miss", "fails_bias_check", "ml_only", "over_only"]);
+const WARNING_FLAGS = new Set(["assumed_aces", "stale_odds", "fit_miss", "fails_bias_check", "ml_only", "over_only", "manual_odds"]);
 
 function readSecret(): string {
   try {
@@ -201,6 +206,24 @@ export default function TennisPrepPage() {
     }
   }
 
+  /** Sends the whole set of typed-in lines; the answer is the repriced run. */
+  async function saveManualLines(lines: TennisManualLine[]): Promise<boolean> {
+    if (!run) return false;
+    setError(null);
+    try {
+      showRun(await api(`/runs/${run.run_id}/manual-lines`, secret, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        // The API reads each opponent from the board.
+        body: JSON.stringify({ lines: lines.map((line) => ({ ...line, opponent: undefined })) }),
+      }));
+      return true;
+    } catch (err) {
+      setError((err as Error).message);
+      return false;
+    }
+  }
+
   const visible = useMemo(
     () => (run?.results ?? []).filter((r) =>
       r.stat === stat && (oddsType === "all" || r.odds_type === oddsType) && (tour === "all" || r.tour === tour || !r.tour)),
@@ -330,6 +353,10 @@ export default function TennisPrepPage() {
         )}
 
         {run && now && <StatusLine run={run} now={now} onRetry={retry} />}
+
+        {run && run.status === "ready" && now && !run.newer_run_id && (
+          <ManualLines run={run} now={now} onSave={saveManualLines} />
+        )}
 
         {run && run.status === "ready" && groups && (
           <>
@@ -476,7 +503,8 @@ function details(row: TennisResult): [string, string][] {
     if (row.stat === "Total Games") out.push(["DK P over at line", dkAtLine(row)]);
     else out.push(["DK games won", dkGamesWon(row)], ["DK P over at its line", pct(row.dk_gw_p_over)]);
   }
-  out.push(["DK total", num(row.total)], ["Favorite moneyline", american(row.fav_ml)], ["Fit", row.fit ?? "--"]);
+  const typed = row.flags.includes("manual_odds");
+  out.push([typed ? "Entered total" : "DK total", num(row.total)], ["Favorite moneyline", american(row.fav_ml)], ["Fit", row.fit ?? "--"]);
   return out;
 }
 
@@ -590,5 +618,183 @@ function Details({ row }: { row: TennisResult }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+type ManualDraft = Record<"mlPlayer" | "mlOpponent" | "totalLine" | "totalOver" | "totalUnder" | "acesPlayer" | "acesOpponent", string>;
+
+const asText = (value: number | null | undefined, signed = false) =>
+  value == null ? "" : signed && value > 0 ? `+${value}` : String(value);
+
+function draftFrom(line: TennisManualLine | null): ManualDraft {
+  return {
+    mlPlayer: asText(line?.ml_player, true), mlOpponent: asText(line?.ml_opponent, true),
+    totalLine: asText(line?.total_line), totalOver: asText(line?.total_over, true), totalUnder: asText(line?.total_under, true),
+    acesPlayer: asText(line?.aces_player), acesOpponent: asText(line?.aces_opponent),
+  };
+}
+
+/** The line a draft describes, or what is wrong with it. */
+function readDraft(match: TennisManualMatch, tour: "atp" | "wta" | null, draft: ManualDraft): TennisManualLine | string {
+  const price = (value: string) => (value.trim() ? parseAmericanOdds(value) : undefined);
+  const count = (value: string) => (value.trim() ? Number(value) : undefined);
+  if (!tour) return "Pick the tour.";
+  const mlPlayer = price(draft.mlPlayer), mlOpponent = price(draft.mlOpponent);
+  if (mlPlayer == null || mlOpponent == null) return "Both moneylines are needed, as American odds (-180, +150).";
+  if (Math.min(mlPlayer, mlOpponent) > 120) return "Both moneylines are underdog prices; check the signs.";
+  const totalLine = count(draft.totalLine), over = price(draft.totalOver), under = price(draft.totalUnder);
+  if (totalLine !== undefined && !(totalLine >= 15 && totalLine < 30 && Number.isInteger(totalLine * 2))) {
+    return "The total should be between 15 and 29.5, in half games.";
+  }
+  if (over === null || under === null) return "Total prices are American odds (-110).";
+  if ((over === undefined) !== (under === undefined)) return "Give both total prices, or leave both blank for even.";
+  if (over !== undefined && totalLine === undefined) return "Total prices need a total line.";
+  const aces = [count(draft.acesPlayer), count(draft.acesOpponent)];
+  if (aces.some((value) => value !== undefined && !(value >= 0 && value <= 40))) return "Aces should be between 0 and 40.";
+  return {
+    game_id: match.game_id, player: match.player, tour, ml_player: mlPlayer, ml_opponent: mlOpponent,
+    total_line: totalLine ?? null, total_over: over ?? null, total_under: under ?? null,
+    aces_player: aces[0] ?? null, aces_opponent: aces[1] ?? null,
+  };
+}
+
+function ManualLines({ run, now, onSave }: { run: TennisRun; now: Date; onSave: (lines: TennisManualLine[]) => Promise<boolean> }) {
+  const matches = useMemo(() => tennisManualMatches(run, now), [run, now]);
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  if (matches.length === 0) return null;
+  const missing = matches.filter((match) => !match.entered).length;
+  const entered = matches.length - missing;
+
+  const save = async (line: TennisManualLine | null, gameId: string) => {
+    const others = run.manual_lines.filter((existing) => existing.game_id !== gameId);
+    const saved = await onSave(line ? [...others, line] : others);
+    if (saved) setEditing(null);
+    return saved;
+  };
+
+  return (
+    <section className="mt-3 rounded-md border border-border bg-card font-mono text-xs">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+        className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2 text-left">
+        <span className="text-muted-foreground">
+          {missing > 0 && <span className="text-foreground">{missing} {missing === 1 ? "match has" : "matches have"} no book line</span>}
+          {missing > 0 && entered > 0 && " · "}
+          {entered > 0 && <span className="text-primary">{entered} entered by hand</span>}
+        </span>
+        <span className="uppercase tracking-wider text-primary">{open ? "Hide" : "Enter lines"}</span>
+      </button>
+      {open && (
+        <ul className="border-t border-border">
+          {matches.map((match) => (
+            <li key={match.game_id} className="border-b border-border last:border-b-0">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2">
+                <span>
+                  <span className="font-sans text-sm font-semibold text-foreground">{match.player}</span>
+                  <span className="text-muted-foreground"> vs {match.opponent} · {dayTime(match.start_time)}</span>
+                </span>
+                <span className="flex items-center gap-3">
+                  {match.entered && (
+                    <span className="text-muted-foreground">
+                      {american(match.entered.ml_player)} / {american(match.entered.ml_opponent)}
+                      {match.entered.total_line != null && ` · total ${match.entered.total_line}`}
+                    </span>
+                  )}
+                  <button type="button" onClick={() => setEditing(editing === match.game_id ? null : match.game_id)}
+                    className="uppercase tracking-wider text-primary hover:underline">
+                    {editing === match.game_id ? "Close" : match.entered ? "Edit" : "Enter"}
+                  </button>
+                </span>
+              </div>
+              {editing === match.game_id && <ManualLineForm match={match} onSave={save} />}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+// Enough of a name to tell two fields apart in a narrow column.
+const last = (name: string) => name.split(" ").slice(1).join(" ") || name;
+
+function ManualLineForm({ match, onSave }: {
+  match: TennisManualMatch; onSave: (line: TennisManualLine | null, gameId: string) => Promise<boolean>;
+}) {
+  const [draft, setDraft] = useState(() => draftFrom(match.entered));
+  const [tour, setTour] = useState(match.tour);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const parsed = readDraft(match, tour, draft);
+  const line = typeof parsed === "string" ? null : parsed;
+
+  const field = (key: keyof ManualDraft, label: string, placeholder: string, decimal = false) => (
+    <label className="block min-w-0">
+      <span className="block truncate text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+      <input value={draft[key]} placeholder={placeholder} inputMode={decimal ? "decimal" : "text"} autoComplete="off"
+        onChange={(event) => { setDraft({ ...draft, [key]: event.target.value }); setProblem(null); }}
+        className="mt-1 w-full rounded-sm border border-border bg-background px-2 py-1.5 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-primary" />
+    </label>
+  );
+
+  const submit = async (next: TennisManualLine | null) => {
+    setBusy(true);
+    await onSave(next, match.game_id);
+    setBusy(false);
+  };
+
+  return (
+    <form className="space-y-3 border-t border-border bg-background px-4 py-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (line) void submit(line);
+        else setProblem(parsed as string);
+      }}>
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Tour</span>
+        <div className="flex gap-1 rounded-md bg-secondary p-1">
+          {(["atp", "wta"] as const).map((option) => (
+            <button key={option} type="button" aria-pressed={tour === option} onClick={() => { setTour(option); setProblem(null); }}
+              className={`h-7 rounded-sm px-2.5 text-[11px] uppercase tracking-wider ${tour === option ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+              {option}
+            </button>
+          ))}
+        </div>
+        <span className="text-muted-foreground">Men&apos;s Challengers are ATP.</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+        {field("mlPlayer", `ML ${last(match.player)}`, "-180")}
+        {field("mlOpponent", `ML ${last(match.opponent)}`, "+150")}
+        {field("totalLine", "Total games", "22.5", true)}
+        {field("totalOver", "Over price", "-110")}
+        {field("totalUnder", "Under price", "-110")}
+        {field("acesPlayer", `Aces ${last(match.player)}`, "optional", true)}
+        {field("acesOpponent", `Aces ${last(match.opponent)}`, "optional", true)}
+      </div>
+      <p className="text-muted-foreground">
+        {line ? (
+          <>
+            Reads as: <span className="text-foreground">{match.player} wins {pct(devigAmerican(line.ml_player, line.ml_opponent))}</span>
+            {line.total_line != null
+              ? <>, <span className="text-foreground">over {line.total_line} games {pct(devigAmerican(line.total_over ?? -110, line.total_under ?? -110))}</span>.</>
+              : ". Without a total, Fantasy Score stays unpriced and the games markets get no lean."}
+            {line.total_line != null && line.aces_player == null && line.aces_opponent == null && " Without aces, Fantasy Score uses the tour's average rate."}
+          </>
+        ) : "Moneylines are required. Total prices left blank count as even. Aces are the number you expect for the match."}
+      </p>
+      {problem && <p className="text-red-400">{problem}</p>}
+      <div className="flex gap-3">
+        <button type="submit" disabled={busy}
+          className="rounded-sm bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-primary-foreground disabled:opacity-50">
+          {busy ? "Pricing…" : "Price match"}
+        </button>
+        {match.entered && (
+          <button type="button" disabled={busy} onClick={() => void submit(null)}
+            className="rounded-sm border border-border px-4 py-2 text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground disabled:opacity-50">
+            Remove
+          </button>
+        )}
+      </div>
+    </form>
   );
 }

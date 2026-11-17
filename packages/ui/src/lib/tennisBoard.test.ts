@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest"
 
-import { extractTennisBoard, groupTennisResults, tennisGroup, tennisProbability, type TennisResult } from "./tennisBoard"
+import {
+  devigAmerican, extractTennisBoard, groupTennisResults, parseAmericanOdds, tennisGroup, tennisManualMatches,
+  tennisProbability, type TennisManualLine, type TennisResult,
+} from "./tennisBoard"
 
 function projection(id: string, overrides: Record<string, unknown> = {}, league = "5", playerId = "p1") {
   return {
@@ -109,6 +112,46 @@ describe("tennisGroup", () => {
     expect(tennisGroup(result(), later)).toBe("started")
     expect(tennisGroup(result({ unpriced_reason: "no_book_line" }), later)).toBe("started")
     expect(tennisGroup(result({ flags: ["started"] }), NOW)).toBe("started")
+  })
+})
+
+describe("manual lines", () => {
+  const typed: TennisManualLine = {
+    game_id: "7", player: "Qual Ifier", tour: "atp", ml_player: 150, ml_opponent: -180,
+    total_line: 22.5, total_over: null, total_under: null, aces_player: null, aces_opponent: null,
+  }
+
+  it("keeps a typed-in match out of the actionable group", () => {
+    expect(tennisGroup(result({ flags: ["manual_odds"] }), NOW)).toBe("provisional")
+    expect(tennisGroup(result({ flags: ["manual_odds", "fails_bias_check"] }), NOW)).toBe("no_play")
+  })
+
+  it("lists matches missing a book line once each, then the ones already entered", () => {
+    const results = [
+      result({ game_id: "1" }),
+      result({ game_id: "5", player: "Late Starter", unpriced_reason: "no_book_line", lean: null, start_time: "2026-11-16T12:00:00-05:00" }),
+      result({ game_id: "4", player: "Chal Lenger", unpriced_reason: "no_book_line", lean: null }),
+      result({ game_id: "4", player: "Chal Lenger", stat: "Total Games", unpriced_reason: "no_book_line", lean: null }),
+      result({ game_id: "6", player: "Only Moneyline", lean: null, flags: ["ml_only"], tour: "wta", stat: "Total Games" }),
+      result({ game_id: "7", player: "Chal Lenger", opponent: "Qual Ifier", flags: ["manual_odds"], tour: "atp" }),
+      result({ game_id: "8", player: "Two Named", unpriced_reason: "ambiguous_match", lean: null }),
+      result({ game_id: "9", player: "Under Way", unpriced_reason: "no_book_line", lean: null, start_time: "2026-11-16T04:00:00-05:00" }),
+    ]
+    const matches = tennisManualMatches({ results, manual_lines: [typed] }, NOW)
+    expect(matches.map((m) => m.game_id)).toEqual(["4", "6", "5", "7"])
+    expect(matches[1]!.tour).toBe("wta")
+    // An entered match reads from the side it was typed on.
+    expect(matches[3]).toMatchObject({ player: "Qual Ifier", opponent: "Chal Lenger", entered: typed })
+  })
+
+  it("reads American prices and nothing else", () => {
+    expect([parseAmericanOdds("+150"), parseAmericanOdds(" -180 "), parseAmericanOdds("100")]).toEqual([150, -180, 100])
+    expect(["1.9", "-50", "abc", "", "--110", "20000"].map(parseAmericanOdds)).toEqual([null, null, null, null, null, null])
+  })
+
+  it("splits the margin out of a two-way price", () => {
+    expect(devigAmerican(-110, -110)).toBeCloseTo(0.5)
+    expect(devigAmerican(-200, 165)).toBeCloseTo(0.6386, 3)
   })
 })
 

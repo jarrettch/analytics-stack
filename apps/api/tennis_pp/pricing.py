@@ -58,6 +58,9 @@ class Event:
     aces_fd: dict[str, tuple[float, float]] = field(default_factory=dict)
     aces_dk: dict[str, tuple[float, float]] = field(default_factory=dict)
     games_won: dict[str, dict[str, float]] = field(default_factory=lambda: collections.defaultdict(dict))
+    # Expected aces for the match per player, typed in with hand-entered lines.
+    aces_manual: dict[str, float] = field(default_factory=dict)
+    manual: bool = False
 
     def side_of(self, name: str) -> int | None:
         """0 for home, 1 for away; None when the name fits both participants or neither."""
@@ -122,6 +125,26 @@ def build_events(snapshot_rows: list[dict], cfg: ModelConfig = DEFAULT_CONFIG) -
             two_sided = {l: model.devig(s["over"], s["under"]) for l, s in e.ladder.items() if {"over", "under"} <= s.keys()}
             e.main_total = min(two_sided, key=lambda l: abs(two_sided[l] - 0.5)) if two_sided else None
     return events
+
+
+# Assumed where a hand-entered total comes without prices.
+_EVEN_PRICE = -110.0
+
+
+def manual_event(entry: dict) -> Event:
+    """A book event built from lines typed in for one PrizePicks match (board.ManualLine)."""
+    player, opponent = entry["player"], entry["opponent"]
+    e = Event(f"manual:{entry['game_id']}", entry["tour"], (player, opponent), manual=True)
+    e.ml["manual"] = {norm(player): entry["ml_player"], norm(opponent): entry["ml_opponent"]}
+    if entry.get("total_line") is not None:
+        e.main_total = entry["total_line"]
+        e.ladder[e.main_total] = {
+            "over": entry.get("total_over") or _EVEN_PRICE, "under": entry.get("total_under") or _EVEN_PRICE,
+        }
+    for name, aces in ((player, entry.get("aces_player")), (opponent, entry.get("aces_opponent"))):
+        if aces is not None:
+            e.aces_manual[norm(name)] = aces
+    return e
 
 
 def match_event(events: dict[str, Event], player: str, opponent: str, start: datetime | None, cfg: ModelConfig) -> tuple[Event | None, str | None]:
@@ -220,7 +243,13 @@ def _fantasy_score(e: Event, em: _EventModel, side: int, pp_aces: dict[str, list
     d = em.fit.dist
     ladder = next(((book, label) for book, label in ((e.aces_fd, "FD"), (e.aces_dk, "DK")) if e.by_side(book, side)), None)
     assumed = False
-    if ladder:
+    manual_aces = e.by_side(e.aces_manual, side)
+    if manual_aces is not None:
+        # A typed-in expectation (recent results, say) is a mean, not a line to fit a median to.
+        service_games = sum(w * (ga + gb) for (ga, gb, _, _), w in d.items()) / 2
+        ace_line, ace_r = manual_aces, manual_aces / service_games
+        aces_src = f"manual {manual_aces:g}"
+    elif ladder:
         ace_line, ace_odds = e.by_side(ladder[0], side)
         ace_r = model.fit_ace_rate(d, ace_line, model.implied(ace_odds) / cfg.one_sided_margin, cfg.ace_k)
         aces_src = f"{ladder[1]} {ace_line:g} {ace_odds:g}"
@@ -274,11 +303,16 @@ def price_board(
     now: datetime,
     cfg: ModelConfig = DEFAULT_CONFIG,
     fit_cache: dict[str, _EventModel] | None = None,
+    manual: list[dict] | None = None,
 ) -> list[dict]:
     """One result per PrizePicks line. `fit_cache` (event_id -> fit) may be reused across boards
-    priced on the same snapshot."""
+    priced on the same snapshot. `manual` holds hand-entered lines by PrizePicks game; a match
+    that has them is priced on them and not on the snapshot."""
     events = build_events(snapshot_rows, cfg)
     fit_cache = fit_cache if fit_cache is not None else {}
+    # Never in fit_cache: the same game can carry different typed-in lines from run to run.
+    manual_events = {entry["game_id"]: manual_event(entry) for entry in manual or []}
+    manual_fits: dict[str, _EventModel] = {}
     fs_cache: dict[tuple[str, int], dict] = {}
     pp_aces: dict[tuple[str, str], dict[str, list[float]]] = collections.defaultdict(lambda: collections.defaultdict(list))
     for row in rows:
@@ -306,7 +340,11 @@ def price_board(
         if start and start <= now:
             out["flags"].append("started")
 
-        e, reason = match_event(events, row["player"], row["opponent"], start, cfg)
+        if row["game_id"] in manual_events:
+            e, reason = manual_events[row["game_id"]], None
+            out["flags"].append("manual_odds")
+        else:
+            e, reason = match_event(events, row["player"], row["opponent"], start, cfg)
         side = e.side_of(norm(row["player"])) if e else None
         if e and side is None:
             reason = "ambiguous_match"
@@ -314,9 +352,10 @@ def price_board(
             out["unpriced_reason"] = reason
             continue
         out["event_id"], out["tour"] = e.event_id, e.league
-        if e.event_id not in fit_cache:
-            fit_cache[e.event_id] = model_event(e, cfg)
-        em = fit_cache[e.event_id]
+        fits = manual_fits if e.manual else fit_cache
+        if e.event_id not in fits:
+            fits[e.event_id] = model_event(e, cfg)
+        em = fits[e.event_id]
         if em.fit is None or (stat == "Fantasy Score" and em.fit.label == "ml_only"):
             # FS needs the total as well as the moneyline.
             out["unpriced_reason"] = em.unpriced_reason or "no_book_line"
@@ -356,7 +395,8 @@ def price_board(
         elif stat == "Total Games":
             p_over, p_under, push = _over_under((ga + gb - line, w) for (ga, gb, _, _), w in d.items())
             out["model_mean"] = round(sum(w * (ga + gb) for (ga, gb, _, _), w in d.items()), 1)
-            out.update(_ladder_check(e, line))
+            if not e.manual:
+                out.update(_ladder_check(e, line))
             if out["fav_ml"] <= cfg.blowout_ml:
                 out["flags"].append("blowout")
         else:

@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from routers import tennis as tennis_router
-from tennis_pp.board import RunRequest
+from tennis_pp.board import ManualLine, ManualLinesRequest, RunRequest
 from tennis_pp.runs import LEAGUES, MARKETS, TennisRuns
 from tennis_pp.store import MemoryStore
 
@@ -146,6 +146,102 @@ class RunLifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all("started" in r["flags"] for r in run["results"]))
 
 
+def _unlisted_board():
+    """The Alcaraz board plus one match the snapshot has no event for."""
+    extra = [{**BOARD[0], "player": "Chal Lenger", "opponent": "Qual Ifier", "stat": stat, "line": value,
+              "odds_type": "standard", "game_id": "999", "projection_id": str(9000 + i)}
+             for i, (stat, value) in enumerate((("Fantasy Score", 20.0), ("Total Games", 21.5)))]
+    return BOARD + extra
+
+
+TYPED = {"game_id": "999", "player": "Chal Lenger", "opponent": "Qual Ifier", "tour": "atp",
+         "ml_player": -180, "ml_opponent": 150, "total_line": 22.5, "total_over": -115, "total_under": -105,
+         "aces_player": 6, "aces_opponent": None}
+
+
+class ManualLinesRunTest(unittest.IsolatedAsyncioTestCase):
+    async def test_typed_lines_reprice_as_a_revision_and_the_stored_run_is_untouched(self):
+        h = Harness()
+        h.seed_snapshot(timedelta(minutes=5))
+        run = await h.runs.create(_unlisted_board(), h.clock)
+        mine = lambda view: [r for r in view["results"] if r["game_id"] == "999"]
+        self.assertTrue(all(r["unpriced_reason"] == "no_book_line" for r in mine(run)))
+
+        revised = await h.runs.set_manual_lines(run["run_id"], [TYPED])
+        self.assertEqual((revised["revises"], revised["manual_lines"]), (run["run_id"], [TYPED]))
+        self.assertTrue(all(r["unpriced_reason"] is None and "manual_odds" in r["flags"] for r in mine(revised)))
+        before = h.runs.view(run["run_id"])
+        self.assertEqual((before["results"], before["manual_lines"], before["newer_run_id"]),
+                         (run["results"], [], revised["run_id"]))
+
+        # An empty set takes them away again.
+        cleared = await h.runs.set_manual_lines(revised["run_id"], [])
+        self.assertTrue(all(r["unpriced_reason"] == "no_book_line" for r in mine(cleared)))
+
+    async def test_typed_lines_survive_the_refresh_and_are_never_stale(self):
+        h = Harness()
+        h.seed_snapshot(timedelta(hours=2))
+        h.gate = asyncio.Event()
+        run = await h.runs.create(_unlisted_board(), h.clock)
+        revised = await h.runs.set_manual_lines(run["run_id"], [TYPED])
+        for result in revised["results"]:
+            self.assertNotEqual("manual_odds" in result["flags"], "stale_odds" in result["flags"])
+
+        h.gate.set()
+        await h.runs.wait_for_refreshes()
+        # One reprice, of the run that has the lines; the run it replaced is not repriced too.
+        self.assertEqual(len(h.store.runs), 3)
+        final = h.runs.view(h.runs.view(revised["run_id"])["newer_run_id"])
+        self.assertEqual(final["manual_lines"], [TYPED])
+        self.assertTrue(any("manual_odds" in r["flags"] for r in final["results"]))
+        self.assertFalse(any("stale_odds" in r["flags"] for r in final["results"]))
+
+    async def test_a_superseded_or_unpriced_run_refuses_lines(self):
+        h = Harness()
+        h.seed_snapshot(timedelta(minutes=5))
+        run = await h.runs.create(_unlisted_board(), h.clock)
+        await h.runs.set_manual_lines(run["run_id"], [TYPED])
+        with self.assertRaisesRegex(ValueError, "repriced"):
+            await h.runs.set_manual_lines(run["run_id"], [TYPED])
+        self.assertIsNone(await h.runs.set_manual_lines("missing", [TYPED]))
+
+        cold = Harness()
+        cold.gate = asyncio.Event()
+        pending = await cold.runs.create(_unlisted_board(), cold.clock)
+        with self.assertRaisesRegex(ValueError, "no odds yet"):
+            await cold.runs.set_manual_lines(pending["run_id"], [TYPED])
+        cold.gate.set()
+        await cold.runs.wait_for_refreshes()
+
+
+class ManualLineValidationTest(unittest.TestCase):
+    ENTRY = {k: v for k, v in TYPED.items() if k != "opponent"}
+
+    def test_resolve_reads_the_opponent_from_the_board(self):
+        request = ManualLinesRequest.model_validate({"lines": [self.ENTRY]})
+        self.assertEqual(request.resolve(_unlisted_board()), [TYPED])
+        # Either player of the game can be the one the prices are read from.
+        other = ManualLinesRequest.model_validate({"lines": [{**self.ENTRY, "player": "Qual Ifier"}]})
+        self.assertEqual(other.resolve(_unlisted_board())[0]["opponent"], "Chal Lenger")
+
+    def test_resolve_rejects_what_the_board_does_not_have(self):
+        for lines in ([{**self.ENTRY, "game_id": "998"}], [{**self.ENTRY, "player": "Some Stranger"}], [self.ENTRY, self.ENTRY]):
+            with self.assertRaises(ValueError):
+                ManualLinesRequest.model_validate({"lines": lines}).resolve(_unlisted_board())
+
+    def test_rejects_prices_that_cannot_be_right(self):
+        for bad in (
+            {"ml_player": -50}, {"ml_player": 0}, {"ml_player": 150, "ml_opponent": 180},
+            {"total_line": 22.3}, {"total_line": 12.5}, {"total_line": 36.5},
+            {"total_over": None}, {"total_line": None}, {"aces_player": -1}, {"aces_player": 60},
+            {"tour": "itf"}, {"opponent": "Qual Ifier"},
+        ):
+            with self.assertRaises(Exception, msg=str(bad)):
+                ManualLine.model_validate({**self.ENTRY, **bad})
+        ManualLine.model_validate({**self.ENTRY, "ml_player": 100, "ml_opponent": -120})
+        ManualLine.model_validate({**self.ENTRY, "total_line": None, "total_over": None, "total_under": None})
+
+
 class ValidationTest(unittest.TestCase):
     def payload(self, **overrides):
         row = {**BOARD[0], **overrides}
@@ -217,6 +313,26 @@ class EndpointTest(unittest.TestCase):
             missing = self.client.get("/api/tennis/runs/00000000-0000-0000-0000-000000000000", headers=self.auth)
             self.assertEqual(missing.status_code, 404)
             self.assertEqual(self.client.get("/api/tennis/runs/not-a-uuid", headers=self.auth).status_code, 422)
+
+    def test_manual_lines_reprice_and_bad_ones_are_refused(self):
+        with patch.dict("os.environ", {"PREP_UPLOAD_SECRET": "hunter2"}):
+            run = self.client.post("/api/tennis/runs", json=self.body, headers=self.auth).json()
+            url = f"/api/tennis/runs/{run['run_id']}/manual-lines"
+            row = self.body["rows"][0]
+            entry = {"game_id": row["game_id"], "player": row["player"], "tour": "atp", "ml_player": -150, "ml_opponent": 125}
+            self.assertEqual(self.client.put(url, json={"lines": [entry]}).status_code, 401)
+            stranger = self.client.put(url, json={"lines": [{**entry, "player": "Some Stranger"}]}, headers=self.auth)
+            self.assertEqual(stranger.status_code, 422)
+            self.assertEqual(self.client.put(url, json={"lines": [{**entry, "ml_player": 5}]}, headers=self.auth).status_code, 422)
+
+            revised = self.client.put(url, json={"lines": [entry]}, headers=self.auth)
+            self.assertEqual(revised.status_code, 200, revised.text)
+            self.assertEqual(revised.json()["revises"], run["run_id"])
+            self.assertEqual(revised.json()["manual_lines"][0]["opponent"], row["opponent"])
+            # The run it replaced no longer takes lines.
+            self.assertEqual(self.client.put(url, json={"lines": [entry]}, headers=self.auth).status_code, 409)
+            missing = "/api/tennis/runs/00000000-0000-0000-0000-000000000000/manual-lines"
+            self.assertEqual(self.client.put(missing, json={"lines": []}, headers=self.auth).status_code, 404)
 
     def test_rejects_oversized_and_invalid_boards(self):
         with patch.dict("os.environ", {"PREP_UPLOAD_SECRET": "hunter2"}):

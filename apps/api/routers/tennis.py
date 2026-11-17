@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
-from tennis_pp.board import MAX_BODY_BYTES, RunRequest
+from tennis_pp.board import MAX_BODY_BYTES, ManualLinesRequest, RunRequest
 from tennis_pp.runs import TennisRuns
 from tennis_pp.store import SupabaseStore
 
@@ -62,6 +62,23 @@ async def create_run(request: Request, service: TennisRuns = Depends(get_service
 async def get_run(run_id: UUID, service: TennisRuns = Depends(get_service)):
     """The run as stored. It never reprices: an old run shows what it showed then."""
     return _found(service.view(str(run_id)))
+
+
+@router.put("/runs/{run_id}/manual-lines")
+async def set_manual_lines(run_id: UUID, payload: ManualLinesRequest, service: TennisRuns = Depends(get_service)):
+    """Book lines typed in for matches the feed doesn't carry. Sends the whole set each time and
+    answers with the repriced run, a new revision of this one."""
+    run = service.store.run(str(run_id))
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    try:
+        lines = payload.resolve(run["board"])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        return _found(await service.set_manual_lines(str(run_id), lines))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/runs/{run_id}/refresh")

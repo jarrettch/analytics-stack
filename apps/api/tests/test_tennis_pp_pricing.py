@@ -171,5 +171,64 @@ class RowTest(unittest.TestCase):
         self.assertNotIn("assumed_aces", with_fd["flags"])
 
 
+def typed(**overrides):
+    return {"game_id": "100", "player": "Alex Favorite", "opponent": "Ben Underdog", "tour": "atp",
+            "ml_player": -200, "ml_opponent": 165, "total_line": 22.5, "total_over": -110, "total_under": -110,
+            "aces_player": None, "aces_opponent": None, **overrides}
+
+
+class ManualLinesTest(unittest.TestCase):
+    BOARD = [line(), line(stat="Total Games", value=21.5, projection_id="2"),
+             line(stat="Total Games Won", value=12.5, projection_id="3"),
+             line("Ben Underdog", "Alex Favorite", stat="Total Games Won", value=9.5, projection_id="4")]
+
+    def test_typed_lines_price_a_match_the_feed_does_not_carry(self):
+        unpriced = price(self.BOARD, [])
+        self.assertTrue(all(r["unpriced_reason"] == "no_book_line" for r in unpriced))
+
+        results = price_board(self.BOARD, [], now=NOW, manual=[typed()])
+        book = price(self.BOARD, match())
+        for ours, theirs in zip(results, book):
+            self.assertIsNone(ours["unpriced_reason"])
+            self.assertIn("manual_odds", ours["flags"])
+            # The same numbers typed in give the same answer as the feed.
+            self.assertEqual((ours["p_over"], ours["p_win"], ours["lean"]), (theirs["p_over"], theirs["p_win"], theirs["lean"]))
+        self.assertEqual(results[0]["event_id"], "manual:100")
+        self.assertNotIn("dk_p_over", results[1])
+
+    def test_the_moneylines_belong_to_the_named_player(self):
+        flipped = typed(player="Ben Underdog", opponent="Alex Favorite", ml_player=165, ml_opponent=-200)
+        for entry in (typed(), flipped):
+            fs = price_board(self.BOARD, [], now=NOW, manual=[entry])[0]
+            self.assertGreater(fs["p_win"], 0.6)
+
+    def test_typed_lines_replace_the_feed_for_that_match_only(self):
+        other = line("Cara Other", "Dee Other", stat="Total Games", value=21.5, game_id="200", projection_id="9")
+        snapshot = match() + match("e2", "Cara Other", "Dee Other")
+        ours, theirs = price_board([self.BOARD[1], other], snapshot, now=NOW, manual=[typed(ml_player=-600, ml_opponent=420)])
+        self.assertEqual((ours["fav_ml"], theirs["fav_ml"]), (-600, -200))
+        self.assertNotIn("manual_odds", theirs["flags"])
+
+    def test_without_a_total_only_the_games_markets_price(self):
+        fs, games, *_ = price_board(self.BOARD, [], now=NOW, manual=[typed(total_line=None, total_over=None, total_under=None)])
+        self.assertEqual(fs["unpriced_reason"], "no_book_line")
+        self.assertIn("ml_only", games["flags"])
+
+    def test_a_total_without_prices_is_taken_as_even(self):
+        priced = price_board(self.BOARD, [], now=NOW, manual=[typed()])[1]
+        bare = price_board(self.BOARD, [], now=NOW, manual=[typed(total_over=None, total_under=None)])[1]
+        self.assertEqual(bare["p_over"], priced["p_over"])
+
+    def test_typed_aces_set_the_mean_and_clear_the_assumed_flag(self):
+        few = price_board(self.BOARD, [], now=NOW, manual=[typed(aces_player=2)])[0]
+        many = price_board(self.BOARD, [], now=NOW, manual=[typed(aces_player=12)])[0]
+        assumed = price_board(self.BOARD, [], now=NOW, manual=[typed()])[0]
+        self.assertEqual(many["aces_src"], "manual 12")
+        self.assertNotIn("assumed_aces", many["flags"])
+        self.assertIn("assumed_aces", assumed["flags"])
+        # Ten more aces at half a point each.
+        self.assertAlmostEqual(many["model_mean"] - few["model_mean"], 5.0, delta=0.11)
+
+
 if __name__ == "__main__":
     unittest.main()

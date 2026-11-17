@@ -716,3 +716,16 @@ Render all strings as text, never as HTML.
    them the page can show P but not whether a goblin at 0.66 beats its
    multiplier. Manual payout entry is out of scope for v1; is P alone enough
    to pick goblins from?
+
+## Manual lines (added after the first build)
+
+The feed often has no line for Challenger matches. `PUT /api/tennis/runs/{id}/manual-lines` takes
+the whole set of typed-in lines for a run and answers with a new revision priced on the same
+snapshot. Per match: both moneylines (required), a total with optional prices (blank counts as
+-110 each), and optional expected aces per player, which set the ace mean directly.
+
+- A match with typed-in lines is priced on them and not on the feed, flagged `manual_odds`, and
+  never `stale_odds`. The page keeps it out of the actionable group: the margins and bias shifts
+  were measured against DraftKings and FanDuel.
+- Lines are stored in `tennis_runs.manual_lines` and carried into the revision a refresh makes.
+- A run that has been repriced, or has no snapshot yet, refuses lines (409).
