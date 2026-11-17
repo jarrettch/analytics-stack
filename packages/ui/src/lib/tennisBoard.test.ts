@@ -112,6 +112,24 @@ describe("tennisGroup", () => {
   })
 })
 
+describe("tennisGroup on Games Won", () => {
+  const gamesWon = (p: number, overrides: Partial<TennisResult> = {}) =>
+    result({ stat: "Total Games Won", p_over: p, p_under: 1 - p, ...overrides })
+
+  it("needs a 55% lean to be a play", () => {
+    expect(tennisGroup(gamesWon(0.549), NOW)).toBe("no_play")
+    expect(tennisGroup(gamesWon(0.55), NOW)).toBe("actionable")
+    expect(tennisGroup(gamesWon(0.4, { lean: "under" }), NOW)).toBe("actionable")
+    expect(tennisGroup(gamesWon(0.549, { flags: ["stale_odds"] }), NOW)).toBe("no_play")
+    expect(tennisGroup(gamesWon(0.6, { flags: ["stale_odds"] }), NOW)).toBe("provisional")
+  })
+
+  it("leaves the other stats at any lean", () => {
+    expect(tennisGroup(result({ p_over: 0.507, p_under: 0.493 }), NOW)).toBe("actionable")
+    expect(tennisGroup(result({ stat: "Total Games", p_over: 0.507, p_under: 0.493 }), NOW)).toBe("actionable")
+  })
+})
+
 describe("groupTennisResults", () => {
   it("orders a group by the lean's probability", () => {
     const groups = groupTennisResults([

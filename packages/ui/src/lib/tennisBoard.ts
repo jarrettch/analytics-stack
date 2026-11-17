@@ -157,10 +157,16 @@ export type TennisGroup = "actionable" | "provisional" | "no_play" | "unpriced" 
 export const TENNIS_GROUPS: { id: TennisGroup; label: string; hint: string }[] = [
   { id: "actionable", label: "Actionable", hint: "A lean on a playable side that passes every check, on fresh odds." },
   { id: "provisional", label: "Provisional", hint: "Would be actionable but for stale odds or an assumed ace rate." },
-  { id: "no_play", label: "No lean or not playable", hint: "No lean, an under on a goblin or demon, a failed bias check, or a fit that can't be trusted." },
+  { id: "no_play", label: "No lean or not playable", hint: "No lean, a Games Won lean under 55%, an under on a goblin or demon, a failed bias check, or a fit that can't be trusted." },
   { id: "unpriced", label: "Unpriced", hint: "No book line to price against." },
   { id: "started", label: "Started", hint: "The match has begun." },
 ]
+
+/**
+ * The lowest probability that counts as a lean worth playing, where a stat has one. Games Won
+ * leans cluster just over 50%, below what any PrizePicks slip needs to break even.
+ */
+export const TENNIS_MIN_PROBABILITY: Partial<Record<TennisPricedStat, number>> = { "Total Games Won": 0.55 }
 
 /** Which group a result belongs in. `now` is checked again here: a board can sit open past a start. */
 export function tennisGroup(result: TennisResult, now: Date): TennisGroup {
@@ -170,6 +176,7 @@ export function tennisGroup(result: TennisResult, now: Date): TennisGroup {
   // Goblins and demons can only be played over.
   const playable = result.lean === "over" || (result.lean === "under" && result.odds_type === "standard")
   if (!playable || flags.has("fails_bias_check") || flags.has("ml_only") || flags.has("fit_miss")) return "no_play"
+  if ((tennisProbability(result) ?? 0) < (TENNIS_MIN_PROBABILITY[result.stat] ?? 0)) return "no_play"
   return flags.has("stale_odds") || flags.has("assumed_aces") ? "provisional" : "actionable"
 }
 
