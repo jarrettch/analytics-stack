@@ -312,6 +312,7 @@ def _nhl_plays(data: dict, matchup: dict) -> list[dict]:
             "event": str(desc),
             "awayScore": _safe_int(details.get("awayScore")),
             "homeScore": _safe_int(details.get("homeScore")),
+            "scoringPlay": play.get("typeDescKey") == "goal",
         })
     return out
 

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { NBABoxScoreTable } from "./GameDetailView"
-import type { NBAPlayerBoxScore } from "./types/game-detail-types"
+import { NBABoxScoreTable, PlaysTable } from "./GameDetailView"
+import type { NBAPlayerBoxScore, PlayByPlayEvent } from "./types/game-detail-types"
 
 function player(name: string, overrides: Partial<NBAPlayerBoxScore> = {}): NBAPlayerBoxScore {
   return {
@@ -52,5 +52,27 @@ describe("NBABoxScoreTable", () => {
 
     expect(html).not.toContain("DNP")
     expect(html).toContain("0-0")
+  })
+})
+
+describe("PlaysTable", () => {
+  const play = (id: string, overrides: Partial<PlayByPlayEvent> = {}): PlayByPlayEvent => ({
+    id, clock: "5:00", quarter: 1, team: "MIN", event: `play ${id}`, awayScore: 0, homeScore: 0, ...overrides,
+  })
+
+  it("highlights only the plays the feed marks as scoring", () => {
+    const html = renderToStaticMarkup(
+      <PlaysTable
+        plays={[
+          play("1"),
+          play("2", { scoringPlay: true, scoringType: "TD", awayScore: 7 }),
+          // Score corrections move the score without being a scoring play.
+          play("3", { scoringPlay: false, awayScore: 6 }),
+        ]}
+      />,
+    )
+
+    expect(html.match(/data-scoring-play/g)).toHaveLength(1)
+    expect(html).toContain(">TD</span>")
   })
 })

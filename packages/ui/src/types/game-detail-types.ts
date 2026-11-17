@@ -12,6 +12,10 @@ export interface PlayByPlayEvent {
   event: string
   awayScore: number
   homeScore: number
+  /** True when the source feed marks the play as a score. */
+  scoringPlay?: boolean
+  /** Short label for the score, e.g. "TD", "FG" or "3PT". NFL and NBA only. */
+  scoringType?: string | null
   winProbAway?: number
   winProbHome?: number
   sourceTimestamp?: string

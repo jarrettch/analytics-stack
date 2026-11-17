@@ -240,7 +240,7 @@ function EmptyPanel({ label }: { label: string }) {
   )
 }
 
-function PlaysTable({ plays }: { plays: PlayByPlayEvent[] }) {
+export function PlaysTable({ plays }: { plays: PlayByPlayEvent[] }) {
   if (plays.length === 0) return <EmptyPanel label="Play-by-play is not available yet." />
   return (
     <div className="overflow-hidden rounded-md border border-border bg-card">
@@ -254,7 +254,23 @@ function PlaysTable({ plays }: { plays: PlayByPlayEvent[] }) {
           </tr>
         </thead>
         <tbody>
-          {plays.slice(-80).reverse().map((p) => (
+          {plays.slice(-80).reverse().map((p) => p.scoringPlay ? (
+            <tr key={p.id} data-scoring-play className="border-t border-emerald-500/30 bg-emerald-500/10">
+              <td className="whitespace-nowrap px-3 py-2 text-emerald-300/80 shadow-[inset_3px_0_0_0_rgb(16_185_129)]">{p.quarter} {p.clock}</td>
+              <td className="px-3 py-2 font-semibold text-emerald-300">{p.team ?? "--"}</td>
+              <td className="px-3 py-2 text-emerald-200">
+                {p.scoringType && (
+                  <span className="mr-2 inline-block rounded-sm bg-emerald-500 px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wider text-emerald-950">
+                    {p.scoringType}
+                  </span>
+                )}
+                {p.event}
+              </td>
+              <td className="whitespace-nowrap px-3 py-2 text-right font-bold tabular-nums text-emerald-300">
+                {p.awayScore}-{p.homeScore}
+              </td>
+            </tr>
+          ) : (
             <tr key={p.id} className="border-t border-border">
               <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{p.quarter} {p.clock}</td>
               <td className="px-3 py-2 text-foreground">{p.team ?? "--"}</td>

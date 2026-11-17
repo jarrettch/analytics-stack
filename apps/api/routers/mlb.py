@@ -263,6 +263,7 @@ def _mlb_plays(all_plays: list[dict], matchup: dict) -> list[dict]:
             "event": result.get("description") or result.get("event") or "Game event",
             "awayScore": _safe_int(result.get("awayScore")),
             "homeScore": _safe_int(result.get("homeScore")),
+            "scoringPlay": bool(about.get("isScoringPlay")),
         })
     return out
 

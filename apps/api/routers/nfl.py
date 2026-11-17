@@ -767,6 +767,8 @@ def _play_by_play(summary: dict) -> list[dict]:
                 "event": play.get("text") or (play.get("type") or {}).get("text", "Play"),
                 "awayScore": _to_int(play.get("awayScore")),
                 "homeScore": _to_int(play.get("homeScore")),
+                "scoringPlay": bool(play.get("scoringPlay")),
+                "scoringType": (play.get("scoringType") or {}).get("abbreviation"),
                 "sourceTimestamp": play.get("wallclock") or play.get("modified"),
             })
     return sorted(plays, key=lambda play: play.get("sequence", 0))
