@@ -12,3 +12,4 @@ export * from "./lib/winProb";
 export * from "./lib/usageWindow";
 export * from "./lib/collegeFilters";
 export * from "./lib/slatePrep";
+export * from "./lib/tennisBoard";
