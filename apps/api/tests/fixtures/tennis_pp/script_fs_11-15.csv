@@ -1,0 +1,54 @@
+player,opp,tour,pp_type,pp_line,p_win,spread,total,aces_src,system,model_mean,model_median,p_over,p_under,push,p_side_bias,bias_check,spread_check,fit,note
+Carlos Alcaraz,Frances Tiafoe,atp,standard,23.5,0.88,-4.5,20.5,FD 8.5 -155,20.6,22.6,24.0,0.555,0.445,0.048,0.344,FAIL,"(-4.5, 0.514, 0.554)",iid,
+Martina Trevisan,Guiomar Maristany Zuleta de Reales,wta,goblin,2,0.481,1.5,20.5,assumed 0.22,11.1,9.1,7.0,0.615,0.385,0.014,0.615,pass,"(-1.5, 0.491, 0.475)",mix s=0.133,
+Martina Trevisan,Guiomar Maristany Zuleta de Reales,wta,standard,10.5,0.481,1.5,20.5,assumed 0.22,11.1,9.1,7.0,0.475,0.525,0.003,0.514,pass,"(-1.5, 0.491, 0.475)",mix s=0.133,
+Martina Trevisan,Guiomar Maristany Zuleta de Reales,wta,demon,19,0.481,1.5,20.5,assumed 0.22,11.1,9.1,7.0,0.295,0.705,0.016,0.65,pass,"(-1.5, 0.491, 0.475)",mix s=0.133,
+Marat Sharipov,Inaki Montes-de la Torre,,goblin,3,,,,,,,,,,,,,,,no book match/total
+Marat Sharipov,Inaki Montes-de la Torre,,standard,13.5,,,,,,,,,,,,,,,no book match/total
+Marat Sharipov,Inaki Montes-de la Torre,,demon,19.5,,,,,,,,,,,,,,,no book match/total
+Katrina Scott,Anastasia Zolotareva,,goblin,3.5,,,,,,,,,,,,,,,no book match/total
+Katrina Scott,Anastasia Zolotareva,,standard,15.5,,,,,,,,,,,,,,,no book match/total
+Katrina Scott,Anastasia Zolotareva,,demon,20,,,,,,,,,,,,,,,no book match/total
+Rebeka Masarova,Diletta Cherubini,wta,goblin,20,0.82,-5.5,19.5,assumed 0.22,18.1,17.6,21.0,0.56,0.44,0.035,0.56,pass,"(5.5, 0.468, 0.481)",mix s=0.089,
+Rebeka Masarova,Diletta Cherubini,wta,standard,22,0.82,-5.5,19.5,assumed 0.22,18.1,17.6,21.0,0.382,0.618,0.048,0.44,FAIL,"(5.5, 0.468, 0.481)",mix s=0.089,
+Rebeka Masarova,Diletta Cherubini,wta,demon,24,0.82,-5.5,19.5,assumed 0.22,18.1,17.6,21.0,0.185,0.815,0.043,0.618,pass,"(5.5, 0.468, 0.481)",mix s=0.089,
+Matej Dodig,Inaki Montes-de la Torre,,goblin,6.5,,,,,,,,,,,,,,,no book match/total
+Matej Dodig,Inaki Montes-de la Torre,,standard,18,,,,,,,,,,,,,,,no book match/total
+Matej Dodig,Inaki Montes-de la Torre,,demon,21.5,,,,,,,,,,,,,,,no book match/total
+Toby Samuel,Ilya Ivashka,,goblin,19,,,,,,,,,,,,,,,no book match/total
+Toby Samuel,Ilya Ivashka,,standard,21.5,,,,,,,,,,,,,,,no book match/total
+Toby Samuel,Ilya Ivashka,,demon,23.5,,,,,,,,,,,,,,,no book match/total
+Shintaro Mochizuki,Lorenzo Giustino,,goblin,4,,,,,,,,,,,,,,,no book match/total
+Shintaro Mochizuki,Lorenzo Giustino,,standard,16,,,,,,,,,,,,,,,no book match/total
+Shintaro Mochizuki,Lorenzo Giustino,,demon,20,,,,,,,,,,,,,,,no book match/total
+Nuria Brancaccio,Sofia Costoulas,wta,goblin,4,0.629,-3.5,19.5,assumed 0.22,16.1,12.6,16.5,0.692,0.308,0.01,0.692,pass,"(-3.5, 0.519, 0.492)",mix s=0.128,
+Nuria Brancaccio,Sofia Costoulas,wta,standard,16,0.629,-3.5,19.5,assumed 0.22,16.1,12.6,16.5,0.517,0.483,0.015,0.517,pass,"(-3.5, 0.519, 0.492)",mix s=0.128,
+Nuria Brancaccio,Sofia Costoulas,wta,demon,20,0.629,-3.5,19.5,assumed 0.22,16.1,12.6,16.5,0.36,0.64,0.026,0.549,pass,"(-3.5, 0.519, 0.492)",mix s=0.128,
+Nicolai Budkov Kjaer,Mika Brunold,,goblin,3.5,,,,,,,,,,,,,,,no book match/total
+Nicolai Budkov Kjaer,Mika Brunold,,standard,15.5,,,,,,,,,,,,,,,no book match/total
+Nicolai Budkov Kjaer,Mika Brunold,,demon,20,,,,,,,,,,,,,,,no book match/total
+Jacob Fearnley,Gianluca Cadenasso,,goblin,20,,,,,,,,,,,,,,,no book match/total
+Jacob Fearnley,Gianluca Cadenasso,,standard,22,,,,,,,,,,,,,,,no book match/total
+Jacob Fearnley,Gianluca Cadenasso,,demon,24,,,,,,,,,,,,,,,no book match/total
+Carole Monnet,Victoria Jimenez Kasintseva,wta,goblin,4,0.64,-3.5,20.5,assumed 0.22,16.1,12.8,17.0,0.704,0.296,0.01,0.704,pass,"(-3.5, 0.519, 0.502)",mix s=0.112,
+Carole Monnet,Victoria Jimenez Kasintseva,wta,standard,16,0.64,-3.5,20.5,assumed 0.22,16.1,12.8,17.0,0.527,0.473,0.016,0.527,pass,"(-3.5, 0.519, 0.502)",mix s=0.112,
+Carole Monnet,Victoria Jimenez Kasintseva,wta,demon,20,0.64,-3.5,20.5,assumed 0.22,16.1,12.8,17.0,0.364,0.636,0.028,0.541,pass,"(-3.5, 0.519, 0.502)",mix s=0.112,
+Leyre Romero Gormaz,Ipek Oz,wta,goblin,13,0.702,-4.5,20.5,assumed 0.22,17.1,14.4,18.5,0.672,0.328,0.009,0.672,pass,"(4.5, 0.5, 0.524)",mix s=0.096,
+Leyre Romero Gormaz,Ipek Oz,wta,standard,19.5,0.702,-4.5,20.5,assumed 0.22,17.1,14.4,18.5,0.445,0.555,0.029,0.459,FAIL,"(4.5, 0.5, 0.524)",mix s=0.096,
+Leyre Romero Gormaz,Ipek Oz,wta,demon,22,0.702,-4.5,20.5,assumed 0.22,17.1,14.4,18.5,0.264,0.736,0.038,0.586,pass,"(4.5, 0.5, 0.524)",mix s=0.096,
+Andrea Guerrieri,Elias Ymer,,goblin,3.5,,,,,,,,,,,,,,,no book match/total
+Andrea Guerrieri,Elias Ymer,,standard,15.5,,,,,,,,,,,,,,,no book match/total
+Andrea Guerrieri,Elias Ymer,,demon,20,,,,,,,,,,,,,,,no book match/total
+Nikoloz Basilashvili,Max Houkes,,goblin,21,,,,,,,,,,,,,,,no book match/total
+Nikoloz Basilashvili,Max Houkes,,standard,23,,,,,,,,,,,,,,,no book match/total
+Nikoloz Basilashvili,Max Houkes,,demon,25,,,,,,,,,,,,,,,no book match/total
+Dino Prizmic,Diego Dedura,,goblin,20,,,,,,,,,,,,,,,no book match/total
+Dino Prizmic,Diego Dedura,,standard,22,,,,,,,,,,,,,,,no book match/total
+Dino Prizmic,Diego Dedura,,demon,24,,,,,,,,,,,,,,,no book match/total
+Daniil Medvedev,Flavio Cobolli,atp,standard,23,0.749,-3.5,22.5,FD 12.5 -135,21.6,21.7,24.0,0.574,0.426,0.03,0.429,FAIL,"(-3.5, 0.545, 0.533)",mix s=0.055,
+Anastasia Tikhonova,Valeriya Strakhova,,goblin,2,,,,,,,,,,,,,,,no book match/total
+Anastasia Tikhonova,Valeriya Strakhova,,standard,11.5,,,,,,,,,,,,,,,no book match/total
+Anastasia Tikhonova,Valeriya Strakhova,,demon,19,,,,,,,,,,,,,,,no book match/total
+Luisina Giovannini,Ariana Geerlings Martinez,,goblin,2,,,,,,,,,,,,,,,no book match/total
+Luisina Giovannini,Ariana Geerlings Martinez,,standard,11.5,,,,,,,,,,,,,,,no book match/total
+Luisina Giovannini,Ariana Geerlings Martinez,,demon,19,,,,,,,,,,,,,,,no book match/total
