@@ -164,3 +164,14 @@ def test_provider_cursor_rejection_aborts_without_offset_fallback(provider):
         fetch()
     assert len(provider[2]) == 2
     assert all("offset" not in request["params"] for request in provider[2])
+
+
+def test_main_line_filter_is_sent_by_default_and_omitted_on_request(provider):
+    responses, _, requests = provider
+    responses.extend([(200, page(), {}), (200, page(), {})])
+
+    asyncio.run(sharp.fetch_sharp_odds("atp", "moneyline", sweep=sharp.SharpSweep()))
+    asyncio.run(sharp.fetch_sharp_odds("atp", "total_games", sweep=sharp.SharpSweep(), main_only=False))
+
+    assert requests[0]["params"]["is_main_line"] == "true"
+    assert "is_main_line" not in requests[1]["params"]
