@@ -178,12 +178,20 @@ export default function SlatePrepPage() {
               then copy exactly what you selected.
             </p>
           </div>
-          <Link
-            href="/"
-            className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
-          >
-            ← Dashboard
-          </Link>
+          <div className="flex gap-4">
+            <Link
+              href="/prep/tennis"
+              className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Tennis Board
+            </Link>
+            <Link
+              href="/"
+              className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+            >
+              ← Dashboard
+            </Link>
+          </div>
         </header>
 
         <section

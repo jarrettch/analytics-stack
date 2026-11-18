@@ -136,12 +136,19 @@ async def _request_page(params: dict, sweep: SharpSweep) -> dict:
     raise SharpOddsError("SharpAPI retry budget exhausted")
 
 
-async def fetch_sharp_odds(league: str, market: str, *, sweep: SharpSweep) -> list[dict]:
-    """Return every cursor page, or raise without exposing a partial market."""
+async def fetch_sharp_odds(
+    league: str, market: str, *, sweep: SharpSweep, main_only: bool = True,
+) -> list[dict]:
+    """Return every cursor page, or raise without exposing a partial market.
+
+    `main_only=False` also returns alternate lines (tennis total and ace ladders).
+    """
     params = {
         "league": league, "market": market, "sportsbook": "draftkings,fanduel",
-        "is_live": "false", "is_main_line": "true", "limit": 200,
+        "is_live": "false", "limit": 200,
     }
+    if main_only:
+        params["is_main_line"] = "true"
     rows: list[dict] = []
     cursors: set[str] = set()
     for _ in range(MAX_PAGES):

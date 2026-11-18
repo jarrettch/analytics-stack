@@ -1,0 +1,136 @@
+stat,player,opp,start,pp_type,pp_line,tour,p_win,fav_ml,dk_total,dk_p_over,model_mean,p_over,p_under,push,flags,dk_gw,dk_gw_p_over
+Total Games,Sorana Cirstea,Alexandra Shubladze,11-06T03:30,goblin,17.5,wta,0.71,-300,20.5,,22.1,0.731,0.269,0,mixs=0.080,,
+Total Games,Sorana Cirstea,Alexandra Shubladze,11-06T03:30,goblin,18.5,wta,0.71,-300,20.5,0.634,22.1,0.647,0.353,0,mixs=0.080,,
+Total Games,Sorana Cirstea,Alexandra Shubladze,11-06T03:30,goblin,19.5,wta,0.71,-300,20.5,0.567,22.1,0.57,0.43,0,mixs=0.080,,
+Total Games,Sorana Cirstea,Alexandra Shubladze,11-06T03:30,standard,20,wta,0.71,-300,20.5,0.567/0.505,22.1,0.54,0.46,0.066,mixs=0.080,,
+Total Games,Sorana Cirstea,Alexandra Shubladze,11-06T03:30,demon,21.5,wta,0.71,-300,20.5,0.468,22.1,0.456,0.544,0,mixs=0.080,,
+Total Games,Sorana Cirstea,Alexandra Shubladze,11-06T03:30,demon,22.5,wta,0.71,-300,20.5,0.417,22.1,0.401,0.599,0,mixs=0.080,,
+Total Games,Sorana Cirstea,Alexandra Shubladze,11-06T03:30,demon,25.5,wta,0.71,-300,20.5,,22.1,0.306,0.694,0,mixs=0.080,,
+Total Games,Janice Tjen,Polina Kudermetova,11-06T04:30,goblin,18.5,wta,0.632,-202,21.5,,22.6,0.681,0.319,0,mixs=0.078,,
+Total Games,Janice Tjen,Polina Kudermetova,11-06T04:30,goblin,19.5,wta,0.632,-202,21.5,0.600,22.6,0.605,0.395,0,mixs=0.078,,
+Total Games,Janice Tjen,Polina Kudermetova,11-06T04:30,goblin,20.5,wta,0.632,-202,21.5,0.532,22.6,0.539,0.461,0,mixs=0.078,,
+Total Games,Janice Tjen,Polina Kudermetova,11-06T04:30,standard,21.5,wta,0.632,-202,21.5,0.491,22.6,0.491,0.509,0,mixs=0.078,,
+Total Games,Janice Tjen,Polina Kudermetova,11-06T04:30,demon,22.5,wta,0.632,-202,21.5,0.433,22.6,0.433,0.567,0,mixs=0.078,,
+Total Games,Janice Tjen,Polina Kudermetova,11-06T04:30,demon,23.5,wta,0.632,-202,21.5,0.400,22.6,0.395,0.605,0,mixs=0.078,,
+Total Games,Janice Tjen,Polina Kudermetova,11-06T04:30,demon,24.5,wta,0.632,-202,21.5,0.379,22.6,0.373,0.627,0,mixs=0.078,,
+Total Games,Lucrezia Stefanini,Anastasia Zakharova,11-06T04:30,goblin,17.5,wta,0.502,-114,21.5,,22.9,0.779,0.221,0,mixs=0.079,,
+Total Games,Lucrezia Stefanini,Anastasia Zakharova,11-06T04:30,goblin,18.5,wta,0.502,-114,21.5,,22.9,0.699,0.301,0,mixs=0.079,,
+Total Games,Lucrezia Stefanini,Anastasia Zakharova,11-06T04:30,goblin,19.5,wta,0.502,-114,21.5,0.610,22.9,0.624,0.376,0,mixs=0.079,,
+Total Games,Lucrezia Stefanini,Anastasia Zakharova,11-06T04:30,standard,21.5,wta,0.502,-114,21.5,0.509,22.9,0.509,0.491,0,mixs=0.079,,
+Total Games,Lucrezia Stefanini,Anastasia Zakharova,11-06T04:30,demon,25.5,wta,0.502,-114,21.5,0.362,22.9,0.35,0.65,0,mixs=0.079,,
+Total Games,Lucrezia Stefanini,Anastasia Zakharova,11-06T04:30,demon,26.5,wta,0.502,-114,21.5,,22.9,0.307,0.693,0,mixs=0.079,,
+Total Games,Lucrezia Stefanini,Anastasia Zakharova,11-06T04:30,demon,27.5,wta,0.502,-114,21.5,,22.9,0.266,0.734,0,mixs=0.079,,
+Total Games,Magda Linette,Mai Hontama,11-06T04:30,goblin,17.5,wta,0.692,-270,20.5,,21.9,0.709,0.291,0,mixs=0.094,,
+Total Games,Magda Linette,Mai Hontama,11-06T04:30,goblin,18.5,wta,0.692,-270,20.5,0.621,21.9,0.625,0.375,0,mixs=0.094,,
+Total Games,Magda Linette,Mai Hontama,11-06T04:30,standard,20.5,wta,0.692,-270,20.5,0.486,21.9,0.486,0.514,0,mixs=0.094,,
+Total Games,Magda Linette,Mai Hontama,11-06T04:30,demon,25.5,wta,0.692,-270,20.5,,21.9,0.294,0.706,0,mixs=0.094,,
+Total Games,Magda Linette,Mai Hontama,11-06T04:30,demon,26.5,wta,0.692,-270,20.5,,21.9,0.257,0.743,0,mixs=0.094,,
+Total Games,Magda Linette,Mai Hontama,11-06T04:30,demon,27.5,wta,0.692,-270,20.5,,21.9,0.22,0.78,0,mixs=0.094,,
+Total Games,Robin Montgomery,Maaya Rajeshwaran Revathi,11-06T04:30,goblin,16.5,wta,0.816,-650,19.5,,21.2,0.765,0.235,0,mixs=0.075 blowout,,
+Total Games,Robin Montgomery,Maaya Rajeshwaran Revathi,11-06T04:30,goblin,17.5,wta,0.816,-650,19.5,0.650,21.2,0.667,0.333,0,mixs=0.075 blowout,,
+Total Games,Robin Montgomery,Maaya Rajeshwaran Revathi,11-06T04:30,goblin,18.5,wta,0.816,-650,19.5,0.567,21.2,0.577,0.423,0,mixs=0.075 blowout,,
+Total Games,Robin Montgomery,Maaya Rajeshwaran Revathi,11-06T04:30,standard,19.5,wta,0.816,-650,19.5,0.500,21.2,0.5,0.5,0,mixs=0.075 blowout,,
+Total Games,Robin Montgomery,Maaya Rajeshwaran Revathi,11-06T04:30,demon,20.5,wta,0.816,-650,19.5,0.433,21.2,0.436,0.564,0,mixs=0.075 blowout,,
+Total Games,Robin Montgomery,Maaya Rajeshwaran Revathi,11-06T04:30,demon,21.5,wta,0.816,-650,19.5,0.400,21.2,0.389,0.611,0,mixs=0.075 blowout,,
+Total Games,Robin Montgomery,Maaya Rajeshwaran Revathi,11-06T04:30,demon,22.5,wta,0.816,-650,19.5,0.350,21.2,0.338,0.662,0,mixs=0.075 blowout,,
+Total Games,Anna Blinkova,Yasmine Kabbaj,11-06T05:00,standard,18.5,wta,0.874,-1600,,,20.5,0.519,0.481,0,ml_only blowout,,
+Total Games,Anna Blinkova,Yasmine Kabbaj,11-06T05:00,demon,19.5,wta,0.874,-1600,,,20.5,0.442,0.558,0,ml_only blowout,,
+Total Games,Noma Noha Akugue,Justina Mikulskyte,11-06T05:00,goblin,17.5,wta,0.818,-690,,,21.3,0.679,0.321,0,ml_only blowout,,
+Total Games,Martyna Kubka,Sofya Lansere,11-06T05:30,standard,21,wta,0.635,-225,,,22.8,0.533,0.467,0.05,ml_only,,
+Total Games,Martyna Kubka,Sofya Lansere,11-06T05:30,demon,22.5,wta,0.635,-225,,,22.8,0.447,0.553,0,ml_only,,
+Total Games,Martyna Kubka,Sofya Lansere,11-06T05:30,demon,23.5,wta,0.635,-225,,,22.8,0.409,0.591,0,ml_only,,
+Total Games,Ksenia Zaytseva,Gina Feistel,11-06T06:00,standard,21.5,wta,0.532,-132,,,23.1,0.526,0.474,0,ml_only,,
+Total Games,Ksenia Zaytseva,Gina Feistel,11-06T06:00,demon,22.5,wta,0.532,-132,,,23.1,0.466,0.534,0,ml_only,,
+Total Games,Alexandra Eala,Antonia Ruzic,11-06T06:40,goblin,17.5,wta,0.745,-364,19.5,,21.6,0.691,0.309,0,mixs=0.089,,
+Total Games,Alexandra Eala,Antonia Ruzic,11-06T06:40,goblin,18.5,wta,0.745,-364,19.5,0.594,21.6,0.605,0.395,0,mixs=0.089,,
+Total Games,Alexandra Eala,Antonia Ruzic,11-06T06:40,standard,20,wta,0.745,-364,19.5,0.529/0.468,21.6,0.496,0.504,0.064,mixs=0.089,,
+Total Games,Alexandra Eala,Antonia Ruzic,11-06T06:40,demon,24.5,wta,0.745,-364,19.5,0.331,21.6,0.31,0.69,0,mixs=0.089,,
+Total Games,Alexandra Eala,Antonia Ruzic,11-06T06:40,demon,25.5,wta,0.745,-364,19.5,,21.6,0.276,0.724,0,mixs=0.089,,
+Total Games,Alexandra Eala,Antonia Ruzic,11-06T06:40,demon,26.5,wta,0.745,-364,19.5,,21.6,0.239,0.761,0,mixs=0.089,,
+Total Games,Noma Noha Akugue,Justina Mikulskyte,11-06T07:20,goblin,18.5,wta,0.818,-690,,,21.3,0.589,0.411,0,ml_only blowout,,
+Total Games,Noma Noha Akugue,Justina Mikulskyte,11-06T07:20,demon,20.5,wta,0.818,-690,,,21.3,0.446,0.554,0,ml_only blowout,,
+Total Games,Ben Shelton,Tommy Paul,11-06T08:00,goblin,19.5,atp,0.454,-134,24.5,,25.2,0.786,0.214,0,,,
+Total Games,Ben Shelton,Tommy Paul,11-06T08:00,goblin,20.5,atp,0.454,-134,24.5,,25.2,0.716,0.284,0,,,
+Total Games,Ben Shelton,Tommy Paul,11-06T08:00,goblin,21.5,atp,0.454,-134,24.5,,25.2,0.667,0.333,0,,,
+Total Games,Ben Shelton,Tommy Paul,11-06T08:00,standard,25,atp,0.454,-134,24.5,0.519/0.491,25.2,0.499,0.501,0.041,,,
+Total Games,Ben Shelton,Tommy Paul,11-06T08:00,demon,28.5,atp,0.454,-134,24.5,0.379,25.2,0.335,0.665,0,,,
+Total Games,Ben Shelton,Tommy Paul,11-06T08:00,demon,29.5,atp,0.454,-134,24.5,,25.2,0.282,0.718,0,,,
+Total Games,Luca Van Assche,Rinky Hijikata,11-06T09:10,goblin,18.5,atp,0.608,-176,23.5,,24.8,0.842,0.158,0,mixs=0.049,,
+Total Games,Luca Van Assche,Rinky Hijikata,11-06T09:10,goblin,19.5,atp,0.608,-176,23.5,,24.8,0.763,0.237,0,mixs=0.049,,
+Total Games,Luca Van Assche,Rinky Hijikata,11-06T09:10,goblin,20.5,atp,0.608,-176,23.5,,24.8,0.687,0.313,0,mixs=0.049,,
+Total Games,Luca Van Assche,Rinky Hijikata,11-06T09:10,standard,23,atp,0.608,-176,23.5,0.552/0.491,24.8,0.523,0.477,0.063,mixs=0.049,,
+Total Games,Luca Van Assche,Rinky Hijikata,11-06T09:10,demon,27.5,atp,0.608,-176,23.5,0.379,24.8,0.36,0.64,0,mixs=0.049,,
+Total Games,Luca Van Assche,Rinky Hijikata,11-06T09:10,demon,28.5,atp,0.608,-176,23.5,,24.8,0.319,0.681,0,mixs=0.049,,
+Total Games,Luca Van Assche,Rinky Hijikata,11-06T09:10,demon,29.5,atp,0.608,-176,23.5,,24.8,0.274,0.726,0,mixs=0.049,,
+Total Games,Anna Blinkova,Yasmine Kabbaj,11-06T10:30,goblin,17.5,wta,0.874,-1600,,,20.5,0.611,0.389,0,ml_only blowout,,
+Total Games,Anna Blinkova,Yasmine Kabbaj,11-06T10:30,demon,20.5,wta,0.874,-1600,,,20.5,0.38,0.62,0,ml_only blowout,,
+Total Games,Leyre Romero Gormaz,Julia Riera,11-06T11:00,goblin,19.5,wta,0.566,-160,,,23.0,0.638,0.362,0,ml_only,,
+Total Games,Leyre Romero Gormaz,Julia Riera,11-06T11:00,standard,21.5,wta,0.566,-160,,,23.0,0.522,0.478,0,ml_only,,
+Total Games,Leyre Romero Gormaz,Julia Riera,11-06T11:00,demon,22.5,wta,0.566,-160,,,23.0,0.462,0.538,0,ml_only,,
+Total Games,Carlos Alcaraz,Taylor Fritz,11-06T13:00,goblin,19.5,atp,0.716,-304,22.5,,24.9,0.769,0.231,0,,,
+Total Games,Carlos Alcaraz,Taylor Fritz,11-06T13:00,goblin,20.5,atp,0.716,-304,22.5,,24.9,0.694,0.306,0,,,
+Total Games,Carlos Alcaraz,Taylor Fritz,11-06T13:00,goblin,21.5,atp,0.716,-304,22.5,0.647,24.9,0.642,0.358,0,,,
+Total Games,Carlos Alcaraz,Taylor Fritz,11-06T13:00,standard,23,atp,0.716,-304,22.5,0.561/0.481,24.9,0.532,0.468,0.061,,,
+Total Games,Carlos Alcaraz,Taylor Fritz,11-06T13:00,demon,23.5,atp,0.716,-304,22.5,0.481,24.9,0.5,0.5,0,,,
+Total Games,Carlos Alcaraz,Taylor Fritz,11-06T13:00,demon,24.5,atp,0.716,-304,22.5,0.477,24.9,0.486,0.514,0,,,
+Total Games,Carlos Alcaraz,Taylor Fritz,11-06T13:00,demon,29.5,atp,0.716,-304,22.5,,24.9,0.273,0.727,0,,,
+Total Games,Bianca Andreescu,Alice Tubello,11-06T13:30,goblin,19.5,wta,0.716,-330,,,22.3,0.588,0.412,0,ml_only,,
+Total Games,Bianca Andreescu,Alice Tubello,11-06T13:30,standard,20.5,wta,0.716,-330,,,22.3,0.522,0.478,0,ml_only,,
+Total Games,Bianca Andreescu,Alice Tubello,11-06T13:30,demon,21.5,wta,0.716,-330,,,22.3,0.473,0.527,0,ml_only,,
+Total Games,Casper Ruud,Nuno Borges,11-06T14:30,goblin,19.5,atp,0.663,-233,22.5,,23.9,0.707,0.293,0,,,
+Total Games,Casper Ruud,Nuno Borges,11-06T14:30,goblin,20.5,atp,0.663,-233,22.5,,23.9,0.642,0.358,0,,,
+Total Games,Casper Ruud,Nuno Borges,11-06T14:30,goblin,21.5,atp,0.663,-233,22.5,0.594,23.9,0.592,0.408,0,,,
+Total Games,Casper Ruud,Nuno Borges,11-06T14:30,standard,22.5,atp,0.663,-233,22.5,0.529,23.9,0.529,0.471,0,,,
+Total Games,Casper Ruud,Nuno Borges,11-06T14:30,demon,25.5,atp,0.663,-233,22.5,0.433,23.9,0.412,0.588,0,,,
+Total Games,Casper Ruud,Nuno Borges,11-06T14:30,demon,26.5,atp,0.663,-233,22.5,0.385,23.9,0.362,0.638,0,,,
+Total Games,Casper Ruud,Nuno Borges,11-06T14:30,demon,27.5,atp,0.663,-233,22.5,0.353,23.9,0.313,0.687,0,,,
+Total Games,Elena Rybakina,Linda Noskova,11-08T15:00,standard,22.5,wta,0.64,-204,22.5,0.514,23.8,0.514,0.486,0,mixs=0.034,,
+Total Games,Coco Gauff,Jessica Pegula,11-08T16:30,standard,22,wta,0.564,-145,21.5,0.519/0.468,23.0,0.489,0.511,0.06,mixs=0.072,,
+Total Games Won,Alexandra Shubladze,Sorana Cirstea,11-06T03:30,goblin,8.5,wta,0.29,-300,20.5,,9.7,0.573,0.427,0,mixs=0.080,9.5 o-125/u-115,0.509
+Total Games Won,Alexandra Shubladze,Sorana Cirstea,11-06T03:30,standard,9.5,wta,0.29,-300,20.5,,9.7,0.526,0.474,0,mixs=0.080,9.5 o-125/u-115,0.509
+Total Games Won,Sorana Cirstea,Alexandra Shubladze,11-06T03:30,demon,12.5,wta,0.71,-300,20.5,,12.4,0.451,0.549,0,mixs=0.080 juice_under,12.5 o100/u-140,0.462
+Total Games Won,Anastasia Zakharova,Lucrezia Stefanini,11-06T04:30,demon,12.5,wta,0.498,-114,21.5,,11.4,0.424,0.576,0,mixs=0.079 juice_under,12.5 o120/u-175,0.417
+Total Games Won,Janice Tjen,Polina Kudermetova,11-06T04:30,demon,12.5,wta,0.632,-202,21.5,,12.1,0.454,0.546,0,mixs=0.078 juice_under,12.5 o100/u-140,0.462
+Total Games Won,Maaya Rajeshwaran Revathi,Robin Montgomery,11-06T04:30,standard,7.5,wta,0.184,-650,19.5,,8.5,0.514,0.486,0,mixs=0.075,7.5 o-125/u-115,0.509
+Total Games Won,Magda Linette,Mai Hontama,11-06T04:30,demon,12.5,wta,0.692,-270,20.5,,12.2,0.429,0.571,0,mixs=0.094 juice_under,12.5 o110/u-165,0.433
+Total Games Won,Mai Hontama,Magda Linette,11-06T04:30,standard,10.5,wta,0.308,-270,20.5,,9.7,0.494,0.506,0,mixs=0.094,9.5 o-125/u-110,0.515
+Total Games Won,Polina Kudermetova,Janice Tjen,11-06T04:30,goblin,9.5,wta,0.368,-202,21.5,,10.5,0.606,0.394,0,mixs=0.078,11.5 o-130/u-110,0.519
+Total Games Won,Polina Kudermetova,Janice Tjen,11-06T04:30,goblin,10.5,wta,0.368,-202,21.5,,10.5,0.567,0.433,0,mixs=0.078,11.5 o-130/u-110,0.519
+Total Games Won,Polina Kudermetova,Janice Tjen,11-06T04:30,standard,11.5,wta,0.368,-202,21.5,,10.5,0.53,0.47,0,mixs=0.078,11.5 o-130/u-110,0.519
+Total Games Won,Robin Montgomery,Maaya Rajeshwaran Revathi,11-06T04:30,demon,12.5,wta,0.816,-650,19.5,,12.7,0.426,0.574,0,mixs=0.075 juice_under,12.5 o120/u-175,0.417
+Total Games Won,Aliaksandra Sasnovich,Maria Sakkari,11-06T05:30,goblin,10.5,wta,0.41,-163,21.5,,11.1,0.622,0.378,0,mixs=0.060 juice_over,11.5 o-165/u110,0.567
+Total Games Won,Martyna Kubka,Sofya Lansere,11-06T05:30,demon,12.5,wta,0.635,-225,,,12.2,0.469,0.531,0,ml_only,,
+Total Games Won,Sofya Lansere,Martyna Kubka,11-06T05:30,goblin,8.5,wta,0.365,-225,,,10.6,0.656,0.344,0,ml_only,,
+Total Games Won,Sofya Lansere,Martyna Kubka,11-06T05:30,goblin,9.5,wta,0.365,-225,,,10.6,0.611,0.389,0,ml_only,,
+Total Games Won,Sofya Lansere,Martyna Kubka,11-06T05:30,standard,11.5,wta,0.365,-225,,,10.6,0.533,0.467,0,ml_only,,
+Total Games Won,Maaya Rajeshwaran Revathi,Robin Montgomery,11-06T05:40,demon,8.5,wta,0.184,-650,19.5,,8.5,0.449,0.551,0,mixs=0.075,7.5 o-125/u-115,0.509
+Total Games Won,Maaya Rajeshwaran Revathi,Robin Montgomery,11-06T05:40,demon,9.5,wta,0.184,-650,19.5,,8.5,0.398,0.602,0,mixs=0.075,7.5 o-125/u-115,0.509
+Total Games Won,Gina Feistel,Ksenia Zaytseva,11-06T06:00,goblin,10.5,wta,0.468,-132,,,11.3,0.663,0.337,0,ml_only,,
+Total Games Won,Gina Feistel,Ksenia Zaytseva,11-06T06:00,goblin,11.5,wta,0.468,-132,,,11.3,0.63,0.37,0,ml_only,,
+Total Games Won,Gina Feistel,Ksenia Zaytseva,11-06T06:00,demon,12.5,wta,0.468,-132,,,11.3,0.425,0.575,0,ml_only,,
+Total Games Won,Ksenia Zaytseva,Gina Feistel,11-06T06:00,demon,12.5,wta,0.532,-132,,,11.7,0.448,0.552,0,ml_only,,
+Total Games Won,Alexandra Eala,Antonia Ruzic,11-06T06:40,demon,12.5,wta,0.745,-364,19.5,,12.4,0.427,0.573,0,mixs=0.089 juice_under,12.5 o110/u-165,0.433
+Total Games Won,Antonia Ruzic,Alexandra Eala,11-06T06:40,standard,8.5,wta,0.255,-364,19.5,,9.2,0.522,0.478,0,mixs=0.089,8.5 o-125/u-115,0.509
+Total Games Won,Antonia Ruzic,Alexandra Eala,11-06T06:40,demon,9.5,wta,0.255,-364,19.5,,9.2,0.475,0.525,0,mixs=0.089,8.5 o-125/u-115,0.509
+Total Games Won,Antonia Ruzic,Alexandra Eala,11-06T06:40,demon,10.5,wta,0.255,-364,19.5,,9.2,0.434,0.566,0,mixs=0.089,8.5 o-125/u-115,0.509
+Total Games Won,Justina Mikulskyte,Noma Noha Akugue,11-06T06:40,demon,7.5,wta,0.182,-690,,,8.6,0.522,0.478,0,ml_only,,
+Total Games Won,Justina Mikulskyte,Noma Noha Akugue,11-06T06:40,demon,8.5,wta,0.182,-690,,,8.6,0.455,0.545,0,ml_only,,
+Total Games Won,Noma Noha Akugue,Justina Mikulskyte,11-06T06:40,demon,12.5,wta,0.818,-690,,,12.8,0.437,0.563,0,ml_only,,
+Total Games Won,Mai Hontama,Magda Linette,11-06T06:50,goblin,8.5,wta,0.308,-270,20.5,,9.7,0.578,0.422,0,mixs=0.094,9.5 o-125/u-110,0.515
+Total Games Won,Anastasia Zakharova,Lucrezia Stefanini,11-06T08:00,goblin,11.5,wta,0.498,-114,21.5,,11.4,0.651,0.349,0,mixs=0.079,12.5 o120/u-175,0.417
+Total Games Won,Ben Shelton,Tommy Paul,11-06T08:00,demon,13.5,atp,0.454,-134,24.5,,12.3,0.386,0.614,0,,12.5 o-150/u105,0.552
+Total Games Won,Tommy Paul,Ben Shelton,11-06T08:00,demon,13.5,atp,0.546,-134,24.5,,12.8,0.409,0.591,0,juice_under,13.5 o110/u-165,0.433
+Total Games Won,Luca Van Assche,Rinky Hijikata,11-06T09:10,goblin,12.5,atp,0.608,-176,23.5,,13.0,0.574,0.426,0,mixs=0.049 juice_over,12.5 o-165/u110,0.567
+Total Games Won,Luca Van Assche,Rinky Hijikata,11-06T09:10,demon,13.5,atp,0.608,-176,23.5,,13.0,0.393,0.607,0,mixs=0.049,12.5 o-165/u110,0.567
+Total Games Won,Rinky Hijikata,Luca Van Assche,11-06T09:10,goblin,11.5,atp,0.392,-176,23.5,,11.9,0.619,0.381,0,mixs=0.049,12.5 o-115/u-125,0.491
+Total Games Won,Rinky Hijikata,Luca Van Assche,11-06T09:10,standard,12.5,atp,0.392,-176,23.5,,11.9,0.485,0.515,0,mixs=0.049,12.5 o-115/u-125,0.491
+Total Games Won,Anna Blinkova,Yasmine Kabbaj,11-06T10:30,demon,12.5,wta,0.874,-1600,,,12.8,0.396,0.604,0,ml_only,,
+Total Games Won,Yasmine Kabbaj,Anna Blinkova,11-06T10:30,demon,7.5,wta,0.126,-1600,,,7.7,0.434,0.566,0,ml_only,,
+Total Games Won,Julia Riera,Leyre Romero Gormaz,11-06T11:00,goblin,11.5,wta,0.434,-160,,,11.1,0.6,0.4,0,ml_only,,
+Total Games Won,Leyre Romero Gormaz,Julia Riera,11-06T11:00,demon,12.5,wta,0.566,-160,,,11.9,0.458,0.542,0,ml_only,,
+Total Games Won,Carlos Alcaraz,Taylor Fritz,11-06T13:00,goblin,12.5,atp,0.716,-304,22.5,,13.5,0.628,0.372,0,,13.5 o120/u-175,0.417
+Total Games Won,Taylor Fritz,Carlos Alcaraz,11-06T13:00,standard,11.5,atp,0.284,-304,22.5,,11.4,0.543,0.457,0,juice_over,11.5 o-140/u100,0.538
+Total Games Won,Alice Tubello,Bianca Andreescu,11-06T13:30,standard,8.5,wta,0.284,-330,,,9.8,0.578,0.422,0,ml_only,,
+Total Games Won,Bianca Andreescu,Alice Tubello,11-06T13:30,demon,12.5,wta,0.716,-330,,,12.5,0.469,0.531,0,ml_only,,
+Total Games Won,Casper Ruud,Nuno Borges,11-06T14:30,goblin,12.5,atp,0.663,-233,22.5,,12.9,0.557,0.443,0,juice_over,12.5 o-165/u110,0.567
+Total Games Won,Nuno Borges,Casper Ruud,11-06T14:30,goblin,11.5,atp,0.337,-233,22.5,,11.0,0.549,0.451,0,juice_over,11.5 o-140/u100,0.538

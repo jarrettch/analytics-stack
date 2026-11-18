@@ -1,0 +1,36 @@
+player,opp,tour,pp_type,pp_line,p_win,spread,total,aces_src,system,model_mean,model_median,p_over,p_under,push,p_side_bias,bias_check,spread_check,fit
+Sorana Cirstea,Alexandra Shubladze,wta,goblin,7.5,0.71,-4.5,20.5,FD 2.5 -155,17.1,15.0,19.0,0.73,0.27,0.005,0.73,pass,"(4.5, 0.5, 0.529)",mix s=0.080
+Sorana Cirstea,Alexandra Shubladze,wta,standard,18.5,0.71,-4.5,20.5,FD 2.5 -155,17.1,15.0,19.0,0.521,0.479,0.022,0.521,pass,"(4.5, 0.5, 0.529)",mix s=0.080
+Sorana Cirstea,Alexandra Shubladze,wta,demon,21.5,0.71,-4.5,20.5,FD 2.5 -155,17.1,15.0,19.0,0.327,0.673,0.039,0.53,pass,"(4.5, 0.5, 0.529)",mix s=0.080
+Janice Tjen,Polina Kudermetova,wta,goblin,5,0.632,-3.5,21.5,FD 6.5 155,18.1,14.4,18.5,0.735,0.265,0.011,0.735,pass,"(-3.5, 0.491, 0.48)",mix s=0.078
+Janice Tjen,Polina Kudermetova,wta,standard,17,0.632,-3.5,21.5,FD 6.5 155,18.1,14.4,18.5,0.541,0.459,0.015,0.541,pass,"(-3.5, 0.491, 0.48)",mix s=0.078
+Janice Tjen,Polina Kudermetova,wta,demon,20.5,0.632,-3.5,21.5,FD 6.5 155,18.1,14.4,18.5,0.399,0.601,0.027,0.508,pass,"(-3.5, 0.491, 0.48)",mix s=0.078
+Maria Sakkari,Aliaksandra Sasnovich,wta,goblin,3.5,0.59,-2.5,21.5,FD 2.5 -115,15.0,11.8,15.0,0.7,0.3,0.014,0.7,pass,"(2.5, 0.495, 0.508)",mix s=0.060
+Maria Sakkari,Aliaksandra Sasnovich,wta,standard,15,0.59,-2.5,21.5,FD 2.5 -115,15.0,11.8,15.0,0.498,0.502,0.016,0.446,FAIL,"(2.5, 0.495, 0.508)",mix s=0.060
+Maria Sakkari,Aliaksandra Sasnovich,wta,demon,19.5,0.59,-2.5,21.5,FD 2.5 -115,15.0,11.8,15.0,0.316,0.684,0.027,0.591,pass,"(2.5, 0.495, 0.508)",mix s=0.060
+Robin Montgomery,Maaya Rajeshwaran Revathi,wta,goblin,18,0.816,-5.5,19.5,FD 6.5 130,20.2,19.3,22.5,0.732,0.268,0.015,0.732,pass,"(5.5, 0.514, 0.514)",mix s=0.075
+Robin Montgomery,Maaya Rajeshwaran Revathi,wta,standard,21,0.816,-5.5,19.5,FD 6.5 130,20.2,19.3,22.5,0.597,0.403,0.033,0.597,pass,"(5.5, 0.514, 0.514)",mix s=0.075
+Robin Montgomery,Maaya Rajeshwaran Revathi,wta,demon,23,0.816,-5.5,19.5,FD 6.5 130,20.2,19.3,22.5,0.43,0.57,0.046,0.403,FAIL,"(5.5, 0.514, 0.514)",mix s=0.075
+Alexandra Eala,Antonia Ruzic,wta,goblin,18,0.745,-4.5,19.5,FD 2.5 130,17.1,15.5,19.5,0.571,0.429,0.021,0.571,pass,"(-4.5, 0.532, 0.522)",mix s=0.089
+Alexandra Eala,Antonia Ruzic,wta,standard,21,0.745,-4.5,19.5,FD 2.5 130,17.1,15.5,19.5,0.384,0.616,0.039,0.477,FAIL,"(-4.5, 0.532, 0.522)",mix s=0.089
+Alexandra Eala,Antonia Ruzic,wta,demon,23,0.745,-4.5,19.5,FD 2.5 130,17.1,15.5,19.5,0.212,0.788,0.04,0.616,pass,"(-4.5, 0.532, 0.522)",mix s=0.089
+Magda Linette,Mai Hontama,wta,goblin,5,0.692,-4.5,20.5,FD 8.5 130,20.1,17.1,21.0,0.803,0.197,0.009,0.803,pass,"(-4.5, 0.491, 0.463)",mix s=0.094
+Magda Linette,Mai Hontama,wta,standard,17,0.692,-4.5,20.5,FD 8.5 130,20.1,17.1,21.0,0.645,0.355,0.01,0.645,pass,"(-4.5, 0.491, 0.463)",mix s=0.094
+Magda Linette,Mai Hontama,wta,demon,20.5,0.692,-4.5,20.5,FD 8.5 130,20.1,17.1,21.0,0.537,0.463,0.022,0.537,pass,"(-4.5, 0.491, 0.463)",mix s=0.094
+Tommy Paul,Ben Shelton,atp,goblin,3,0.546,-1.5,24.5,FD 8.5 120,17.5,14.0,16.5,0.834,0.166,0.017,0.766,pass,"(1.5, 0.529, 0.525)",iid
+Tommy Paul,Ben Shelton,atp,standard,14.5,0.546,-1.5,24.5,FD 8.5 120,17.5,14.0,16.5,0.539,0.461,0.009,0.493,FAIL,"(1.5, 0.529, 0.525)",iid
+Tommy Paul,Ben Shelton,atp,demon,19.5,0.546,-1.5,24.5,FD 8.5 120,17.5,14.0,16.5,0.386,0.614,0.022,0.614,pass,"(1.5, 0.529, 0.525)",iid
+Lucrezia Stefanini,Anastasia Zakharova,wta,goblin,2.5,0.502,-1.5,21.5,FD 0.5 -170,13.0,8.8,9.0,0.605,0.395,0.016,0.605,pass,"(1.5, 0.532, 0.547)",mix s=0.079
+Lucrezia Stefanini,Anastasia Zakharova,wta,standard,13,0.502,-1.5,21.5,FD 0.5 -170,13.0,8.8,9.0,0.442,0.558,0.013,0.517,pass,"(1.5, 0.532, 0.547)",mix s=0.079
+Lucrezia Stefanini,Anastasia Zakharova,wta,demon,19,0.502,-1.5,21.5,FD 0.5 -170,13.0,8.8,9.0,0.248,0.752,0.022,0.677,pass,"(1.5, 0.532, 0.547)",mix s=0.079
+Luca Van Assche,Rinky Hijikata,atp,goblin,4,0.608,-2.5,23.5,FD 8.5 -135,18.5,16.1,19.5,0.849,0.151,0.014,0.793,pass,"(-2.5, 0.471, 0.477)",mix s=0.049
+Luca Van Assche,Rinky Hijikata,atp,standard,16,0.608,-2.5,23.5,FD 8.5 -135,18.5,16.1,19.5,0.594,0.406,0.01,0.545,pass,"(-2.5, 0.471, 0.477)",mix s=0.049
+Luca Van Assche,Rinky Hijikata,atp,demon,20,0.608,-2.5,23.5,FD 8.5 -135,18.5,16.1,19.5,0.472,0.528,0.022,0.528,pass,"(-2.5, 0.471, 0.477)",mix s=0.049
+Carlos Alcaraz,Taylor Fritz,atp,goblin,17,0.716,-3.5,22.5,FD 6.5 140,18.5,16.2,19.0,0.61,0.39,0.02,0.511,pass,"(-3.5, 0.448, 0.46)",iid
+Carlos Alcaraz,Taylor Fritz,atp,standard,20.5,0.716,-3.5,22.5,FD 6.5 140,18.5,16.2,19.0,0.404,0.596,0.04,0.596,pass,"(-3.5, 0.448, 0.46)",iid
+Carlos Alcaraz,Taylor Fritz,atp,demon,23,0.716,-3.5,22.5,FD 6.5 140,18.5,16.2,19.0,0.182,0.818,0.04,0.818,pass,"(-3.5, 0.448, 0.46)",iid
+Casper Ruud,Nuno Borges,atp,goblin,13,0.663,-2.5,22.5,FD 10.5 120,19.6,17.6,21.0,0.699,0.301,0.007,0.67,pass,"(-2.5, 0.561, 0.546)",iid
+Casper Ruud,Nuno Borges,atp,standard,19.5,0.663,-2.5,22.5,FD 10.5 120,19.6,17.6,21.0,0.558,0.442,0.018,0.466,FAIL,"(-2.5, 0.561, 0.546)",iid
+Casper Ruud,Nuno Borges,atp,demon,22,0.663,-2.5,22.5,FD 10.5 120,19.6,17.6,21.0,0.437,0.563,0.03,0.563,pass,"(-2.5, 0.561, 0.546)",iid
+Elena Rybakina,Linda Noskova,wta,standard,20,0.64,-2.5,22.5,assumed 0.22,15.0,12.6,15.5,0.279,0.721,0.033,0.603,pass,"(-2.5, 0.532, 0.529)",mix s=0.034
+Coco Gauff,Jessica Pegula,wta,standard,14,0.564,-2.5,21.5,assumed 0.22,15.0,11.0,14.0,0.499,0.501,0.014,0.457,FAIL,"(-2.5, 0.481, 0.472)",mix s=0.072
